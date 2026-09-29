@@ -1,0 +1,28 @@
+# docker-compose.vps.yml — Variant B overlay: direct reverse proxy with
+# Caddy's automatic HTTPS, for a VPS with a public IP and a real domain.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d
+#
+# This ADDS to the base docker-compose.yml (Compose merges override files
+# on top of the base) rather than replacing it — same images, same
+# volumes, same service definitions otherwise. The only differences:
+#   - reverse_proxy publishes 80/443 to the host (needed for the public
+#     internet to reach it, and for Let's Encrypt's HTTP-01 challenge on
+#     port 80).
+#   - CADDY_SITE_ADDRESS is your real domain instead of ":80" — Caddy
+#     then automatically requests and renews a Let's Encrypt certificate
+#     for it (see docker/Caddyfile).
+#
+# The `tunnel` profile / cloudflared service from the base file is simply
+# not started here (you never pass --profile tunnel), so it doesn't come
+# up — no need to remove or comment anything out for that.
+#
+# Set CADDY_SITE_ADDRESS in .env before running this (e.g.
+# CADDY_SITE_ADDRESS=garage16.example.com) — see .env.example.
+
+services:
+  reverse_proxy:
+    ports:
+      - "80:80"
+      - "443:443"

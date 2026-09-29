@@ -1,0 +1,36 @@
+# Builds the friend-facing Windows client (installer + portable zip).
+# V0.8.6. NOT verifiable from the project's dev sandbox (no Windows
+# runner there) — the first real run on GitHub is its first real test;
+# see docs/CLIENT_BUILD.md.
+#
+# Set the repository VARIABLE  GARAGE16_SERVER_URL  (Settings -> Secrets
+# and variables -> Actions -> Variables) to bake your server's address
+# into the package so friends never type it. Trigger manually from the
+# Actions tab, or by pushing a tag like  client-v0.8.6.
+name: build-client
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["client-v*"]
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+      - name: Build client (PyInstaller + installer)
+        shell: pwsh
+        run: .\packaging\build_windows.ps1 -ServerUrl "${{ vars.GARAGE16_SERVER_URL }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: garage16-client-windows
+          path: |
+            dist-installer/Garage16-Client-Setup.exe
+            dist-installer/Garage16-Portable.zip
+          if-no-files-found: error

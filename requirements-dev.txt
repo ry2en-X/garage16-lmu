@@ -1,0 +1,8 @@
+# Dev-only: needed to run the full test suite (pytest discovers and runs
+# everything under tests/, including the fastapi-dependent modules that
+# tests/run_stdlib_tests.py deliberately skips). Not needed to run the
+# server/client/bot themselves — see server/, client/, discord_bot/
+# requirements.txt for that.
+pytest>=8.0
+httpx>=0.27  # needed by fastapi.testclient.TestClient — used by V0.6.0's integration/concurrency/moderation tests
+pyyaml>=6.0  # tests/test_packaging.py and tests/test_docker_config.py parse docker-compose.yml and the CI workflow

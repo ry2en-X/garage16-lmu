@@ -1,0 +1,54 @@
+# syntax=docker/dockerfile:1
+FROM python:3.12-slim AS base
+
+# libpq for psycopg (PostgreSQL driver); gosu for controlled privilege
+# drop in entrypoint.sh (see that file — needed to chown a freshly
+# Docker-created volume mount point before running as the non-root
+# `garage` user); build-essential is dropped after install since
+# psycopg[binary] ships prebuilt wheels and doesn't need a compiler —
+# keeping the final image lean.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    gosu \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY server/requirements.txt ./server/requirements.txt
+RUN pip install --no-cache-dir -r server/requirements.txt
+
+COPY server ./server
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
+COPY docker/entrypoint.sh ./docker/entrypoint.sh
+# V0.8.8: the telemetry cleanup tool (README, "Telemetry storage cleanup") was documented as
+# "run it inside the server container" but was never copied into the image.
+COPY scripts/telemetry_cleanup.py ./scripts/telemetry_cleanup.py
+
+# BUGFIX (found via real deployment testing, 2026-09-25) — see
+# Dockerfile.discord_bot's identical comment for the full story: source
+# files can arrive with overly-restrictive permissions (observed on a
+# NAS deployment where the project went ZIP -> Windows -> File Station
+# extract -> NAS). `chown` below fixes ownership but NOT missing read
+# bits on the files themselves — this fixes that regardless of what the
+# source archive's permissions looked like.
+# V0.8.8: strip any Windows line endings (CRLF) from the entrypoint. A CRLF shebang
+# (`#!/bin/sh\r`) makes the kernel look for an interpreter called "sh\r" and the
+# container dies with "exec ./docker/entrypoint.sh: no such file or directory" —
+# which is what a Windows checkout with git autocrlf, or a Windows editor, produces.
+RUN sed -i 's/\r$//' ./docker/entrypoint.sh
+RUN chmod -R a+rX ./server ./alembic ./alembic.ini ./docker/entrypoint.sh ./scripts
+RUN chmod +x ./docker/entrypoint.sh
+
+# Non-root at runtime: entrypoint.sh fixes ownership of the (possibly
+# freshly Docker-created, root-owned) telemetry storage volume, then
+# drops to `garage` via gosu before running migrations or the app — see
+# that script. The image itself still creates `garage` and the local
+# fallback storage dir here so both exist regardless of which storage
+# path ends up used.
+RUN useradd --create-home --shell /bin/bash garage
+RUN mkdir -p /app/server_telemetry_storage && chown -R garage:garage /app
+
+EXPOSE 8000
+
+ENTRYPOINT ["./docker/entrypoint.sh"]

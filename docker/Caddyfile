@@ -1,0 +1,88 @@
+# docker/Caddyfile — ONE file for both access variants, switched by the
+# CADDY_SITE_ADDRESS environment variable (set in docker-compose.yml /
+# docker-compose.vps.yml — see those files) — no editing this file
+# required to switch variants.
+#
+#   Variant A (Cloudflare Tunnel, default): CADDY_SITE_ADDRESS=:80
+#     Caddy serves plain HTTP on the internal Docker network only.
+#     Cloudflare's edge terminates the public HTTPS connection and the
+#     Tunnel carries traffic to this container — Caddy itself never
+#     needs a certificate or a public port.
+#
+#   Variant B (direct, VPS): CADDY_SITE_ADDRESS=your-domain.example
+#     A bare domain (no port) tells Caddy to serve HTTPS on :443 with a
+#     real Let's Encrypt certificate, auto-renewed, plus an automatic
+#     :80 -> :443 redirect. Requires the domain's DNS to actually point
+#     at this host's public IP, and ports 80+443 reachable from the
+#     internet (see docker-compose.vps.yml, which publishes them).
+#
+# BUGFIX (found via real deployment testing, 2026-09-25): every
+# reverse_proxy block below explicitly sets `X-Forwarded-Proto: https`.
+# Without it, Caddy sets that header based on ITS OWN incoming
+# connection — which is plain HTTP in Variant A (Caddy listens on :80,
+# Cloudflare's edge/Tunnel terminates the actual public HTTPS). The
+# server's LMU_GARAGE_REQUIRE_HTTPS check reads exactly this header and
+# was rejecting every request with "HTTPS required" even over a real
+# https:// tunnel URL, since Caddy told it the request was HTTP. The
+# literal "https" is correct for BOTH variants: in Variant A, anything
+# reaching Caddy already passed through Cloudflare's TLS termination; in
+# Variant B, Caddy only ever serves this site block over its own real
+# HTTPS (:443, plus an automatic :80 redirect) — so a request reaching
+# these handlers is HTTPS-aware either way.
+
+{$CADDY_SITE_ADDRESS:80} {
+    # API routes go to the FastAPI server. Adjust the path prefixes here
+    # if the frontend and API don't share the same domain in your setup
+    # (e.g. if the web/ frontend is deployed separately to Cloudflare
+    # Pages instead of being served from here — see web/config.js).
+    #
+    # ONE named matcher for every API prefix, on purpose (V0.8.8):
+    #   - `handle /teams /teams/* {` (two paths after `handle`) is NOT valid
+    #     Caddyfile syntax — Caddy refuses to start ("wrong argument count
+    #     or unexpected line ending"), which took the whole stack's web/API
+    #     access down in V0.6.8 and was then only hand-fixed on the NAS, never
+    #     here. A named matcher (`@api path a b c`) takes any number of paths.
+    #   - Every prefix the server exposes MUST be listed. /drivers and
+    #     /invitations were missing for a while (V0.7.2 onward): Caddy then
+    #     answered those requests with the web frontend's index.html instead
+    #     of JSON, silently breaking driver profiles, the invite-by-name
+    #     lookup and team invitations behind the reverse proxy — while every
+    #     TestClient-based test stayed green, because tests never go through
+    #     Caddy. tests/test_reverse_proxy.py now checks this file against the
+    #     app's real OpenAPI paths and the frontend's calls, and (when a
+    #     Caddy binary is available) runs the real proxy in front of the real
+    #     app. Add a new router prefix -> add it here.
+    @api path /accounts/* /telemetry/* /leaderboard/* /teams /teams/* /drivers/* /invitations/* /admin/* /health
+    handle @api {
+        reverse_proxy server:8000 {
+            header_up X-Forwarded-Proto https
+        }
+    }
+
+    # Everything else: the static web frontend. Skip this whole `handle`
+    # block (and the volume mount serving it) entirely if the frontend is
+    # deployed separately (Cloudflare Pages) instead of from here — the
+    # API routes above are all this proxy needs to serve in that case.
+    handle {
+        root * /srv/web
+        try_files {path} /index.html
+        file_server
+    }
+
+    # Upload body size — see server/config.py's max_upload_bytes (default
+    # 50 MiB). Keep this a little above that so Caddy doesn't reject a
+    # borderline-sized upload before the app gets to enforce its own
+    # limit with a proper JSON error body.
+    request_body {
+        max_size 55MB
+    }
+
+    encode gzip
+
+    log {
+        output file /data/access.log {
+            roll_size 50MB
+            roll_keep 5
+        }
+    }
+}

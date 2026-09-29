@@ -1,0 +1,36 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY discord_bot/requirements.txt ./discord_bot/requirements.txt
+# The bot reads the same DB as the server (server/models.py) — it needs
+# the same SQLAlchemy + driver stack, not just discord.py.
+COPY server/requirements.txt ./server/requirements.txt
+RUN pip install --no-cache-dir -r discord_bot/requirements.txt -r server/requirements.txt
+
+COPY server ./server
+COPY discord_bot ./discord_bot
+COPY docker/entrypoint-discord-bot.sh ./docker/entrypoint-discord-bot.sh
+
+# BUGFIX (found via real deployment testing, 2026-09-25): source files
+# can arrive with overly-restrictive permissions (observed: a NAS
+# deployment where the project went ZIP -> Windows -> File Station
+# extract -> NAS, which dropped both the execute bit on entrypoint
+# scripts AND, in at least one case, the read bit on a plain .py file).
+# COPY preserves whatever mode bits the source had, and a missing read
+# bit means the non-root `garage` user below can't even import the
+# module, regardless of chmod +x on the entrypoint alone. `a+rX` adds
+# read for everyone and execute only where something (a file or
+# directory) already had execute for someone — this doesn't make every
+# .py file spuriously "executable", just fixes the actual problem
+# (unreadable files / non-traversable directories) regardless of what
+# the source archive's permissions looked like.
+# V0.8.8: strip Windows line endings (see Dockerfile.server for why).
+RUN sed -i 's/\r$//' ./docker/entrypoint-discord-bot.sh
+RUN chmod -R a+rX ./server ./discord_bot ./docker/entrypoint-discord-bot.sh
+RUN chmod +x ./docker/entrypoint-discord-bot.sh
+
+RUN useradd --create-home --shell /bin/bash garage
+USER garage
+
+ENTRYPOINT ["./docker/entrypoint-discord-bot.sh"]

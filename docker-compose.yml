@@ -1,0 +1,290 @@
+# docker-compose.yml — Base stack: PostgreSQL, the FastAPI server, the
+# Discord bot, Caddy as reverse proxy, and an optional Cloudflare Tunnel
+# companion. Platform-neutral: nothing here assumes a NAS or a VPS —
+# named volumes only, no host-specific paths, no vendor package manager.
+#
+# `name: garage16` pins the Compose project name regardless of what
+# folder this file happens to sit in (Compose otherwise derives it from
+# the directory name, which is unpredictable here — e.g. "Garage16 - LMU"
+# with spaces/dashes). This makes the auto-created network name
+# predictable too: `garage16_default` — needed when attaching a separate
+# container (e.g. a manual Cloudflare Quick Tunnel for testing — see
+# README.md) to the same network without having to look it up first.
+name: garage16
+#
+# ================================ Two access variants =====================
+#
+# Variant A — Cloudflare Tunnel (default, no file changes needed):
+#   No inbound port needs to be open on your router/firewall at all.
+#   docker compose --profile tunnel up -d
+#   (starts db, server, discord_bot, reverse_proxy, cloudflared)
+#
+# Variant B — direct reverse proxy with Caddy's automatic HTTPS (VPS with
+#   a public IP and a domain pointed at it):
+#   docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d
+#   (same stack, minus cloudflared, PLUS ports 80/443 published on
+#   reverse_proxy; Caddy requests a real Let's Encrypt certificate)
+#
+# Switching between them is a command-line/.env change only — see
+# README.md's "Umstieg NAS -> VPS" section. No application code, no
+# Dockerfile, changes either way.
+# ============================================================================
+#
+# Secrets: every credential below can come from a plain .env value (the
+# default — see .env.example) OR a Docker secret (file-based) — see the
+# commented-out `secrets:` blocks further down for how to switch, and
+# docker/entrypoint.sh / docker/entrypoint-discord-bot.sh for how the
+# containers resolve either form identically.
+#
+# NOT tested against a live Docker/PostgreSQL environment in this
+# project's development sandbox (no Docker available there) — reviewed
+# for correctness, but the first real `docker compose up` on real
+# hardware is still the actual test. See docs/ROLLBACK.md if something
+# goes wrong after a deploy, and this repo's CHANGELOG.md for what's been
+# verified against a real PostgreSQL instance already (migrations, CRUD,
+# the concurrency-critical advisory lock) versus what's still open
+# (the full multi-container stack together).
+#
+# Usage:
+#   cp .env.example .env   # fill in real secrets
+#   docker compose --profile tunnel up -d      # NAS / Cloudflare Tunnel
+#   docker compose logs -f server
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-garage16}
+      POSTGRES_USER: ${POSTGRES_USER:-garage16}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Uncomment to use a Docker secret instead of the plain value above
+      # (the postgres image supports _FILE natively — no entrypoint work
+      # needed on our side for this one container). NOTE: even then,
+      # POSTGRES_PASSWORD in .env must stay a non-empty PLACEHOLDER (e.g.
+      # "unused-see-secrets-folder") — the ${VAR:?...} above is Compose's
+      # own "must not be empty" check, enforced before any container even
+      # starts, so it can't know a real value is coming from a mounted
+      # secret file at runtime. The placeholder is never actually used:
+      # POSTGRES_PASSWORD_FILE below overrides it inside the container.
+      # POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-garage16}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # secrets:
+    #   - postgres_password
+
+  server:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      LMU_GARAGE_ENV: production
+      # DB connection pieces — docker/entrypoint.sh assembles
+      # LMU_GARAGE_DB_URL from these INSIDE the container, which is what
+      # lets POSTGRES_PASSWORD come from a Docker secret too (see that
+      # script's header comment for why this can't be done here in
+      # docker-compose.yml's own variable interpolation).
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-garage16}
+      POSTGRES_USER: ${POSTGRES_USER:-garage16}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      LMU_GARAGE_SECRET_KEY: ${LMU_GARAGE_SECRET_KEY:?set a real Fernet key in .env}
+      LMU_GARAGE_REGISTRATION_SECRET: ${LMU_GARAGE_REGISTRATION_SECRET:?set a registration secret in .env}
+      LMU_GARAGE_ADMIN_TOKEN: ${LMU_GARAGE_ADMIN_TOKEN:?set an admin token in .env}
+      LMU_GARAGE_CORS_ORIGINS: ${LMU_GARAGE_CORS_ORIGINS:-https://your-domain.example}
+      LMU_GARAGE_REQUIRE_HTTPS: "1"
+      LMU_GARAGE_LOG_FORMAT: json
+      LMU_GARAGE_STORAGE_DIR: /data/telemetry
+      LMU_GARAGE_MIN_CLIENT_VERSION: ${LMU_GARAGE_MIN_CLIENT_VERSION:-0.5.3}
+      # V0.6.9 — password reset email. Defaults to "development" (logs
+      # instead of sending) so an unconfigured deployment doesn't crash;
+      # set LMU_GARAGE_EMAIL_PROVIDER=smtp in .env once real SMTP
+      # credentials are filled in there.
+      LMU_GARAGE_EMAIL_PROVIDER: ${LMU_GARAGE_EMAIL_PROVIDER:-development}
+      LMU_GARAGE_SMTP_HOST: ${LMU_GARAGE_SMTP_HOST:-}
+      LMU_GARAGE_SMTP_PORT: ${LMU_GARAGE_SMTP_PORT:-587}
+      LMU_GARAGE_SMTP_USER: ${LMU_GARAGE_SMTP_USER:-}
+      LMU_GARAGE_SMTP_PASSWORD: ${LMU_GARAGE_SMTP_PASSWORD:-}
+      LMU_GARAGE_SMTP_FROM: ${LMU_GARAGE_SMTP_FROM:-garage16@localhost}
+      LMU_GARAGE_FRONTEND_URL: ${LMU_GARAGE_FRONTEND_URL:-https://your-domain.example}
+      # V0.7.2 §7 — leave unset normally; set only on the OLD instance during a deliberate cutover.
+      LMU_GARAGE_MIGRATED_TO: ${LMU_GARAGE_MIGRATED_TO:-}
+      # V0.8.6 — where too-old desktop clients are sent to update (shown as an
+      # 'Open download page' button). Optional; see docs/CLIENT_BUILD.md.
+      LMU_GARAGE_CLIENT_DOWNLOAD_URL: ${LMU_GARAGE_CLIENT_DOWNLOAD_URL:-}
+      # V0.7.2 — off by default in production; see .env.example.
+      LMU_GARAGE_ENABLE_API_DOCS: ${LMU_GARAGE_ENABLE_API_DOCS:-false}
+      # Uncomment these three (and set the matching four plain values just
+      # above to non-empty PLACEHOLDERS, not blank — Compose's ${VAR:?...}
+      # requires non-empty at parse time and can't see a secret file that
+      # only exists inside the container — see the `db` service's comment
+      # above for the same point) to use Docker secrets instead:
+      # POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      # LMU_GARAGE_SECRET_KEY_FILE: /run/secrets/lmu_secret_key
+      # LMU_GARAGE_REGISTRATION_SECRET_FILE: /run/secrets/lmu_registration_secret
+      # LMU_GARAGE_ADMIN_TOKEN_FILE: /run/secrets/lmu_admin_token
+    volumes:
+      - telemetry_data:/data/telemetry
+    expose:
+      - "8000"
+    healthcheck:
+      # Uses Python (already in the image) rather than curl/wget, which
+      # aren't installed in python:3.12-slim by default — avoids adding a
+      # package just for the healthcheck.
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    # secrets:
+    #   - postgres_password
+    #   - lmu_secret_key
+    #   - lmu_registration_secret
+    #   - lmu_admin_token
+
+  discord_bot:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.discord_bot
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:?set your Discord bot token in .env}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-garage16}
+      POSTGRES_USER: ${POSTGRES_USER:-garage16}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # DISCORD_BOT_TOKEN_FILE: /run/secrets/discord_bot_token
+      # POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    # No exposed/published ports — the bot only makes outbound
+    # connections to Discord's gateway; nothing needs to reach it.
+    healthcheck:
+      # See discord_bot/bot.py's _touch_heartbeat(): the bot has no port
+      # to probe, so its announce loop touches a file every cycle
+      # (POLL_SECONDS, ~10s) instead — "stale for >2min" means the loop
+      # has hung or the process is stuck, not just a slow Discord API call.
+      test: ["CMD", "python", "-c", "import os,sys,time; p='/tmp/discord_bot_heartbeat'; sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p)<120 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    # secrets:
+    #   - discord_bot_token
+    #   - postgres_password
+
+  reverse_proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      # Caddyfile reads this via {$CADDY_SITE_ADDRESS:80} — see that file.
+      # Default ":80" is correct for Variant A (Cloudflare Tunnel): Caddy
+      # just serves plain HTTP on the internal Docker network, since
+      # Cloudflare's edge (not Caddy) terminates the public HTTPS
+      # connection. docker-compose.vps.yml overrides this to your real
+      # domain for Variant B, which switches Caddy into automatic-HTTPS
+      # mode for that domain.
+      CADDY_SITE_ADDRESS: ${CADDY_SITE_ADDRESS:-:80}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./web:/srv/web:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      # Caddy's admin API listens on :2019 inside the container by
+      # default, independent of whatever site address/port the Caddyfile
+      # itself is serving — a reliable target regardless of variant A/B.
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:2019/config/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # No `ports:` here in the base file on purpose — Variant A
+    # (Cloudflare Tunnel) needs none published; cloudflared reaches this
+    # container over the internal Docker network only. Variant B adds
+    # them via docker-compose.vps.yml.
+
+  # --- Variant A only: Cloudflare Tunnel companion ---------------------
+  # Started only with `docker compose --profile tunnel up -d`. Requires a
+  # tunnel created in the Cloudflare Zero Trust dashboard (Networks ->
+  # Tunnels), with its Public Hostname routed to http://reverse_proxy:80
+  # — see README.md's Synology section for the exact dashboard steps
+  # (this part can't be done from docker-compose.yml; Cloudflare has no
+  # config-as-code for this in the free tier).
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    depends_on:
+      reverse_proxy:
+        condition: service_healthy
+    command: tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN:?set CLOUDFLARE_TUNNEL_TOKEN in .env when using the tunnel profile}
+    # No published ports — cloudflared only makes OUTBOUND connections to
+    # Cloudflare's edge. This is the entire point: nothing on this host
+    # ever needs to accept an inbound connection from the internet.
+
+  # --- Optional: containerized backups (see README.md's "Backups") -----
+  # Started only with `docker compose --profile backup up -d`. Alternative
+  # to the NAS-native Synology Task Scheduler approach — this one is
+  # identical on NAS and VPS, since it's just another container.
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    profiles: ["backup"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGUSER: ${POSTGRES_USER:-garage16}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      PGDATABASE: ${POSTGRES_DB:-garage16}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      # BACKUP_HOST_PATH: leave unset to use a named Docker volume
+      # (portable default), or set it to a real path — e.g. a second
+      # disk's mount point on a NAS, or a cloud-storage-synced folder —
+      # to have backups land somewhere durable outside Docker's own
+      # storage. Same env var works on NAS and VPS.
+      - ${BACKUP_HOST_PATH:-backup_data}:/backups
+      - telemetry_data:/data/telemetry:ro
+      - ./docker/backup-loop.sh:/backup-loop.sh:ro
+    entrypoint: ["/bin/sh", "/backup-loop.sh"]
+
+volumes:
+  db_data:
+  telemetry_data:
+  caddy_data:
+  caddy_config:
+  backup_data:
+
+# Uncomment to use Docker secrets (file-based) instead of plain .env
+# values — pair with the commented `secrets:` lines under each service
+# above, and the matching `_FILE` environment entries.
+# secrets:
+#   postgres_password:
+#     file: ./secrets/postgres_password.txt
+#   lmu_secret_key:
+#     file: ./secrets/lmu_secret_key.txt
+#   lmu_registration_secret:
+#     file: ./secrets/lmu_registration_secret.txt
+#   lmu_admin_token:
+#     file: ./secrets/lmu_admin_token.txt
+#   discord_bot_token:
+#     file: ./secrets/discord_bot_token.txt

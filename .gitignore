@@ -1,0 +1,63 @@
+# --- Secrets — NEVER commit these ---
+.env
+*.pem
+*.key
+secrets/
+
+# --- Local databases ---
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# --- Generated telemetry/data (per-driver, local only) ---
+server_telemetry_storage/
+lmu_garage_data/
+client_config.json
+.lmu_garage/
+
+# --- LMU verification test artifacts (docs/LMU_VERIFICATION_PROTOCOL.md) ---
+test_*.csv
+test_*_log.txt
+Tests_Garage16.txt
+lmu_dump_*.csv
+smoketest_*.py
+
+# --- Backups (scripts/backup.sh output) ---
+test-backups/
+*.sql.gz
+*.tar.gz
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+env/
+
+# --- Node (web/ tooling, if ever added) ---
+node_modules/
+
+# --- Packaging output (see package_release.bat) ---
+*.zip
+
+# --- Windows client build output (packaging/build_windows.ps1, docs/CLIENT_BUILD.md) ---
+# The installer, the portable zip and PyInstaller's working folders are
+# BUILD ARTIFACTS — publish them as a GitHub Release, never commit them.
+.venv-build/
+build/
+dist/
+dist-installer/
+
+# --- Logs (the desktop client writes garage16-client.log) ---
+*.log
+
+# --- Editor/OS cruft ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+__MACOSX/

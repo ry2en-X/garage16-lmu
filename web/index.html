@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>LMU Garage</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+
+  <div class="frame">
+    <nav class="pitwall" id="pitwall">
+      <a class="pitwall__brand" href="#/" style="text-decoration:none;">
+        <span class="pitwall__brand-mark">LMU</span>
+        <span class="pitwall__brand-name">GARAGE</span>
+      </a>
+
+      <div class="pitwall__links" id="navLinks">
+        <a href="#/leaderboard" data-route="leaderboard">Leaderboard</a>
+        <a href="#/dashboard" data-route="dashboard">Dashboard</a>
+        <a href="#/teams" data-route="teams">Teams</a>
+        <a href="#/account" data-route="account">Account</a>
+      </div>
+
+      <div class="pitwall__status" id="pitwallStatus">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">not signed in</span>
+      </div>
+    </nav>
+
+    <div class="mobile-bar">
+      <div class="mobile-bar__brand">LMU GARAGE</div>
+      <button class="mobile-bar__toggle" id="mobileToggle" aria-label="Toggle menu">☰</button>
+    </div>
+
+    <main class="panel" id="app" role="main">
+      <!-- pages render here -->
+    </main>
+  </div>
+
+  <script src="config.js"></script>
+  <script type="module" src="js/router.js"></script>
+</body>
+</html>

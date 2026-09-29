@@ -1,0 +1,18 @@
+# Line endings (V0.8.8). Without this, Git for Windows checks text files out
+# with CRLF (core.autocrlf=true is its default), and a CRLF shell script or
+# Caddyfile copied to the NAS/VPS breaks the containers ("no such file or
+# directory" for a script that is plainly there). Force LF for everything
+# that runs on Linux; keep CRLF for the Windows-only batch file.
+*                text=auto eol=lf
+*.sh             text eol=lf
+Caddyfile        text eol=lf
+Dockerfile*      text eol=lf
+*.yml            text eol=lf
+*.bat            text eol=crlf
+
+# Never touch binaries.
+*.png  binary
+*.ico  binary
+*.exe  binary
+*.zip  binary
+*.parquet binary
