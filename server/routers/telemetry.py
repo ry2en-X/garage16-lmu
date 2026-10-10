@@ -54,11 +54,11 @@ from ..models import Driver, Lap, LapReport
 from ..rate_limit import rate_limit
 from ..records import evaluate_and_record
 from ..catalog import canonical_class, track_matches_query
-from ..versioning import is_client_outdated
+from ..versioning import data_level_for_client_version, is_client_outdated
 from ..schemas import LapMetadata, LapReportOut, LapReportRequest, LapSummary, UploadResponse
 from ..security import verify_hmac
 from ..storage import telemetry_storage_dir
-from ..validation import ValidationResult, validate_telemetry
+from ..validation import ValidationResult, validate_telemetry_file
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
 logger = logging.getLogger("lmu_garage.telemetry")
@@ -103,6 +103,22 @@ def _stream_to_temp_file(upload: UploadFile, dest_dir: Path) -> tuple[Path, str,
         tmp_path.unlink(missing_ok=True)
         raise
     return tmp_path, sha256.hexdigest(), total
+
+
+def _discard_unreferenced_file(db: Session, path: Path) -> bool:
+    """Removes `path` after a failed upload — unless a committed lap points at it.
+
+    The path is content-addressed, so on PostgreSQL (real concurrency; SQLite
+    serialises every request behind one write lock, so it cannot happen there) an
+    identical upload may have committed its row against this very file between our
+    move and our failure. Deleting it then would leave a lap whose file is gone —
+    the one thing that must never happen. Called after rollback(), i.e. it sees
+    committed rows only. Returns whether the file was removed.
+    """
+    if db.query(Lap.id).filter(Lap.telemetry_path == str(path)).first() is not None:
+        return False
+    path.unlink(missing_ok=True)
+    return True
 
 
 @router.post("/upload", response_model=UploadResponse)
@@ -176,6 +192,9 @@ def upload_lap(
                 f"{settings.min_client_version}). Update the desktop client.",
                 "min_client_version": settings.min_client_version,
                 "download_url": settings.client_download_url,
+                # V0.9.2, additive and only when configured: the analysis-app
+                # edition's download (see config.py)
+                **({"app_download_url": settings.client_app_download_url} if settings.client_app_download_url else {}),
             },
         )
 
@@ -226,7 +245,12 @@ def upload_lap(
     # P0-2: Always use .parquet — never trust the client-supplied filename
     # extension (could be .exe, .html, or pathologically long).
     dest_path = out_dir / f"{actual_hash}.parquet"
-    tmp_path.replace(dest_path)
+    try:
+        tmp_path.replace(dest_path)
+    except Exception:
+        # V0.9.1: a failed move must not leave the upload's temp file behind.
+        tmp_path.unlink(missing_ok=True)
+        raise
 
     # --- 7. Validate, insert, evaluate records (one transaction) ---
     try:
@@ -240,9 +264,11 @@ def upload_lap(
         # shorten the DB transaction itself (that needs a bigger endpoint
         # restructure — see README's "known limitations"), but it stops
         # validation from starving concurrent requests on the same worker.
-        telemetry_bytes = dest_path.read_bytes()
+        # V0.9.1: validated straight from the file on disk (only the columns
+        # the checks need are read) — the old read_bytes() held the whole
+        # upload in memory a second time just for this.
         try:
-            validation = validate_telemetry(telemetry_bytes, metadata)
+            validation = validate_telemetry_file(dest_path, metadata)
         except Exception as exc:
             logger.warning("Telemetry validation crashed for %s: %s", actual_hash, exc)
             validation = ValidationResult(is_valid=False, reasons=[f"validation error: {exc}"])
@@ -305,7 +331,7 @@ def upload_lap(
         db.commit()
     except Exception:
         db.rollback()
-        dest_path.unlink(missing_ok=True)
+        _discard_unreferenced_file(db, dest_path)
         raise
 
     db.refresh(lap)
@@ -346,6 +372,7 @@ def list_my_laps(
             ambient_temp=lap.ambient_temp,
             track_temp=lap.track_temp,
             uploaded_at=lap.uploaded_at.isoformat(),
+            data_level=data_level_for_client_version(lap.client_version),
         )
         for lap in laps
     ]

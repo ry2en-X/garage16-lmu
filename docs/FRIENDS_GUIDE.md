@@ -11,8 +11,18 @@ du sehen kannst, und was du dann tust.
 
 Du bekommst von deinem Admin (dem, der Garage16 betreibt) drei Dinge:
 
-- die Datei **`Garage16-Client-Setup.exe`** (oder einen Download-Link dazu)
-- die **Web-Adresse** von Garage16 (z. B. `https://garage16.deinefreunde.de`)
+- die Setup-Datei (oder einen Download-Link dazu — auf **garage16.de → Download**
+  stehen beide nebeneinander, ab 0.9.2; oder auf GitHub unter **Releases → Latest**).
+  Du wählst **eine** davon, lädst sie herunter und doppelklickst — ein Terminal
+  brauchst du nie:
+  - **Client** — `Garage16-Client-Setup.exe`: zeichnet deine Runden auf und lädt sie
+    hoch. Die Analyse öffnet sich in deinem Browser.
+  - **Client + Analysetool** — `Garage16-Client-Analysis-Setup.exe`: dasselbe, und die
+    Analyse öffnet sich in einem **eigenen Fenster** — ganz ohne Browser, aber mit
+    denselben Daten wie auf der Website (alles kommt immer vom Server).
+  Umentscheiden geht jederzeit: einfach die andere Datei über die vorhandene
+  installieren. Deine Anmeldung und deine Runden bleiben.
+- die **Web-Adresse** von Garage16: **`https://garage16.de`**
 - das **Registration secret** (ein Kennwort, das nur zum Anlegen deines
   Accounts nötig ist — ohne es lässt der Server keine Fremden herein)
 
@@ -169,3 +179,125 @@ du bekommst die ganze Strecke mit allen Varianten. Alle Klassen (Hypercar,
 LMP2 WEC, LMP2 ELMS, LMP3, GTE, GT3) stehen immer zur Auswahl; dahinter steht,
 wie viele Runden es schon gibt. Neue Strecken, Varianten und Autos erscheinen
 von selbst, sobald jemand sie fährt.
+
+## Sprache: Englisch oder Deutsch (ab 0.9.1)
+
+Beim **ersten Besuch** der Seite fragt ein kleines Fenster, in welcher Sprache du sie
+benutzen möchtest: **English** oder **Deutsch**. Ein Tipp genügt; deine Browsersprache
+ist schon vorgewählt. Später wechselst du jederzeit im Menü mit den Knöpfen **EN | DE**
+(die Seite lädt dann einmal neu). Die Wahl wird nur in diesem Browser gemerkt.
+Namen von Fahrern, Strecken und Fahrzeugen, Rundenzeiten und Meldungen, die direkt vom
+Server kommen, bleiben dabei unverändert (Servermeldungen sind englisch).
+
+## Runden analysieren und vergleichen (ab V0.9)
+
+**Aus dem Garage16-Fenster heraus** (ab 0.9.2): **Open analysis** öffnet die Analyse,
+**Analyse last lap** öffnet direkt die Runde, die gerade hochgeladen wurde.
+- Mit dem **Client** öffnet sich dafür dein Browser (melde dich dort einmal auf
+  garage16.de an).
+- Mit **Client + Analysetool** öffnet sich ein eigenes Fenster **„Garage16 — Analysis“**.
+  Du musst dich darin **nicht anmelden** — das Fenster nimmt die Anmeldung deines
+  Clients. Es zeigt genau die Analyse der Website, mit allen Runden, Vergleichen und
+  deinem Layout. Willst du lieber doch den Browser, setz im Garage16-Fenster den Haken
+  **„Open the analysis in my browser instead“**.
+- Das Analysefenster braucht die **Microsoft Edge WebView2 Runtime**. Windows 11 und ein
+  aktuelles Windows 10 haben sie schon. Fehlt sie, öffnet sich die Analyse im Browser,
+  und das Garage16-Fenster sagt dir, woran es liegt (die Runtime gibt es kostenlos bei
+  Microsoft).
+- In deinem Konto unter den Sitzungen steht das Fenster als **„Garage16 desktop app
+  (analysis window)“** — dort kannst du es auch abmelden; beim nächsten Öffnen meldet
+  es sich von selbst wieder an.
+
+Mit dem Client (ab 0.9.0) zeichnet Garage16 viel mehr von jeder Runde auf —
+unter anderem Federweg, Reifenlast, Schlupf und die Einstellungen von TC und ABS.
+Im Web:
+
+- **Analysis** → du siehst zwei Runden übereinander in einem Diagramm pro Wert
+  (Runde 1 rot, Runde 2 blau) und darunter, wo du Zeit gewinnst oder verlierst.
+  Fahr mit der Maus über ein Diagramm: überall erscheinen die genauen Werte an
+  dieser Stelle der Strecke. Ein Klick hält die Stelle fest (nochmal klicken
+  löst sie), das Mausrad zoomt, mit gedrückter Maustaste verschiebst du den
+  Ausschnitt, ein Doppelklick setzt alles zurück. Dabei fragt die Seite nichts
+  beim Server nach — es ist alles schon geladen. Nur wenn du weit hineinzoomst,
+  holt sie für den sichtbaren Ausschnitt automatisch feinere Daten nach (ein
+  kurzer Moment, danach sind die Kurven genauer).
+- **Runde vergleichen** (ab 0.9.1): Öffne eine Runde (im Leaderboard, im Dashboard
+  oder in der Streckenbibliothek auf **Analyse**) und klicke **Runde vergleichen**.
+  Im Fenster **Vergleichen mit** wählst du:
+  - **Garage16 Best** — die schnellste gültige Runde auf Garage16 für dieselbe
+    Strecke und dasselbe Auto. (Das ist kein offizieller Weltrekord, sondern der
+    Bestwert hier.)
+  - **Team Best** — die schnellste gültige Runde deines Teams. Bist du in keinem
+    Team oder hat dein Team keine Runde dort, steht da **„Kein Team Best verfügbar."**
+  - **Meine Beste** — deine schnellste gültige Runde.
+  - **Lap ID** — eine bestimmte Runde über ihre Nummer. Gibt es sie nicht,
+    steht da **„Runde nicht gefunden."**; kann sie nicht angezeigt werden:
+    **„Diese Runde kann nicht analysiert werden."**
+  Fährst du schon die schnellste Runde, sagt das Fenster es dir und bietet die
+  nächstschnellere an — dieselbe Runde wird nie zweimal geladen.
+- **Schnellstart**: auf der Analysis-Startseite vergleichen die Knöpfe **Du vs. Garage16
+  Best**, **Du vs. Team Best** und **Du vs. Meine Beste** deine letzte Strecke mit
+  einem Klick.
+- **Ansicht anpassen** (unauffällig neben den Knöpfen): Du siehst zuerst immer das
+  Garage16-Standardlayout und musst nichts einstellen. Willst du es ändern, kannst du
+  Fenster am **Griff (⠿)** ziehen oder mit ↑ ↓ verschieben, die Größe wählen (klein,
+  mittel, groß), einem Fenster einen anderen Kanal geben, Fenster hinzufügen oder
+  entfernen und Farben für Runde 1, Runde 2 und Delta wählen. Das wird **nur in
+  diesem Browser** gespeichert. **Standardlayout wiederherstellen** bringt alles
+  zurück — deine Runden und dein Konto sind davon nie betroffen. Ein Diagramm lässt
+  sich beim normalen Ziehen nicht versehentlich verschieben: dafür gibt es den Griff.
+- **Delta und Sektoren**: unter dem Delta-Diagramm stehen die Stelle, an der du am
+  meisten Zeit gewinnst, und die, an der du am meisten verlierst (jeweils auf einem
+  Stück von etwa Kurvenlänge; ein Klick springt dorthin), und das Ergebnis der Runde.
+  In der Sektortabelle sind der beste und der schlechteste Sektor markiert.
+  **Überall gilt dieselbe Regel: Runde 1 minus Runde 2.** Ein **Minus** heißt, Runde 1
+  ist schneller (Zeit gewonnen, grün), ein **Plus**, Runde 1 ist langsamer (Zeit
+  verloren, rot) — im Delta-Diagramm, in den Sektoren und beim Gesamtunterschied.
+- **Kurven** (ab 0.9.1): eine Tabelle mit jeder Kurve der Runde — wo ihr Scheitel liegt,
+  wie viel Zeit du dort gewonnen oder verloren hast, ob du früher oder später gebremst
+  hast als Runde 2, dein tiefstes Tempo und dein Tempo am Ausgang. Die Kurve mit dem
+  größten Verlust ist rot, die mit dem größten Gewinn grün hinterlegt. Ein Klick (oder
+  Enter) zoomt genau auf Bremszone, Scheitel und Ausgang. Jede Kurve reicht bis zur
+  nächsten Bremszone, die erste beginnt an der Linie — zusammen ergeben sie also genau
+  den Unterschied der Rundenzeiten.
+- **Dünne senkrechte Striche** in einem Diagramm sind kurze Ausschläge — ein Tipper auf
+  die Bremse, ein Randstein —, die zwischen zwei Punkten der Übersicht liegen und sonst
+  verschwinden würden. Zoomst du hinein, siehst du sie als normale Kurve.
+- Auf dem **Handy/Tablet**: Tippen setzt den Cursor, seitliches Wischen über ein
+  Diagramm führt ihn entlang der Runde, senkrechtes Wischen scrollt die Seite,
+  langes Drücken hält die Stelle fest, zwei Finger zoomen, doppelt tippen setzt den
+  Zoom zurück.
+- Auf der **Streckenkarte** klickst du auf einen Punkt, und alle Diagramme springen
+  dorthin. Sie lässt sich nach „Zeit gewonnen/verloren", Tempo, Gas, Bremse, Gang,
+  Drehzahl oder G-Kraft einfärben.
+- **Car physics** (aufklappen) zeigt die vier Räder und das G-G-Diagramm an der
+  gewählten Stelle.
+- **Circuits** ist die Streckenbibliothek: jede Strecke mit Umriss, Länge,
+  schnellster Runde, deiner besten Runde dort und einem Knopf, der deine beste
+  Runde mit der schnellsten vergleicht.
+
+Runden, die mit einem **älteren Client** (vor 0.9.0) aufgezeichnet wurden, tragen das
+Etikett **„Basisdaten"** (in Rundenlisten, im Leaderboard-Auswahlfenster und oben auf
+der Analyse-Seite mit einer Erklärung). Sie zählen weiter fürs Leaderboard und lassen
+sich vergleichen — aber nur auf den Grundwerten (Tempo, Gas, Bremse, Lenkung, Gang,
+Drehzahl, Sprit, Reifendruck/-temperatur, Bremsentemperatur, Streckenkarte). Federweg,
+Reifenkräfte, G-Kräfte und TC/ABS gibt es erst für Runden mit dem neuen Client: einfach
+Client aktualisieren und die Runde noch einmal fahren. In einem Fenster, für das eine
+Runde keine Daten hat, steht **„Keine Daten in dieser Runde"**. Jeder
+angemeldete Fahrer kann deine **gültigen** Runden öffnen; ungültige siehst nur du.
+
+### Speicherplatz auf deinem PC (ab 0.9.1)
+
+Eine aufgezeichnete Runde ist mehrere Megabyte groß. Damit dein Laufwerk nicht
+voll läuft, löscht der Client die **lokale Telemetrie-Datei einer Runde 14 Tage,
+nachdem sie erfolgreich hochgeladen wurde** — die Runde selbst bleibt natürlich
+auf Garage16 und lässt sich weiter analysieren. Noch nicht hochgeladene oder
+abgelehnte Runden werden **nie** gelöscht. Möchtest du die Dateien länger oder
+für immer behalten, sag dem Admin Bescheid: Er kann die Frist für dich ändern
+(die technische Einstellung steht in der `README.md`).
+
+Der Client 0.9.1 ist beim Fahren auch sparsamer: Er liest aus dem Speicher von LMU
+nur noch die paar Kilobyte, die er braucht, statt 60-mal pro Sekunde den ganzen Block
+zu kopieren, und eine Runde belegt beim Aufzeichnen rund ein Viertel des
+Arbeitsspeichers von vorher. (Gemessen an nachgebauten Daten — mit laufendem Spiel
+noch nicht nachgemessen.)

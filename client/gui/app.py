@@ -22,11 +22,18 @@ class GarageApp:
     """Runs on the main thread; the telemetry/upload loops run in background
     threads and push StatusUpdate objects through a thread-safe queue."""
 
-    def __init__(self, on_reconnect=None):
+    def __init__(self, on_reconnect=None, on_open_analysis=None, analysis_choice=None):
+        """on_open_analysis(lap_id or None): opens the analysis (V0.9.2, see
+        client/main.py open_analysis). analysis_choice: None in the standard
+        edition; in the "Client + analysis app" edition a pair
+        (prefers_browser: bool, set_prefers_browser(bool)) for the checkbox."""
         self._on_reconnect = on_reconnect
+        self._on_open_analysis = on_open_analysis
+        self._analysis_choice = analysis_choice
+        self._last_lap_id = None
         self.root = tk.Tk()
         self.root.title("Garage16 — Client")
-        self.root.geometry("380x340")
+        self.root.geometry("380x400" if analysis_choice is not None else "380x380")
         self.root.resizable(False, False)
 
         self._queue: "queue.Queue[StatusUpdate]" = queue.Queue()
@@ -70,6 +77,22 @@ class GarageApp:
 
         ttk.Separator(self.root, orient="horizontal").pack(fill="x", **pad)
 
+        # V0.9.2: the analysis — in the browser, or (Client + analysis app) in its own window
+        if self._on_open_analysis is not None:
+            row = ttk.Frame(self.root)
+            row.pack(fill="x", padx=12, pady=(0, 4))
+            ttk.Button(row, text="Open analysis", command=lambda: self._on_open_analysis(None)).pack(side="left")
+            self.last_lap_button = ttk.Button(row, text="Analyse last lap", state="disabled",
+                                              command=self._open_last_lap)
+            self.last_lap_button.pack(side="left", padx=(6, 0))
+            if self._analysis_choice is not None:
+                prefers_browser, setter = self._analysis_choice
+                self.browser_var = tk.BooleanVar(value=bool(prefers_browser))
+                ttk.Checkbutton(
+                    self.root, text="Open the analysis in my browser instead",
+                    variable=self.browser_var, command=lambda: setter(bool(self.browser_var.get())),
+                ).pack(anchor="w", padx=12, pady=(0, 4))
+
         if self._on_reconnect is not None:
             ttk.Button(self.root, text="Reconnect account…", command=self._on_reconnect).pack(anchor="e", padx=12, pady=(0, 4))
 
@@ -95,7 +118,14 @@ class GarageApp:
         if is_safe_download_url(self._notice_url):
             webbrowser.open(self._notice_url)
 
+    def _open_last_lap(self) -> None:
+        if self._on_open_analysis is not None and self._last_lap_id is not None:
+            self._on_open_analysis(self._last_lap_id)
+
     def _apply(self, update: StatusUpdate) -> None:
+        if update.last_lap_id is not None and self._on_open_analysis is not None:
+            self._last_lap_id = update.last_lap_id
+            self.last_lap_button.configure(state="normal")
         if update.notice_url is not None:
             self._notice_url = update.notice_url if is_safe_download_url(update.notice_url) else ""
             if self._notice_url:

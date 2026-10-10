@@ -11,27 +11,28 @@ import { api, ApiError } from "../api.js";
 import { store } from "../state.js";
 import { el } from "../format.js";
 
-export function renderSignInPrompt(container, message = "Sign in to see this.") {
+import { t } from "../i18n.js";
+export function renderSignInPrompt(container, message = t("Sign in to see this.")) {
   const notice = el("div", { class: "notice" }, message);
-  const link = el("a", { href: "#/account", class: "btn", style: "margin-top:12px;display:inline-block;" }, "Go to Account");
-  container.appendChild(el("h1", {}, "Sign in required"));
+  const link = el("a", { href: "#/account", class: "btn", style: "margin-top:12px;display:inline-block;" }, t("Go to Account"));
+  container.appendChild(el("h1", {}, t("Sign in required")));
   container.appendChild(notice);
   container.appendChild(link);
 }
 
 function renderLoginCard() {
   const card = el("div", { class: "card" });
-  card.appendChild(el("h2", {}, "Sign in"));
+  card.appendChild(el("h2", {}, t("Sign in")));
 
   const emailField = el("div", { class: "field" }, [
-    el("label", { for: "loginEmail" }, "Email"),
+    el("label", { for: "loginEmail" }, t("Email")),
     el("input", { id: "loginEmail", type: "email", autocomplete: "email" }),
   ]);
   const pwField = el("div", { class: "field" }, [
-    el("label", { for: "loginPw" }, "Password"),
+    el("label", { for: "loginPw" }, t("Password")),
     el("input", { id: "loginPw", type: "password", autocomplete: "current-password" }),
   ]);
-  const loginBtn = el("button", { class: "btn" }, "Sign in");
+  const loginBtn = el("button", { class: "btn" }, t("Sign in"));
   const out = el("div");
 
   loginBtn.addEventListener("click", async () => {
@@ -43,29 +44,29 @@ function renderLoginCard() {
     try {
       const res = await api.login(email, password);
       store.setSession({ driverId: res.driver_id, displayName: res.display_name, viaCookie: true });
-      out.appendChild(el("div", { class: "notice notice--success" }, "Signed in."));
+      out.appendChild(el("div", { class: "notice notice--success" }, t("Signed in.")));
       window.location.hash = "#/dashboard";
     } catch (err) {
-      out.appendChild(el("div", { class: "notice notice--error" }, err instanceof ApiError ? err.message : "Sign-in failed."));
+      out.appendChild(el("div", { class: "notice notice--error" }, err instanceof ApiError ? err.message : t("Sign-in failed.")));
     } finally {
       loginBtn.disabled = false;
     }
   });
 
-  const forgotLink = el("a", { href: "#", style: "font-size:13px;display:inline-block;margin-top:4px;" }, "Forgot password?");
+  const forgotLink = el("a", { href: "#", style: "font-size:13px;display:inline-block;margin-top:4px;" }, t("Forgot password?"));
   const forgotOut = el("div");
   forgotLink.addEventListener("click", async (evt) => {
     evt.preventDefault();
     const email = emailField.querySelector("input").value.trim();
     forgotOut.innerHTML = "";
     if (!email) {
-      forgotOut.appendChild(el("div", { class: "notice notice--error" }, "Enter your email above first."));
+      forgotOut.appendChild(el("div", { class: "notice notice--error" }, t("Enter your email above first.")));
       return;
     }
     try {
       await api.requestPasswordReset(email);
       forgotOut.appendChild(
-        el("div", { class: "notice notice--success" }, "If that email has an account with a password set, a reset link is on its way.")
+        el("div", { class: "notice notice--success" }, t("If that email has an account with a password set, a reset link is on its way."))
       );
     } catch (err) {
       forgotOut.appendChild(el("div", { class: "notice notice--error" }, err.message));
@@ -82,12 +83,12 @@ function renderLoginCard() {
 }
 
 export function renderAuth(container) {
-  container.appendChild(el("h1", {}, "Account"));
+  container.appendChild(el("h1", {}, t("Account")));
   container.appendChild(
     el(
       "p",
       { class: "subtitle" },
-      "Sign in with email + password if you've set one, register a new driver profile, or restore a session with a saved token."
+      t("Sign in with email + password if you've set one, register a new driver profile, or restore a session with a saved token.")
     )
   );
 
@@ -95,17 +96,17 @@ export function renderAuth(container) {
 
   // --- register ---
   const registerCard = el("div", { class: "card" });
-  registerCard.appendChild(el("h2", {}, "New driver"));
+  registerCard.appendChild(el("h2", {}, t("New driver")));
 
   const nameField = el("div", { class: "field" }, [
-    el("label", { for: "displayName" }, "Display name"),
-    el("input", { id: "displayName", type: "text", placeholder: "e.g. Mika H." }),
+    el("label", { for: "displayName" }, t("Display name")),
+    el("input", { id: "displayName", type: "text", placeholder: t("e.g. Mika H.") }),
   ]);
   const regSecretField = el("div", { class: "field" }, [
-    el("label", { for: "regSecret" }, "Registration secret (only if this server requires one)"),
-    el("input", { id: "regSecret", type: "password", placeholder: "leave blank if you don't have one" }),
+    el("label", { for: "regSecret" }, t("Registration secret (only if this server requires one)")),
+    el("input", { id: "regSecret", type: "password", placeholder: t("leave blank if you don't have one") }),
   ]);
-  const registerBtn = el("button", { class: "btn" }, "Register");
+  const registerBtn = el("button", { class: "btn" }, t("Register"));
   const registerOut = el("div");
 
   registerBtn.addEventListener("click", async () => {
@@ -125,9 +126,9 @@ export function renderAuth(container) {
       // attach real login credentials to this brand-new driver — after
       // that, use "Sign in" above like any other visit.
       store.setSession({ driverId: res.driver_id, displayName: res.display_name, authToken: res.auth_token });
-      registerOut.appendChild(el("div", { class: "notice notice--success" }, "Registered."));
+      registerOut.appendChild(el("div", { class: "notice notice--success" }, t("Registered.")));
       const box = el("div", { class: "credential-box" }, [
-        "Save this client secret now — it's shown once and needed to configure the desktop recorder client:",
+        t("Save this client secret now — it's shown once and needed to configure the desktop recorder client:"),
         el("code", {}, res.client_secret),
       ]);
       registerOut.appendChild(box);
@@ -135,7 +136,7 @@ export function renderAuth(container) {
         el(
           "div",
           { class: "notice", style: "margin-top:12px;" },
-          "You're set up as a driver now. Head to Account → Email & Password to set a password — that's what lets you sign in on this or any browser afterwards, instead of pasting a token."
+          t("You're set up as a driver now. Head to Account → Email & Password to set a password — that's what lets you sign in on this or any browser afterwards, instead of pasting a token.")
         )
       );
     } catch (err) {
@@ -152,12 +153,12 @@ export function renderAuth(container) {
 
   // --- restore session ---
   const restoreCard = el("div", { class: "card" });
-  restoreCard.appendChild(el("h2", {}, "Already have a token?"));
+  restoreCard.appendChild(el("h2", {}, t("Already have a token?")));
   const tokenField = el("div", { class: "field" }, [
-    el("label", { for: "authToken" }, "Auth token"),
-    el("input", { id: "authToken", type: "password", placeholder: "paste your saved auth_token" }),
+    el("label", { for: "authToken" }, t("Auth token")),
+    el("input", { id: "authToken", type: "password", placeholder: t("paste your saved auth_token") }),
   ]);
-  const restoreBtn = el("button", { class: "btn btn--ghost" }, "Restore session");
+  const restoreBtn = el("button", { class: "btn btn--ghost" }, t("Restore session"));
   const restoreOut = el("div");
 
   restoreBtn.addEventListener("click", async () => {
@@ -174,11 +175,11 @@ export function renderAuth(container) {
     try {
       const who = await api.whoami();
       store.setSession({ driverId: who.driver_id, displayName: who.display_name, authToken: token });
-      restoreOut.appendChild(el("div", { class: "notice notice--success" }, "Session restored."));
+      restoreOut.appendChild(el("div", { class: "notice notice--success" }, t("Session restored.")));
     } catch (err) {
       store.signOut();
       restoreOut.appendChild(
-        el("div", { class: "notice notice--error" }, err instanceof ApiError ? err.message : "Could not verify that token.")
+        el("div", { class: "notice notice--error" }, err instanceof ApiError ? err.message : t("Could not verify that token."))
       );
     } finally {
       restoreBtn.disabled = false;

@@ -17,11 +17,17 @@ dirty).
 
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
 import tempfile
 
 _tmp_db_dir = tempfile.mkdtemp(prefix="garage16_test_db_")
 _tmp_storage_dir = tempfile.mkdtemp(prefix="garage16_test_storage_")
+# V0.9.1: remove them again when the test run ends — every run used to leave a database and up
+# to ~20 MB of uploaded test telemetry behind in the temp folder.
+atexit.register(shutil.rmtree, _tmp_db_dir, ignore_errors=True)
+atexit.register(shutil.rmtree, _tmp_storage_dir, ignore_errors=True)
 
 os.environ.setdefault("LMU_GARAGE_ENV", "development")
 os.environ.setdefault("LMU_GARAGE_DB_URL", f"sqlite:///{_tmp_db_dir}/test.db")
@@ -64,3 +70,19 @@ def _reset_rate_limits():
     reset_all()
     yield
     reset_all()
+
+
+@pytest.fixture(autouse=True)
+def _reset_analysis_cache():
+    """The analysis cache (server/analysis_cache.py) is process-global: clear it
+    around every test so one test's cached result can never satisfy another's
+    request (the cache only ever speeds things up, but tests must not depend on
+    what ran before them)."""
+    from server.analysis_cache import analysis_cache
+    from server.telemetry_analysis import clear_lap_cache
+
+    analysis_cache.clear()
+    clear_lap_cache()
+    yield
+    analysis_cache.clear()
+    clear_lap_cache()

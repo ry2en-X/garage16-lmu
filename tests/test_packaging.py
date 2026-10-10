@@ -115,7 +115,11 @@ def test_installer_pulls_its_version_from_the_generated_include_and_names_the_se
     text = "\n".join(_iss_lines())
     assert '#include "version.iss"' in text
     assert "AppVersion={#AppVersion}" in text
-    assert "OutputBaseFilename=Garage16-Client-Setup" in text
+    # V0.9.2: the setup's name depends on the edition (ISCC /DEdition=...); was a fixed
+    # "OutputBaseFilename=Garage16-Client-Setup" line — the plain client keeps that name.
+    assert "OutputBaseFilename={#SetupName}" in text
+    assert '#define SetupName "Garage16-Client-Setup"' in text
+    assert '#define SetupName "Garage16-Client-Analysis-Setup"' in text
     assert 'Source: "..\\dist\\Garage16\\*"' in text
 
 
@@ -236,3 +240,129 @@ def test_attach_parent_console_is_a_noop_outside_frozen_windows(monkeypatch):
 def test_build_script_waits_for_the_windowed_exe_in_its_smoke_test():
     script = (PACKAGING / "build_windows.ps1").read_text(encoding="utf-8")
     assert "Start-Process" in script and "-Wait" in script and "ExitCode" in script
+
+
+# ------------------------------------------------ V0.9.2: two editions
+
+def test_both_editions_install_as_the_same_app_so_switching_is_an_in_place_update():
+    text = "\n".join(_iss_lines())
+    assert len(re.findall(r"^AppId=", text, re.MULTILINE)) == 1, "one AppId for both editions"
+    assert '#ifndef Edition' in text and '#define Edition "standard"' in text, "plain client by default"
+    assert "AppVerName=Garage16 {#AppVersion} ({#EditionLabel})" in text
+
+
+def test_switching_edition_removes_only_the_apps_own_program_files():
+    lines = [l.strip() for l in _iss_lines() if l.strip() and not l.strip().startswith(";")]
+    start = lines.index("[InstallDelete]")
+    entries = []
+    for line in lines[start + 1:]:
+        if line.startswith("["):
+            break
+        entries.append(line)
+    assert entries == ['Type: filesandordirs; Name: "{app}\\_internal"'], entries
+
+
+def test_spec_bakes_the_edition_and_bundles_the_window_engine_only_in_the_analysis_edition():
+    source = (PACKAGING / "garage16.spec").read_text(encoding="utf-8")
+    assert "GARAGE16_EDITION" in source and "garage16_edition.txt" in source
+    assert 'edition_excludes = ["webview", "clr", "pythonnet", "clr_loader"]' in source, \
+        "the plain client never carries pywebview, even if the build machine has it"
+    assert 'collect_data_files("webview")' in source
+    assert '"webview.platforms.winforms", "webview.platforms.edgechromium", "clr"' in source
+    import client.edition as edition
+
+    assert edition.EDITION_FILENAME == "garage16_edition.txt"
+
+
+def test_analysis_requirements_add_only_the_window_engine():
+    lines = [l.split("#")[0].strip() for l in (ROOT / "client" / "requirements-analysis.txt").read_text(encoding="utf-8").splitlines()]
+    lines = [l for l in lines if l]
+    assert lines[0] == "-r requirements.txt"
+    assert len(lines) == 2 and lines[1].startswith("pywebview")
+    assert "pywebview" not in (ROOT / "client" / "requirements.txt").read_text(encoding="utf-8")
+
+
+def test_build_script_builds_either_edition_and_self_tests_the_window_engine():
+    script = (PACKAGING / "build_windows.ps1").read_text(encoding="utf-8")
+    assert '[ValidateSet("standard", "analysis")][string]$Edition = "standard"' in script
+    assert "client\\requirements-analysis.txt" in script
+    assert "--analysis-selftest" in script
+    assert '"/DEdition=$Edition"' in script
+    for name in ("Garage16-Client-Setup.exe", "Garage16-Client-Analysis-Setup.exe",
+                 "Garage16-Portable.zip", "Garage16-Analysis-Portable.zip"):
+        assert name in script
+    assert '$venv = ".venv-build-$Edition"' in script, "one build environment per edition"
+
+
+def test_ci_builds_both_editions_and_releases_all_files_on_a_tag():
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "build-client.yml").read_text(encoding="utf-8"))
+    windows = workflow["jobs"]["windows"]
+    assert windows["strategy"]["matrix"]["edition"] == ["standard", "analysis"]
+    assert "-Edition ${{ matrix.edition }}" in json.dumps(windows["steps"])
+    release = workflow["jobs"]["release"]
+    assert release["needs"] == "windows" and "refs/tags/client-v" in release["if"]
+    assert release["permissions"] == {"contents": "write"}
+    script = json.dumps(release["steps"])
+    assert "gh release create" in script and "files/*" in script
+    assert "Garage16-Client-Setup.exe" in script and "Garage16-Client-Analysis-Setup.exe" in script
+
+
+def test_publishing_needs_no_terminal_one_click_in_the_actions_tab():
+    """V0.9.2: "Run workflow" alone publishes the release (tag from CLIENT_VERSION, marked
+    Latest, re-runs replace the files), so friends download from Releases -> Latest."""
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "build-client.yml").read_text(encoding="utf-8"))
+    triggers = workflow.get(True) or workflow.get("on")
+    publish = triggers["workflow_dispatch"]["inputs"]["publish"]
+    assert publish["type"] == "boolean" and publish["default"] is True
+    release = workflow["jobs"]["release"]
+    assert "github.event_name == 'workflow_dispatch' && inputs.publish" in release["if"]
+    script = json.dumps(release["steps"])
+    assert "read_client_version" in script and 'TAG=\\"client-v${VERSION}\\"' in script or "client-v${VERSION}" in script
+    assert "--latest" in script and "--clobber" in script
+    assert "does not match CLIENT_VERSION" in script, "a wrong tag never publishes a mislabelled release"
+    assert ".venv-build-*/" in GITIGNORE_TEXT()
+
+
+def GITIGNORE_TEXT():
+    return (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+
+
+@pytest.mark.skipif(
+    os.environ.get("GARAGE16_TEST_FROZEN_BUILD") != "1",
+    reason="opt-in (slow, ~2 min): set GARAGE16_TEST_FROZEN_BUILD=1 to run real PyInstaller builds",
+)
+@pytest.mark.parametrize("edition", ["standard", "analysis"])
+def test_real_frozen_build_of_each_edition(tmp_path, edition):
+    """A real PyInstaller build (on the machine running the tests — Linux here, Windows in
+    CI) of each edition: the edition is baked in, the plain client carries no pywebview,
+    and the analysis edition's packaged window engine imports."""
+    pytest.importorskip("PyInstaller")
+    if edition == "analysis":
+        pytest.importorskip("webview")
+    dist, work = tmp_path / "dist", tmp_path / "build"
+    env = dict(os.environ, GARAGE16_SERVER_URL="https://baked.garage16.example.test", GARAGE16_EDITION=edition)
+    env.pop("LMU_GARAGE_EDITION", None)
+    build = subprocess.run(
+        [sys.executable, "-m", "PyInstaller", str(PACKAGING / "garage16.spec"), "--noconfirm",
+         "--distpath", str(dist), "--workpath", str(work)],
+        cwd=ROOT, env=env, capture_output=True, text=True, timeout=900,
+    )
+    assert build.returncode == 0, build.stdout[-2000:] + build.stderr[-2000:]
+    app_dir = dist / "Garage16"
+    exe = app_dir / ("Garage16.exe" if os.name == "nt" else "Garage16")
+    home = tmp_path / "home"
+    home.mkdir()
+    run_env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), LMU_GARAGE_CONFIG_DIR=str(home / "cfg"))
+    for key in ("LMU_GARAGE_API_URL", "LMU_GARAGE_EDITION"):
+        run_env.pop(key, None)
+    version = subprocess.run([str(exe), "--version"], env=run_env, capture_output=True, text=True, timeout=60)
+    selftest = subprocess.run([str(exe), "--analysis-selftest"], env=run_env, capture_output=True, text=True, timeout=120)
+    has_webview = any(p.name == "webview" and p.is_dir() for p in app_dir.rglob("webview"))
+    if edition == "analysis":
+        assert "(Client + analysis app)" in version.stdout, version.stdout
+        assert selftest.returncode == 0 and "Analysis window engine" in selftest.stdout, selftest.stdout + selftest.stderr
+        assert has_webview
+    else:
+        assert "(Client)" in version.stdout, version.stdout
+        assert selftest.returncode == 0 and "opens in the browser" in selftest.stdout
+        assert not has_webview, "the plain client must not carry the analysis window"

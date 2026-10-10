@@ -1,0 +1,7 @@
+# V0.9.2 — the "Client + analysis app" edition: everything the client needs, plus the
+# analysis window (client/analysis_window.py). Only for building that edition; the
+# plain client (requirements.txt) never contains it.
+#   pywebview   the window, on Microsoft Edge WebView2 (Windows). Pulls in pythonnet on
+#               Windows. The WebView2 runtime itself is part of Windows 11 / updated Windows 10.
+-r requirements.txt
+pywebview>=5.4,<7

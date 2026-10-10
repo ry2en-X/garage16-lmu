@@ -5,12 +5,13 @@
 import { api, ApiError } from "../api.js";
 import { el } from "../format.js";
 
+import { t } from "../i18n.js";
 export async function renderVerifyEmail(container, token) {
-  container.appendChild(el("h1", {}, "Verify your email"));
+  container.appendChild(el("h1", {}, t("Verify your email")));
 
   if (!token) {
     container.appendChild(
-      el("div", { class: "notice notice--error" }, "No verification token found in this link.")
+      el("div", { class: "notice notice--error" }, t("No verification token found in this link."))
     );
     return;
   }
@@ -18,13 +19,13 @@ export async function renderVerifyEmail(container, token) {
   const card = el("div", { class: "card" });
   try {
     await api.confirmEmailVerification(token);
-    card.appendChild(el("div", { class: "notice notice--success" }, "Email verified. Thanks!"));
+    card.appendChild(el("div", { class: "notice notice--success" }, t("Email verified. Thanks!")));
     card.appendChild(
-      el("a", { href: "#/account", class: "btn", style: "margin-top:12px;display:inline-block;" }, "Go to Account")
+      el("a", { href: "#/account", class: "btn", style: "margin-top:12px;display:inline-block;" }, t("Go to Account"))
     );
   } catch (err) {
     card.appendChild(
-      el("div", { class: "notice notice--error" }, err instanceof ApiError ? err.message : "Something went wrong.")
+      el("div", { class: "notice notice--error" }, err instanceof ApiError ? err.message : t("Something went wrong."))
     );
   }
   container.appendChild(card);

@@ -7,6 +7,7 @@ instead of the real ctypes structs, since only field access matters here.
 
 from types import SimpleNamespace
 
+from client.lmu.structs import TelemInfoV01, TelemWheelV01
 from client.telemetry.parser import LapParser
 from client.telemetry.reader import Frame
 
@@ -15,12 +16,27 @@ def _vec3(x=0.0, y=0.0, z=0.0):
     return SimpleNamespace(x=x, y=y, z=z)
 
 
+def _backfill(fake, real_struct):
+    """V0.9.0: the parser now also reads ~160 extended channels. These tests
+    only care about a handful of fields, so every attribute the test did not
+    set is filled in from a zero-initialised REAL ctypes struct — the fake then
+    has exactly the real struct's attribute layout, and a mistyped attribute
+    name in the extended-channel registry still fails loudly here."""
+    for name, _ctype in type(real_struct)._fields_:
+        if not hasattr(fake, name):
+            setattr(fake, name, getattr(real_struct, name))
+    return fake
+
+
 def _wheel(pressure=1.0, temperature=(90.0, 95.0, 90.0), brake_temp=300.0):
-    return SimpleNamespace(pressure=pressure, temperature=temperature, brake_temp=brake_temp)
+    return _backfill(
+        SimpleNamespace(pressure=pressure, temperature=temperature, brake_temp=brake_temp),
+        TelemWheelV01(),
+    )
 
 
 def _telemetry(lap_number, elapsed_time, vehicle_name=b"Car", track_name=b"Track"):
-    return SimpleNamespace(
+    return _backfill(SimpleNamespace(
         lap_number=lap_number,
         elapsed_time=elapsed_time,
         vehicle_name=vehicle_name,
@@ -34,7 +50,7 @@ def _telemetry(lap_number, elapsed_time, vehicle_name=b"Car", track_name=b"Track
         fuel=50.0,
         pos=_vec3(1.0, 2.0, 3.0),
         wheel=[_wheel(), _wheel(), _wheel(), _wheel()],
-    )
+    ), TelemInfoV01())
 
 
 def _scoring(last_lap_time=90.0, last_sector1=30.0, last_sector2=60.0, in_pits=False, count_lap_flag=1,

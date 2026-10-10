@@ -81,7 +81,7 @@ Migrationslogik, der Unterschied ist nur die Port-Freigabe auf
 
 ## Nach jedem Rollback
 
-- `curl https://your-domain.example/health` prüfen (Variante B) bzw. den
+- `curl https://garage16.de/health` prüfen (Variante B) bzw. den
   über den Cloudflare-Tunnel erreichbaren Hostnamen (Variante A) — auf
   `db_ok: true` und die erwartete `version` achten.
 - Discord-Bot-Logs prüfen (`docker compose logs discord_bot`) — ein

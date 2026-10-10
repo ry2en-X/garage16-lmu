@@ -125,6 +125,22 @@ class Settings:
                 int(os.environ.get("LMU_GARAGE_RATELIMIT_TEAMINVITE_MAX", 20)),
                 float(os.environ.get("LMU_GARAGE_RATELIMIT_TEAMINVITE_WINDOW", 3600)),
             ),
+            # V0.9.0 — lap analysis (compare, outlines, lap lists). Each call
+            # reads telemetry files, so it is limited per driver and per IP; the
+            # default leaves room for exploring (every channel change is a call). V0.9.1:
+            # 300 -> 900 — zooming far into a lap now fetches finer data for the visible
+            # stretch (one call per settled zoom/pan; the browser remembers stretches it
+            # already has and backs off for a minute after a 429).
+            "analysis": (
+                int(os.environ.get("LMU_GARAGE_RATELIMIT_ANALYSIS_MAX", 900)),
+                float(os.environ.get("LMU_GARAGE_RATELIMIT_ANALYSIS_WINDOW", 3600)),
+            ),
+            # V0.9.2 — the desktop app's analysis window signing itself in. One call
+            # per window that is not signed in yet; 30/hour is far above that.
+            "app_session": (
+                int(os.environ.get("LMU_GARAGE_RATELIMIT_APPSESSION_MAX", 30)),
+                float(os.environ.get("LMU_GARAGE_RATELIMIT_APPSESSION_WINDOW", 3600)),
+            ),
             # V0.8-NAS §2 — resending a verification email.
             "email_verification": (
                 int(os.environ.get("LMU_GARAGE_RATELIMIT_EMAILVERIFY_MAX", 5)),
@@ -154,6 +170,13 @@ class Settings:
     # itself. Unset = the message just says to ask whoever runs the server.
     client_download_url: Optional[str] = field(
         default_factory=lambda: os.environ.get("LMU_GARAGE_CLIENT_DOWNLOAD_URL") or None
+    )
+    # V0.9.2: the client comes in two editions — "Client" (analysis opens in the
+    # browser; LMU_GARAGE_CLIENT_DOWNLOAD_URL above) and "Client + analysis app"
+    # (analysis in its own window; this one). Both are shown side by side on the
+    # website's download page, and a too-old client is sent to its own edition.
+    client_app_download_url: Optional[str] = field(
+        default_factory=lambda: os.environ.get("LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL") or None
     )
 
     db_pool_size: int = int(os.environ.get("LMU_GARAGE_DB_POOL_SIZE", 5))
@@ -241,12 +264,15 @@ def warn_about_questionable_client_facing_urls(cfg: Settings) -> list:
                 f"LMU_GARAGE_MIGRATED_TO={cfg.migrated_to_url!r} is not a valid https:// URL — "
                 "desktop clients only follow a move to an https:// address and will ignore this."
             )
-    if cfg.client_download_url:
-        parsed = urlparse(cfg.client_download_url)
+    for name, value in (("LMU_GARAGE_CLIENT_DOWNLOAD_URL", cfg.client_download_url),
+                        ("LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL", getattr(cfg, "client_app_download_url", None))):
+        if not value:
+            continue
+        parsed = urlparse(value)
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             messages.append(
-                f"LMU_GARAGE_CLIENT_DOWNLOAD_URL={cfg.client_download_url!r} is not a valid http(s) URL — "
-                "clients won't offer a download button for it."
+                f"{name}={value!r} is not a valid http(s) URL — "
+                "clients and the download page won't offer it."
             )
     for message in messages:
         log.warning(message)

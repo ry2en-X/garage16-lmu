@@ -19,21 +19,26 @@
       </a>
 
       <div class="pitwall__links" id="navLinks">
-        <a href="#/leaderboard" data-route="leaderboard">Leaderboard</a>
-        <a href="#/dashboard" data-route="dashboard">Dashboard</a>
-        <a href="#/teams" data-route="teams">Teams</a>
-        <a href="#/account" data-route="account">Account</a>
+        <a href="#/leaderboard" data-route="leaderboard" data-i18n="Leaderboard">Leaderboard</a>
+        <a href="#/circuits" data-route="circuits" data-i18n="Circuits">Circuits</a>
+        <a href="#/analysis" data-route="analysis" data-i18n="Analysis">Analysis</a>
+        <a href="#/dashboard" data-route="dashboard" data-i18n="Dashboard">Dashboard</a>
+        <a href="#/teams" data-route="teams" data-i18n="Teams">Teams</a>
+        <a href="#/account" data-route="account" data-i18n="Account">Account</a>
+        <a href="#/download" data-route="download" data-i18n="Download">Download</a>
       </div>
+
+      <div class="pitwall__lang" id="langSwitchSlot"></div>
 
       <div class="pitwall__status" id="pitwallStatus">
         <span class="status-dot" id="statusDot"></span>
-        <span id="statusText">not signed in</span>
+        <span id="statusText" data-i18n="not signed in">not signed in</span>
       </div>
     </nav>
 
     <div class="mobile-bar">
       <div class="mobile-bar__brand">LMU GARAGE</div>
-      <button class="mobile-bar__toggle" id="mobileToggle" aria-label="Toggle menu">☰</button>
+      <button class="mobile-bar__toggle" id="mobileToggle" aria-label="Toggle menu" data-i18n-aria-label="Toggle menu">☰</button>
     </div>
 
     <main class="panel" id="app" role="main">

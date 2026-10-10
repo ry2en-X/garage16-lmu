@@ -6,6 +6,7 @@ import { store } from "../state.js";
 import { el } from "../format.js";
 import { renderAuth } from "./auth.js";
 
+import { locale, t } from "../i18n.js";
 export async function renderAccount(container) {
   if (!store.isSignedIn()) {
     renderAuth(container);
@@ -14,12 +15,12 @@ export async function renderAccount(container) {
 
   const session = store.getSession();
 
-  container.appendChild(el("h1", {}, "Account"));
-  container.appendChild(el("p", { class: "subtitle" }, "Manage your driver profile and Discord link."));
+  container.appendChild(el("h1", {}, t("Account")));
+  container.appendChild(el("p", { class: "subtitle" }, t("Manage your driver profile and Discord link.")));
 
   const profileCard = el("div", { class: "card" }, [
-    el("div", { class: "card-row" }, [el("span", {}, "Display name"), el("strong", {}, session.displayName)]),
-    session.driverId ? el("div", { class: "card-row" }, [el("span", {}, "Driver ID"), el("strong", {}, String(session.driverId))]) : null,
+    el("div", { class: "card-row" }, [el("span", {}, t("Display name")), el("strong", {}, session.displayName)]),
+    session.driverId ? el("div", { class: "card-row" }, [el("span", {}, t("Driver ID")), el("strong", {}, String(session.driverId))]) : null,
   ]);
   container.appendChild(profileCard);
 
@@ -30,20 +31,18 @@ export async function renderAccount(container) {
 
   // --- security: rotate / revoke credentials ---
   const securityCard = el("div", { class: "card" });
-  securityCard.appendChild(el("h2", {}, "Desktop Client Credentials"));
+  securityCard.appendChild(el("h2", {}, t("Desktop Client Credentials")));
   securityCard.appendChild(
     el(
       "p",
       { class: "subtitle" },
-      "These belong to the LMU recorder client on your PC, not to this browser session (V0.7.2 keeps the two fully separate — see below for signing this browser out). " +
-        "Rotate a credential if you're just being careful — the old one stops working, the new one keeps your identity. " +
-        "Revoke only if a token actually leaked: it disconnects the desktop client immediately and can't be undone from here."
+      t("These belong to the LMU recorder client on your PC, not to this browser session (V0.7.2 keeps the two fully separate — see below for signing this browser out). Rotate a credential if you're just being careful — the old one stops working, the new one keeps your identity. Revoke only if a token actually leaked: it disconnects the desktop client immediately and can't be undone from here.")
     )
   );
 
-  const rotateTokenBtn = el("button", { class: "btn btn--ghost" }, "Rotate auth token");
-  const rotateSecretBtn = el("button", { class: "btn btn--ghost" }, "Rotate client secret");
-  const revokeBtn = el("button", { class: "btn btn--ghost" }, "Revoke desktop client access");
+  const rotateTokenBtn = el("button", { class: "btn btn--ghost" }, t("Rotate auth token"));
+  const rotateSecretBtn = el("button", { class: "btn btn--ghost" }, t("Rotate client secret"));
+  const revokeBtn = el("button", { class: "btn btn--ghost" }, t("Revoke desktop client access"));
   const securityOut = el("div");
 
   rotateTokenBtn.addEventListener("click", async () => {
@@ -58,7 +57,7 @@ export async function renderAccount(container) {
       // about this browser's own sign-in state changes.
       securityOut.appendChild(
         el("div", { class: "credential-box" }, [
-          "New auth token — save it and run `python -m client.main --reconfigure` to update the desktop app:",
+          t("New auth token — save it and run `python -m client.main --reconfigure` to update the desktop app:"),
           el("code", {}, res.auth_token),
         ])
       );
@@ -76,7 +75,7 @@ export async function renderAccount(container) {
       const res = await api.rotateSecret();
       securityOut.appendChild(
         el("div", { class: "credential-box" }, [
-          "New client secret — save it and run `python -m client.main --reconfigure` to update the desktop app:",
+          t("New client secret — save it and run `python -m client.main --reconfigure` to update the desktop app:"),
           el("code", {}, res.client_secret),
         ])
       );
@@ -88,14 +87,14 @@ export async function renderAccount(container) {
   });
 
   revokeBtn.addEventListener("click", async () => {
-    if (!window.confirm("This disconnects your desktop LMU client immediately, with no way back in for it. This browser stays signed in. Continue?")) {
+    if (!window.confirm(t("This disconnects your desktop LMU client immediately, with no way back in for it. This browser stays signed in. Continue?"))) {
       return;
     }
     revokeBtn.disabled = true;
     try {
       await api.revokeSession();
       securityOut.innerHTML = "";
-      securityOut.appendChild(el("div", { class: "notice notice--success" }, "Desktop client access revoked."));
+      securityOut.appendChild(el("div", { class: "notice notice--success" }, t("Desktop client access revoked.")));
     } catch (err) {
       securityOut.appendChild(el("div", { class: "notice notice--error" }, err.message));
     } finally {
@@ -112,12 +111,12 @@ export async function renderAccount(container) {
   // --- sessions (V0.7.2): this browser's own sign-in, separate from the
   // desktop client credentials above ---
   const sessionsCard = el("div", { class: "card" });
-  sessionsCard.appendChild(el("h2", {}, "Sessions"));
+  sessionsCard.appendChild(el("h2", {}, t("Sessions")));
   sessionsCard.appendChild(
-    el("p", { class: "subtitle" }, "Browsers/devices currently signed in with your email and password.")
+    el("p", { class: "subtitle" }, t("Browsers/devices currently signed in with your email and password."))
   );
   const sessionsBox = el("div");
-  const logoutAllBtn = el("button", { class: "btn btn--ghost" }, "Sign out everywhere");
+  const logoutAllBtn = el("button", { class: "btn btn--ghost" }, t("Sign out everywhere"));
   const sessionsOut = el("div");
 
   async function loadSessions() {
@@ -125,22 +124,22 @@ export async function renderAccount(container) {
     try {
       const sessions = await api.mySessions();
       if (!sessions.length) {
-        sessionsBox.appendChild(el("div", { class: "empty-state" }, "No active email/password sessions."));
+        sessionsBox.appendChild(el("div", { class: "empty-state" }, t("No active email/password sessions.")));
         return;
       }
       const card = el("div", { class: "card" });
       sessions.forEach((s) => {
-        const label = s.is_current ? "This device — now" : s.user_agent || "Unknown device";
+        const label = s.is_current ? t("This device — now") : s.user_agent || t("Unknown device");
         const row = el("div", { class: "card-row" }, [
           el("div", {}, [
             el("strong", {}, label),
             el("div", { class: "subtitle", style: "margin:2px 0 0;" },
-              `Signed in ${s.created_at ? new Date(s.created_at).toLocaleString() : "—"}`),
+              t("Signed in {0}", [s.created_at ? new Date(s.created_at).toLocaleString(locale()) : "—"])),
           ]),
           s.is_current
             ? null
             : (() => {
-                const btn = el("button", { class: "btn btn--ghost" }, "Sign out");
+                const btn = el("button", { class: "btn btn--ghost" }, t("Sign out"));
                 btn.addEventListener("click", async () => {
                   btn.disabled = true;
                   try {
@@ -163,7 +162,7 @@ export async function renderAccount(container) {
   }
 
   logoutAllBtn.addEventListener("click", async () => {
-    if (!window.confirm("This signs this and every other browser out immediately. Continue?")) return;
+    if (!window.confirm(t("This signs this and every other browser out immediately. Continue?"))) return;
     logoutAllBtn.disabled = true;
     try {
       await api.logoutAllDevices();
@@ -184,20 +183,20 @@ export async function renderAccount(container) {
   // The name on leaderboards, profiles, teams and in Discord. It used to be
   // whatever was typed when registering and could never be changed.
   const nameCard = el("div", { class: "card" });
-  nameCard.appendChild(el("h2", {}, "Driver name"));
+  nameCard.appendChild(el("h2", {}, t("Driver name")));
   nameCard.appendChild(
-    el("p", { class: "subtitle" }, "This is the name other drivers see on leaderboards, in teams and in Discord. Changing it updates it everywhere, including your past laps.")
+    el("p", { class: "subtitle" }, t("This is the name other drivers see on leaderboards, in teams and in Discord. Changing it updates it everywhere, including your past laps."))
   );
   const nameInput = el("input", { id: "driverName", type: "text", maxlength: "60" });
   nameInput.value = session?.displayName || "";
-  const nameField = el("div", { class: "field" }, [el("label", { for: "driverName" }, "Display name"), nameInput]);
-  const nameBtn = el("button", { class: "btn" }, "Save name");
+  const nameField = el("div", { class: "field" }, [el("label", { for: "driverName" }, t("Display name")), nameInput]);
+  const nameBtn = el("button", { class: "btn" }, t("Save name"));
   const nameOut = el("div");
   nameBtn.addEventListener("click", async () => {
     nameOut.innerHTML = "";
     const wanted = nameInput.value.trim();
     if (!wanted) {
-      nameOut.appendChild(el("div", { class: "notice notice--error" }, "Please enter a name."));
+      nameOut.appendChild(el("div", { class: "notice notice--error" }, t("Please enter a name.")));
       return;
     }
     nameBtn.disabled = true;
@@ -205,7 +204,7 @@ export async function renderAccount(container) {
       const who = await api.updateDisplayName(wanted);
       store.setSession({ ...store.getSession(), displayName: who.display_name });
       nameInput.value = who.display_name;
-      nameOut.appendChild(el("div", { class: "notice notice--success" }, `Saved. You are now "${who.display_name}".`));
+      nameOut.appendChild(el("div", { class: "notice notice--success" }, t("Saved. You are now \"{0}\".", [who.display_name])));
     } catch (err) {
       nameOut.appendChild(el("div", { class: "notice notice--error" }, err.message));
     } finally {
@@ -219,12 +218,12 @@ export async function renderAccount(container) {
 
   // --- email & password (V0.6.9; verification status added V0.8-NAS §2) ---
   const pwCard = el("div", { class: "card" });
-  pwCard.appendChild(el("h2", {}, "Email & Password"));
+  pwCard.appendChild(el("h2", {}, t("Email & Password")));
   pwCard.appendChild(
     el(
       "p",
       { class: "subtitle" },
-      "Set this once to unlock signing in with email+password instead of a saved token — and to be able to recover your account via \"Forgot password\" if you ever lose that token. Leave \"Current password\" blank the first time; fill it in when changing an existing password."
+      t("Set this once to unlock signing in with email+password instead of a saved token — and to be able to recover your account via \"Forgot password\" if you ever lose that token. Leave \"Current password\" blank the first time; fill it in when changing an existing password.")
     )
   );
 
@@ -242,18 +241,18 @@ export async function renderAccount(container) {
     if (!who.email) return; // nothing to show yet
     const row = el("div", { class: "card-row" }, [
       el("span", {}, who.email),
-      el("span", { class: `tag ${who.email_verified ? "tag--valid" : "tag--invalid"}` }, who.email_verified ? "verified" : "not verified"),
+      el("span", { class: `tag ${who.email_verified ? "tag--valid" : "tag--invalid"}` }, who.email_verified ? t("verified") : t("not verified")),
     ]);
     verificationStatus.appendChild(row);
     if (!who.email_verified) {
-      const resendBtn = el("button", { class: "btn btn--ghost", style: "margin-top:8px;" }, "Resend verification email");
+      const resendBtn = el("button", { class: "btn btn--ghost", style: "margin-top:8px;" }, t("Resend verification email"));
       const resendOut = el("div");
       resendBtn.addEventListener("click", async () => {
         resendBtn.disabled = true;
         resendOut.innerHTML = "";
         try {
           await api.resendVerificationEmail();
-          resendOut.appendChild(el("div", { class: "notice notice--success" }, "Verification email sent — check your inbox."));
+          resendOut.appendChild(el("div", { class: "notice notice--success" }, t("Verification email sent — check your inbox.")));
         } catch (err) {
           resendOut.appendChild(el("div", { class: "notice notice--error" }, err.message));
         } finally {
@@ -267,18 +266,18 @@ export async function renderAccount(container) {
   await loadVerificationStatus();
 
   const pwEmailField = el("div", { class: "field" }, [
-    el("label", { for: "pwEmail" }, "Email"),
+    el("label", { for: "pwEmail" }, t("Email")),
     el("input", { id: "pwEmail", type: "email", autocomplete: "email" }),
   ]);
   const pwCurrentField = el("div", { class: "field" }, [
-    el("label", { for: "pwCurrent" }, "Current password (leave blank if you've never set one)"),
+    el("label", { for: "pwCurrent" }, t("Current password (leave blank if you've never set one)")),
     el("input", { id: "pwCurrent", type: "password", autocomplete: "current-password" }),
   ]);
   const pwNewField = el("div", { class: "field" }, [
-    el("label", { for: "pwNew" }, "New password (min. 10 characters)"),
+    el("label", { for: "pwNew" }, t("New password (min. 10 characters)")),
     el("input", { id: "pwNew", type: "password", autocomplete: "new-password" }),
   ]);
-  const pwSaveBtn = el("button", { class: "btn btn--ghost" }, "Save");
+  const pwSaveBtn = el("button", { class: "btn btn--ghost" }, t("Save"));
   const pwOut = el("div");
   pwSaveBtn.addEventListener("click", async () => {
     const email = pwEmailField.querySelector("input").value.trim();
@@ -289,7 +288,7 @@ export async function renderAccount(container) {
     pwOut.innerHTML = "";
     try {
       await api.setPassword({ email, newPassword, currentPassword });
-      pwOut.appendChild(el("div", { class: "notice notice--success" }, "Saved. If this is a new or changed email, check your inbox to verify it."));
+      pwOut.appendChild(el("div", { class: "notice notice--success" }, t("Saved. If this is a new or changed email, check your inbox to verify it.")));
       pwCurrentField.querySelector("input").value = "";
       pwNewField.querySelector("input").value = "";
       await loadVerificationStatus();
@@ -310,16 +309,16 @@ export async function renderAccount(container) {
   // and DELETE /accounts/me since before V0.6.8 — this card is the first
   // time either is actually reachable from the web app) ---
   const privacyCard = el("div", { class: "card" });
-  privacyCard.appendChild(el("h2", {}, "Data & Privacy"));
+  privacyCard.appendChild(el("h2", {}, t("Data & Privacy")));
   privacyCard.appendChild(
     el(
       "p",
       { class: "subtitle" },
-      "Export everything Garage16 has stored about you, or permanently delete your account."
+      t("Export everything Garage16 has stored about you, or permanently delete your account.")
     )
   );
 
-  const exportBtn = el("button", { class: "btn btn--ghost" }, "Download my data (JSON)");
+  const exportBtn = el("button", { class: "btn btn--ghost" }, t("Download my data (JSON)"));
   const exportOut = el("div");
   exportBtn.addEventListener("click", async () => {
     exportBtn.disabled = true;
@@ -333,7 +332,7 @@ export async function renderAccount(container) {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-      exportOut.appendChild(el("div", { class: "notice notice--success" }, "Export downloaded."));
+      exportOut.appendChild(el("div", { class: "notice notice--success" }, t("Export downloaded.")));
     } catch (err) {
       exportOut.appendChild(el("div", { class: "notice notice--error" }, err.message));
     } finally {
@@ -341,12 +340,12 @@ export async function renderAccount(container) {
     }
   });
 
-  const deleteBtn = el("button", { class: "btn btn--danger" }, "Delete account");
+  const deleteBtn = el("button", { class: "btn btn--danger" }, t("Delete account"));
   const deleteOut = el("div");
   deleteBtn.addEventListener("click", async () => {
     if (
       !window.confirm(
-        "This permanently deletes your driver profile, every lap you've uploaded, team memberships, and your Discord link. There is no undo. Continue?"
+        t("This permanently deletes your driver profile, every lap you've uploaded, team memberships, and your Discord link. There is no undo. Continue?")
       )
     ) {
       return;
@@ -371,7 +370,7 @@ export async function renderAccount(container) {
   container.appendChild(privacyCard);
 
   // --- sign out ---
-  const signOutBtn = el("button", { class: "btn btn--ghost", style: "margin-top:24px;" }, "Sign out");
+  const signOutBtn = el("button", { class: "btn btn--ghost", style: "margin-top:24px;" }, t("Sign out"));
   signOutBtn.addEventListener("click", async () => {
     try {
       await api.logout(); // clears the server-side session + cookie, if any
@@ -390,7 +389,7 @@ export async function renderAccount(container) {
 // (when linked) an Unlink button. Re-renders itself after every change.
 export async function renderDiscordCard(card) {
   card.innerHTML = "";
-  card.appendChild(el("h2", {}, "Link Discord"));
+  card.appendChild(el("h2", {}, t("Link Discord")));
 
   let linked = false;
   try {
@@ -403,22 +402,21 @@ export async function renderDiscordCard(card) {
   if (linked) {
     card.appendChild(
       el("div", { class: "card-row" }, [
-        el("span", {}, "Discord"),
-        el("span", { class: "tag tag--valid" }, "linked"),
+        el("span", {}, t("Discord")),
+        el("span", { class: "tag tag--valid" }, t("linked")),
       ])
     );
     card.appendChild(
       el(
         "p",
         { class: "subtitle" },
-        "Your Discord account is linked to this driver, so the Garage16 bot's commands (/pb, /teambest, …) know who you are. " +
-          "Unlink it to connect a different Discord account."
+        t("Your Discord account is linked to this driver, so the Garage16 bot's commands (/pb, /teambest, …) know who you are. Unlink it to connect a different Discord account.")
       )
     );
-    const unlinkBtn = el("button", { class: "btn btn--ghost" }, "Unlink Discord");
+    const unlinkBtn = el("button", { class: "btn btn--ghost" }, t("Unlink Discord"));
     const out = el("div");
     unlinkBtn.addEventListener("click", async () => {
-      if (!window.confirm("Unlink your Discord account from this driver?")) return;
+      if (!window.confirm(t("Unlink your Discord account from this driver?"))) return;
       unlinkBtn.disabled = true;
       try {
         await api.unlinkDiscord();
@@ -437,12 +435,10 @@ export async function renderDiscordCard(card) {
     el(
       "p",
       { class: "subtitle" },
-      "Connect your Discord account so the Garage16 bot knows who you are. " +
-        "1) Generate a link code here. 2) Paste the command it shows into a channel on your Discord server where the Garage16 bot is present — only you see the bot's reply. " +
-        "The code works once and expires after 10 minutes. Only ever use codes you generated yourself here."
+      t("Connect your Discord account so the Garage16 bot knows who you are. 1) Generate a link code here. 2) Paste the command it shows into a channel on your Discord server where the Garage16 bot is present — only you see the bot's reply. The code works once and expires after 10 minutes. Only ever use codes you generated yourself here.")
     )
   );
-  const genBtn = el("button", { class: "btn" }, "Generate link code");
+  const genBtn = el("button", { class: "btn" }, t("Generate link code"));
   const out = el("div");
   let pollTimer = null;
   let countdownTimer = null;
@@ -462,18 +458,18 @@ export async function renderDiscordCard(card) {
       const expiresAt = Date.now() + res.expires_in_seconds * 1000;
 
       const remaining = el("span", { class: "subtitle" }, "");
-      const copyBtn = el("button", { class: "btn btn--ghost" }, "Copy command");
+      const copyBtn = el("button", { class: "btn btn--ghost" }, t("Copy command"));
       copyBtn.addEventListener("click", async () => {
         try {
           await navigator.clipboard.writeText(res.command);
-          copyBtn.textContent = "Copied";
+          copyBtn.textContent = t("Copied");
         } catch {
-          copyBtn.textContent = "Select and copy the command above";
+          copyBtn.textContent = t("Select and copy the command above");
         }
       });
       out.appendChild(
         el("div", { class: "credential-box" }, [
-          el("div", {}, "Run in Discord:"),
+          el("div", {}, t("Run in Discord:")),
           el("code", { style: "font-size:1.2em;" }, res.command),
           el("div", {}, [remaining]),
         ])
@@ -482,7 +478,7 @@ export async function renderDiscordCard(card) {
 
       const tick = () => {
         const left = Math.max(0, Math.round((expiresAt - Date.now()) / 1000));
-        remaining.textContent = left > 0 ? `expires in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "expired — generate a new code";
+        remaining.textContent = left > 0 ? t("expires in {0}:{1}", [Math.floor(left / 60), String(left % 60).padStart(2, "0")]) : t("expired — generate a new code");
         if (left === 0) stopTimers();
       };
       tick();

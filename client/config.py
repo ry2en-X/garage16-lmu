@@ -54,16 +54,55 @@ DEFAULT_API_URL = "http://localhost:8000"
 BUNDLED_SERVER_FILENAME = "garage16_server.txt"
 
 
-def _bundled_server_file_candidates() -> list:
+def bundled_file_candidates(filename: str) -> list:
+    """Where a file baked into the package (next to the executable) can be:
+    the executable's folder, PyInstaller's _MEIPASS, or — running from source —
+    next to this file. Used for garage16_server.txt and (V0.9.2) garage16_edition.txt."""
     import sys
     candidates = []
     if getattr(sys, "frozen", False):  # PyInstaller
-        candidates.append(Path(sys.executable).resolve().parent / BUNDLED_SERVER_FILENAME)
+        candidates.append(Path(sys.executable).resolve().parent / filename)
         meipass = getattr(sys, "_MEIPASS", None)
         if meipass:
-            candidates.append(Path(meipass) / BUNDLED_SERVER_FILENAME)
-    candidates.append(Path(__file__).resolve().parent / BUNDLED_SERVER_FILENAME)
+            candidates.append(Path(meipass) / filename)
+    candidates.append(Path(__file__).resolve().parent / filename)
     return candidates
+
+
+def _bundled_server_file_candidates() -> list:
+    return bundled_file_candidates(BUNDLED_SERVER_FILENAME)
+
+
+def read_setting(key: str, default=None):
+    """One extra setting from client_config.json that ClientConfig does not model
+    (save_config keeps such keys). Missing or unreadable file -> default."""
+    try:
+        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+    return data.get(key, default) if isinstance(data, dict) else default
+
+
+def write_setting(key: str, value) -> None:
+    """Sets one extra setting in client_config.json, atomically, keeping every
+    other key. Does nothing (and never raises) before the client is set up."""
+    try:
+        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if not isinstance(data, dict):
+        return
+    data[key] = value
+    tmp_path = CONFIG_PATH.with_name(CONFIG_PATH.name + ".tmp")
+    try:
+        tmp_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        try:
+            os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass
+        os.replace(tmp_path, CONFIG_PATH)
+    except OSError:
+        logger.warning("Could not save the setting %s", key)
 
 
 def default_api_url() -> str:
@@ -124,8 +163,20 @@ def save_config(config: ClientConfig) -> None:
     POSIX and Windows when source and destination are on the same
     filesystem, which a sibling file always is."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    # V0.9.1: keep settings this dataclass does not model (e.g. "local_retention_days").
+    # Reconnecting an account or a server migration rewrites this file; it must not
+    # silently reset a setting the user chose — "0" (never delete local laps) falling
+    # back to the 14-day default would delete files the user wanted to keep.
+    merged: dict = {}
+    try:
+        existing = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        if isinstance(existing, dict):
+            merged.update(existing)
+    except (OSError, ValueError):
+        pass
+    merged.update(asdict(config))
     tmp_path = CONFIG_PATH.with_name(CONFIG_PATH.name + ".tmp")
-    tmp_path.write_text(json.dumps(asdict(config), indent=2), encoding="utf-8")
+    tmp_path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
     try:
         # Owner read/write only. No-op on Windows (which ignores POSIX
         # chmod bits), but harmless there.
@@ -198,6 +249,40 @@ def _run_setup_ui(setup_ui) -> ClientConfig:
         raise SystemExit("Setup cancelled — Garage16 needs a server URL, auth token, and client secret to run.")
     save_config(result)
     return result
+
+
+DEFAULT_LOCAL_RETENTION_DAYS = 14
+MAX_LOCAL_RETENTION_DAYS = 3650
+
+
+def local_retention_days() -> float:
+    """How long a lap's local telemetry file is kept AFTER it was uploaded (V0.9.1).
+
+    Order: env LMU_GARAGE_LOCAL_RETENTION_DAYS, then "local_retention_days" in
+    client_config.json, then 14. `0` means "never delete anything". A value that is
+    not a non-negative number is ignored (the default applies): a typo must never
+    turn into a surprise deletion policy. Capped at ten years.
+    """
+    def parse(value) -> Optional[float]:
+        if isinstance(value, bool) or value is None:
+            return None
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        if number != number or number < 0 or number == float("inf"):  # NaN, negative, infinite
+            return None
+        return min(number, float(MAX_LOCAL_RETENTION_DAYS))
+
+    from_env = parse(os.environ.get("LMU_GARAGE_LOCAL_RETENTION_DAYS"))
+    if from_env is not None:
+        return from_env
+    try:
+        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        from_file = parse(data.get("local_retention_days")) if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        from_file = None
+    return DEFAULT_LOCAL_RETENTION_DAYS if from_file is None else from_file
 
 
 def resolve_data_dir() -> Path:

@@ -23,11 +23,11 @@ from sqlalchemy import text
 
 from .config import settings
 from .database import Base, SessionLocal, engine
-from .routers import accounts, admin, drivers, leaderboard, teams, telemetry
+from .routers import accounts, admin, analysis, drivers, leaderboard, teams, telemetry
 from .routers.teams import invitations_router
 from .versioning import is_client_outdated
 
-VERSION = "0.8.10"
+VERSION = "0.9.2"
 
 
 def _configure_logging() -> None:
@@ -175,6 +175,7 @@ async def require_https(request: Request, call_next):
 
 
 app.include_router(telemetry.router)
+app.include_router(analysis.router)
 app.include_router(leaderboard.router)
 app.include_router(accounts.router)
 app.include_router(teams.router)
@@ -218,4 +219,7 @@ def health(client_version: Optional[str] = Query(default=None, max_length=32)) -
         # (server/versioning.py) instead of being re-implemented per client.
         **({"update_required": is_client_outdated(client_version, settings.min_client_version)} if client_version else {}),
         **({"client_download_url": settings.client_download_url} if settings.client_download_url else {}),
+        # V0.9.2: the "Client + analysis app" edition (see config.py) — the website's download
+        # page offers both, and an outdated app-edition client points its user here.
+        **({"client_app_download_url": settings.client_app_download_url} if settings.client_app_download_url else {}),
     }

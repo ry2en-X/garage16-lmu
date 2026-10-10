@@ -150,9 +150,107 @@ nächste Schritt, sobald diese Diagnose bestätigt, dass es real vorkommt.
 
 ---
 
+## (h) V0.9 — Fahrhilfen (TC, ABS, Motor-Map, Brake Migration) lesbar?
+
+**Frage:** Liefert LMU die Fahrhilfen-Werte wirklich im Shared Memory (ab LMU 1.3),
+und ändern sie sich, wenn du sie im Auto verstellst? (Quellen widersprechen sich:
+zwei Projekte lesen sie, ein drittes meldet, die Live-Werte seien nicht lesbar.)
+
+**Session:** Ein Auto mit einstellbarem TC und ABS fahren. Während einer Runde TC
+um 2–3 Stufen verstellen, ABS einmal, Brake Migration einmal. Danach die Runde in
+**Analysis** öffnen und die Kanäle „Traction control", „ABS", „Brake migration"
+einblenden (Kanalauswahl).
+
+**Erwartung:** Die Linien springen genau dort, wo du verstellt hast; `TC intervening`
+/ `ABS intervening` schlagen beim Beschleunigen bzw. harten Bremsen aus.
+
+**Diagnose:** Alle Fahrhilfen-Kanäle bleiben dauerhaft 0 → das Feld-Layout stimmt für
+deine LMU-Version nicht (`tests/test_lmu_structs.py` zeigt, welche Offsets erwartet
+werden) oder LMU liefert sie nicht; mit `scripts/dump_shared_memory.py` die rohen
+Bytes ab Offset 745 der Telemetrie-Struktur ansehen. Nicht raten — erst das Ergebnis
+hier eintragen.
+
+---
+
+## (i) V0.9 — Vorzeichen: Lenkung, Quer-G, Giergeschwindigkeit, Schlupfwinkel
+
+**Frage:** Sind „Rechtskurve = positiv" für Lenkung, Quer-G, Gierrate und Schlupfwinkel
+richtig? Das System entscheidet das pro Runde selbst aus den Reifenlasten; hier wird
+geprüft, dass es das richtig tut.
+
+**Session:** Eine Runde mit klar erkennbaren Rechts- und Linkskurven fahren (z. B.
+Road Atlanta). In **Analysis** Lenkung, Quer-G, Gierrate und „Slip angle FL" ansehen.
+
+**Erwartung:** In Rechtskurven sind alle vier Linien positiv, in Linkskurven negativ.
+Die Antwort des Servers (`orientation.a.decided_from_data`) hat für `steering`,
+`lat_g`, `long_g`, `yaw`, `slip` jeweils `true`.
+
+**Diagnose:** Ein Wert `false` bedeutet „zu wenig Signal, Standardrichtung benutzt" —
+dann die Runde mit mehr Kurven wiederholen. Ein `true` mit falschem Vorzeichen in der
+Grafik wäre ein echter Fehler: Runde und Antwort (`/telemetry/analysis/compare`) sichern.
+
+---
+
+## (j) V0.9 — Streckenkarte nicht gespiegelt
+
+**Frage:** Stimmt die Streckenkarte mit der echten Strecke überein (nicht gespiegelt)?
+
+**Session:** Eine Runde auf einer Strecke fahren, deren Form du kennst.
+
+**Erwartung:** Die Karte (Analysis oder Circuits) zeigt die Strecke wie in der
+Streckenkarte des Spiels bzw. wie du sie kennst; Rechtskurven laufen im Uhrzeigersinn.
+Notiere den Wert `map.mirrored` aus der Server-Antwort (es ist `true`, wenn LMUs
+Welt-Koordinaten gegenüber der Standardannahme gespiegelt sind — das ist dann *kein*
+Fehler, die Seite korrigiert es).
+
+**Diagnose:** Karte erkennbar gespiegelt UND `map.a_decided` ist `false` → die
+Runde hatte zu wenig Kurven für die automatische Erkennung; mit einer anderen Runde
+wiederholen.
+
+---
+
+## (k) V0.9 — Einheiten und Radreihenfolge
+
+**Frage:** Stimmen Einheiten und die Reihenfolge der Räder (VL, VR, HL, HR)?
+
+**Session:** Nach einigen schnellen Runden: in **Analysis** „Brake disc temperature",
+„Tyre temperature", „Tyre pressure", „Suspension travel", „Tyre load" für alle vier Räder
+einblenden.
+
+**Erwartung:** Bremsscheiben grob 200–900 °C (vorn meist heißer als hinten), Reifen
+60–110 °C, Reifendruck um 130–220 kPa, Federweg im Bereich einiger Zentimeter (mm).
+In einer **Linkskurve** sind die Lasten der **rechten** Räder (FR, RR) höher, in einer
+Rechtskurve die der linken (FL, RL).
+
+**Diagnose:** Bremsscheiben um 20–60 °C → LMU meldet jetzt Celsius statt Kelvin (die
+Anzeige erkennt das, bitte trotzdem hier vermerken). Lastverteilung seitenverkehrt →
+Radreihenfolge im Struct prüfen, **bevor** irgendetwas anderes geändert wird.
+
+---
+
+## (l) V0.9 — Kein Loch am Start/Ziel, Dateigröße
+
+**Frage:** Geht durch das Speichern im Hintergrund nichts verloren, und wie groß wird
+eine Runde wirklich?
+
+**Session:** 10 Runden am Stück fahren (ohne Pause).
+
+**Erwartung:** In den Metadaten (`*.json` neben jeder Runde im Client-Datenordner) ist
+`sample_count` für alle Runden nahe `lap_time × 60`; in **Analysis** gibt es am
+Start/Ziel keinen Sprung oder Aussetzer in den Linien. Notiere die Dateigröße der
+`*.parquet`-Dateien (Soll: grob 4–10 MB bei 3–4 Minuten Rundenzeit) und die Größe auf
+dem Server (`du -sh /data/telemetry`).
+
+**Diagnose:** `sample_count` deutlich kleiner, vor allem bei der ersten Runde nach einer
+anderen → Abtastlücke; Debug-Log (`LMU_GARAGE_DEBUG=1`) mitschneiden. Dateien viel größer
+als erwartet → die Zahl hier eintragen, dann entscheiden, ob die Zusatzkanäle seltener
+(z. B. jedes zweite Sample) aufgezeichnet werden sollen.
+
+---
+
 ## Nach Abschluss aller Punkte
 
-Trage die Ergebnisse hier oder in einem Issue nach: für jeden Punkt (a)–(g)
+Trage die Ergebnisse hier oder in einem Issue nach: für jeden Punkt (a)–(l)
 „bestätigt wie erwartet" / „Abweichung gefunden: ..." mit einem Verweis auf
 die zugehörige CSV/Logdatei. Nur bestätigte Abweichungen rechtfertigen
 Codeänderungen — nicht auf Verdacht ändern.

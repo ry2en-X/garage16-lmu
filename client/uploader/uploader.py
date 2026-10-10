@@ -34,9 +34,11 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import time
+import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 import requests
 
@@ -44,7 +46,7 @@ from client.telemetry.recorder import LapRecorder
 
 logger = logging.getLogger("lmu_garage.uploader")
 
-CLIENT_VERSION = "0.8.6"
+CLIENT_VERSION = "0.9.2"
 DEFAULT_BACKEND_URL = "https://api.example-lmu-garage.invalid"  # placeholder, replace with real backend
 UPLOAD_ENDPOINT = "/telemetry/upload"
 MAX_RETRIES = 5
@@ -76,6 +78,126 @@ _SERVER_FIELDS = {
     "ambient_temp", "track_temp", "sample_count", "telemetry_file",
     "car_class", "car_model",
 }
+
+
+# Chunk size for hashing and for streaming the multipart body (V0.9.1). A lap
+# file is several MiB; reading it in 1 MiB pieces keeps the extra RAM at
+# O(chunk) instead of O(file) — and the file is read straight from disk each
+# time, never copied into one big bytes object.
+STREAM_CHUNK_BYTES = 1024 * 1024
+
+
+def sha256_file(path: Path, chunk_size: int = STREAM_CHUNK_BYTES) -> str:
+    """Hex sha256 of a file, read in chunks. Same digest as
+    hashlib.sha256(path.read_bytes()) without holding the file in memory."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(chunk_size), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+class StreamingMultipart:
+    """A multipart/form-data request body that streams one file from disk.
+
+    Why not `requests.post(files=...)`: requests assembles the whole multipart
+    body as a single bytes object before sending, i.e. the file is held in RAM
+    (measured: ~2x the file size at peak). This object instead exposes read()
+    / __iter__ / __len__, which requests turns into a streamed body with an
+    exact Content-Length (no chunked transfer encoding, so the reverse proxy
+    and the server see an ordinary upload).
+
+    The parquet file is NOT compressed again on the way: it already is
+    Parquet+zstd, a second layer would cost CPU and save next to nothing.
+
+    Use as a context manager so the file handle is always closed. Create a new
+    instance for every attempt (a retry must start from byte 0).
+    """
+
+    def __init__(self, fields: dict, file_field: str, path: Path, filename: Optional[str] = None,
+                 content_type: str = "application/octet-stream", chunk_size: int = STREAM_CHUNK_BYTES):
+        self.boundary = uuid.uuid4().hex
+        self.content_type = f"multipart/form-data; boundary={self.boundary}"
+        self._chunk_size = chunk_size
+        self._path = Path(path)
+        self._handle = None
+        name = filename or self._path.name
+        head = []
+        for key, value in fields.items():
+            head.append(
+                f"--{self.boundary}\r\n"
+                f'Content-Disposition: form-data; name="{key}"\r\n\r\n'
+                f"{value}\r\n"
+            )
+        head.append(
+            f"--{self.boundary}\r\n"
+            f'Content-Disposition: form-data; name="{file_field}"; filename="{name}"\r\n'
+            f"Content-Type: {content_type}\r\n\r\n"
+        )
+        self._head = "".join(head).encode("utf-8")
+        self._tail = f"\r\n--{self.boundary}--\r\n".encode("utf-8")
+        self._file_size = 0
+        self._stage = 0  # 0 = head, 1 = file, 2 = tail, 3 = done
+        self._head_pos = 0
+        self._tail_pos = 0
+        self._file_left = 0
+
+    def __enter__(self) -> "StreamingMultipart":
+        self._handle = self._path.open("rb")
+        # fstat on the OPEN handle: the size we promise in Content-Length is the
+        # size of exactly the file we are going to read.
+        self._file_size = os.fstat(self._handle.fileno()).st_size
+        self._file_left = self._file_size
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._handle is not None:
+            self._handle.close()
+            self._handle = None
+
+    def __len__(self) -> int:
+        return len(self._head) + self._file_size + len(self._tail)
+
+    def read(self, size: int = -1) -> bytes:
+        if self._handle is None:
+            raise ValueError("StreamingMultipart must be used inside a `with` block")
+        if size is None or size < 0:
+            size = len(self)
+        out = bytearray()
+        while len(out) < size and self._stage < 3:
+            room = size - len(out)
+            if self._stage == 0:
+                piece = self._head[self._head_pos:self._head_pos + room]
+                self._head_pos += len(piece)
+                out += piece
+                if self._head_pos >= len(self._head):
+                    self._stage = 1
+            elif self._stage == 1:
+                want = min(room, self._file_left, self._chunk_size)
+                piece = self._handle.read(want) if want > 0 else b""
+                if want > 0 and not piece:
+                    raise OSError(f"{self._path.name} became shorter while uploading")
+                self._file_left -= len(piece)
+                out += piece
+                if self._file_left <= 0:
+                    self._stage = 2
+            else:
+                piece = self._tail[self._tail_pos:self._tail_pos + room]
+                self._tail_pos += len(piece)
+                out += piece
+                if self._tail_pos >= len(self._tail):
+                    self._stage = 3
+        return bytes(out)
+
+    def __iter__(self) -> Iterator[bytes]:
+        while True:
+            chunk = self.read(self._chunk_size)
+            if not chunk:
+                return
+            yield chunk
 
 
 def _is_transient_status(status_code: int) -> bool:
@@ -122,6 +244,9 @@ class Uploader:
         # Both should come from a config file / secure storage, not hardcoded.
         self.client_secret = (client_secret or "unset-dev-secret").encode()
         self.auth_token = auth_token
+        # V0.9.2: the server's id of the lap uploaded last (the client window offers
+        # "Analyse last lap" for it). None until a lap was uploaded in this run.
+        self.last_uploaded_lap_id: Optional[int] = None
 
     def _sign(self, payload_bytes: bytes) -> str:
         return hmac.new(self.client_secret, payload_bytes, hashlib.sha256).hexdigest()
@@ -129,11 +254,11 @@ class Uploader:
     def _build_payload(self, meta_path: Path) -> dict:
         raw_metadata = json.loads(meta_path.read_text(encoding="utf-8"))
         parquet_path = meta_path.parent / raw_metadata["telemetry_file"]
-        telemetry_bytes = parquet_path.read_bytes()
 
         # Hash the raw telemetry bytes so the server can detect any
-        # mismatch between what was recorded and what arrived.
-        telemetry_hash = hashlib.sha256(telemetry_bytes).hexdigest()
+        # mismatch between what was recorded and what arrived. Streamed in
+        # chunks (V0.9.1): the file is never held in memory just to be hashed.
+        telemetry_hash = sha256_file(parquet_path)
 
         wire_metadata = {k: v for k, v in raw_metadata.items() if k in _SERVER_FIELDS}
 
@@ -154,7 +279,7 @@ class Uploader:
 
     def upload_one(self, meta_path: Path) -> bool:
         payload = self._build_payload(meta_path)
-        data = {
+        fields = {
             "envelope": json.dumps(payload["envelope"]),
             "signature": payload["signature"],
         }
@@ -166,18 +291,22 @@ class Uploader:
 
         for attempt in range(1, MAX_RETRIES + 1):
             try:
-                with payload["telemetry_path"].open("rb") as telemetry_file:
-                    files = {
-                        "telemetry": (
-                            payload["telemetry_path"].name,
-                            telemetry_file,
-                            "application/octet-stream",
-                        ),
-                    }
-                    resp = requests.post(url, data=data, files=files, headers=headers, timeout=30)
+                # Streamed from disk with an exact Content-Length (see
+                # StreamingMultipart); a fresh body object per attempt.
+                with StreamingMultipart(fields, "telemetry", payload["telemetry_path"]) as body:
+                    resp = requests.post(
+                        url, data=body, timeout=30,
+                        headers={**headers, "Content-Type": body.content_type},
+                    )
                 if resp.status_code == 200:
                     self.recorder.mark_uploaded(meta_path)
                     logger.info("Uploaded %s", meta_path.name)
+                    try:
+                        lap_id = resp.json().get("lap_id")
+                        if isinstance(lap_id, int) and not isinstance(lap_id, bool):
+                            self.last_uploaded_lap_id = lap_id
+                    except (ValueError, AttributeError):
+                        pass  # the id is a convenience; the upload itself succeeded
                     return True
 
                 if resp.status_code == 401:
@@ -199,8 +328,10 @@ class Uploader:
                     try:
                         detail = resp.json().get("detail")
                         if isinstance(detail, dict):
+                            from client.edition import download_url_for_this_edition
+
                             min_version = detail.get("min_client_version")
-                            download_url = detail.get("download_url")
+                            download_url = download_url_for_this_edition(detail, "download_url", "app_download_url")
                     except ValueError:
                         pass
                     logger.error(

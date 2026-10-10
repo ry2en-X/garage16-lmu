@@ -63,8 +63,15 @@
     # block (and the volume mount serving it) entirely if the frontend is
     # deployed separately (Cloudflare Pages) instead of from here — the
     # API routes above are all this proxy needs to serve in that case.
+    #
+    # V0.9.1: `Cache-Control: no-cache` means "keep a copy, but ask before using it".
+    # file_server already sends an ETag, so an unchanged file costs a tiny 304; what
+    # this prevents is a browser running a MIX of old and new JavaScript modules
+    # after an update (modules are fetched one by one and, without a header, are
+    # reused on a guess from Last-Modified).
     handle {
         root * /srv/web
+        header Cache-Control "no-cache"
         try_files {path} /index.html
         file_server
     }

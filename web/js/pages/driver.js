@@ -2,8 +2,9 @@
 // linked to from leaderboard rows and team member lists (§5).
 
 import { api } from "../api.js";
-import { el, formatLapTime, formatDate } from "../format.js";
+import { el, formatLapTime, formatDate, recordTypeLabel, roleLabel } from "../format.js";
 
+import { t } from "../i18n.js";
 export async function renderDriverProfile(container, driverId) {
   let profile;
   try {
@@ -14,27 +15,27 @@ export async function renderDriverProfile(container, driverId) {
   }
 
   container.appendChild(el("h1", {}, profile.display_name));
-  container.appendChild(el("p", { class: "subtitle" }, "Garage16 Driver"));
+  container.appendChild(el("p", { class: "subtitle" }, t("Garage16 Driver")));
 
   // --- Statistics ---
   container.appendChild(
     el("div", { class: "card", style: "display:flex; gap:24px; flex-wrap:wrap;" }, [
-      _stat(profile.total_laps, "Laps"),
-      _stat(profile.tracks_driven, "Tracks"),
-      _stat(profile.cars_driven, "Cars"),
-      _stat(profile.personal_records.length, "Personal Records"),
+      _stat(profile.total_laps, t("Laps")),
+      _stat(profile.tracks_driven, t("Tracks")),
+      _stat(profile.cars_driven, t("Cars")),
+      _stat(profile.personal_records.length, t("Personal Records")),
     ])
   );
 
   // --- Teams ---
   if (profile.teams.length) {
-    container.appendChild(el("h2", {}, "Teams"));
+    container.appendChild(el("h2", {}, t("Teams")));
     const teamsCard = el("div", { class: "card" });
-    profile.teams.forEach((t) => {
+    profile.teams.forEach((membership) => {
       teamsCard.appendChild(
         el("div", { class: "card-row" }, [
-          el("a", { href: `#/team/${t.team_id}` }, [el("strong", {}, t.team_name)]),
-          el("span", { class: "tag" }, t.role),
+          el("a", { href: `#/team/${membership.team_id}` }, [el("strong", {}, membership.team_name)]),
+          el("span", { class: "tag" }, roleLabel(membership.role)),
         ])
       );
     });
@@ -42,9 +43,9 @@ export async function renderDriverProfile(container, driverId) {
   }
 
   // --- Personal Records ---
-  container.appendChild(el("h2", {}, "Personal Records"));
+  container.appendChild(el("h2", {}, t("Personal Records")));
   if (!profile.personal_records.length) {
-    container.appendChild(el("div", { class: "empty-state" }, "No valid laps recorded yet."));
+    container.appendChild(el("div", { class: "empty-state" }, t("No valid laps recorded yet.")));
   } else {
     const rows = profile.personal_records.map((r) =>
       el("tr", {}, [
@@ -57,23 +58,23 @@ export async function renderDriverProfile(container, driverId) {
     );
     container.appendChild(
       el("table", { class: "timing-table" }, [
-        el("thead", {}, el("tr", {}, ["Track", "Car", "Class", "Time", "Set"].map((h) => el("th", {}, h)))),
+        el("thead", {}, el("tr", {}, [t("Track"), t("Car"), t("Class"), t("Time"), t("Set")].map((h) => el("th", {}, h)))),
         el("tbody", {}, rows),
       ])
     );
   }
 
   // --- Recent Activity ---
-  container.appendChild(el("h2", {}, "Recent Activity"));
+  container.appendChild(el("h2", {}, t("Recent Activity")));
   if (!profile.recent_activity.length) {
-    container.appendChild(el("div", { class: "empty-state" }, "No activity yet."));
+    container.appendChild(el("div", { class: "empty-state" }, t("No activity yet.")));
   } else {
     const card = el("div", { class: "card" });
     profile.recent_activity.forEach((a) => {
       card.appendChild(
         el("div", { class: "card-row" }, [
           el("div", {}, [
-            el("span", { class: "tag" }, a.record_type),
+            el("span", { class: "tag" }, recordTypeLabel(a.record_type)),
             el("span", { style: "margin-left:8px;" }, `${a.track_name} — ${a.car_name}`),
           ]),
           el("div", {}, [

@@ -1,5 +1,21 @@
 # Client-Paket bauen und verteilen (für den Admin)
 
+> **Ab V0.9.2 in zwei Varianten** (gleicher Code, gleiche App):
+>
+> | Variante | Installer | Portable | Analyse |
+> |---|---|---|---|
+> | **Client** (`-Edition standard`, Standard) | `Garage16-Client-Setup.exe` | `Garage16-Portable.zip` | im Browser |
+> | **Client + Analysetool** (`-Edition analysis`) | `Garage16-Client-Analysis-Setup.exe` | `Garage16-Analysis-Portable.zip` | eigenes Fenster (WebView2) |
+>
+> Beide installieren sich als **dieselbe App** (gleiche App-ID, gleicher Ordner): die
+> eine über die andere zu installieren wechselt die Variante, Anmeldung und Runden
+> bleiben. GitHub baut beide; ein Tag `client-v…` legt ein Release mit allen vier
+> Dateien an. Selbst bauen: `.\packaging\build_windows.ps1 -Edition analysis`.
+> Beide Download-Links gehören in die `.env` (`LMU_GARAGE_CLIENT_DOWNLOAD_URL`,
+> `LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL`) — sie erscheinen dann auf der Download-Seite der
+> Website. `Garage16.exe --analysis-selftest` sagt, ob das Analysefenster auf einem PC
+> laufen kann (der Build prüft das bei jedem Paket).
+
 So entsteht die App, die deine Freunde ohne Python und ohne Terminal
 installieren: `Garage16-Client-Setup.exe`. Gebaut wird **einmal von dir**,
 danach reicht es, die Datei zu verteilen.
@@ -17,13 +33,30 @@ danach reicht es, die Datei zu verteilen.
 
 1. Projekt in ein GitHub-Repository legen (privat reicht).
 2. Repository → Settings → Secrets and variables → Actions → **Variables**
-   → neue Variable `GARAGE16_SERVER_URL` = die Adresse deines Servers
-   (z. B. `https://garage16.deinedomain.de`). Sie wird ins Paket
-   eingebacken: Freunde tippen sie nie ein.
-3. Actions → **build-client** → *Run workflow* (oder einen Tag wie
-   `client-v0.8.6` pushen).
-4. Nach ein paar Minuten: unter dem Lauf die Artefakte
-   `Garage16-Client-Setup.exe` und `Garage16-Portable.zip` herunterladen.
+   → optional eine Variable `GARAGE16_SERVER_URL`, falls der Server unter
+   einer anderen Adresse als **`https://garage16.de`** laufen soll. Ohne die
+   Variable wird `https://garage16.de` ins Paket eingebacken: Freunde tippen
+   die Adresse nie ein.
+3. Actions → **build-client** → *Run workflow* → grüner Knopf *Run workflow*
+   (Haken „Publish“ bleibt gesetzt). Kein Terminal nötig.
+4. Nach etwa 10 Minuten steht unter **Releases** das Release
+   **„Garage16 client 0.9.2“** (Tag `client-v0.9.2`, die Version kommt aus
+   `CLIENT_VERSION`) mit allen vier Dateien, markiert als *Latest*. Erneut
+   starten ersetzt die Dateien desselben Releases; eine neue Version entsteht,
+   sobald `CLIENT_VERSION` erhöht wurde.
+5. Freunde laden unter **Releases → Latest** eine Setup-Datei herunter und
+   doppelklicken — fertig. Diese Links zeigen immer auf die neueste Version und
+   passen deshalb auch in die `.env` (Download-Seite der Website):
+   ```
+   LMU_GARAGE_CLIENT_DOWNLOAD_URL=https://github.com/<konto>/<repo>/releases/latest/download/Garage16-Client-Setup.exe
+   LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL=https://github.com/<konto>/<repo>/releases/latest/download/Garage16-Client-Analysis-Setup.exe
+   ```
+   **Wichtig:** Bei einem **privaten** Repository sehen nur Personen mit Zugriff
+   die Release-Dateien. Für Freunde: entweder das Repository öffentlich stellen
+   (Settings → General → Danger Zone → *Change visibility*; es enthält keine
+   Geheimnisse — `.env` wird nie hochgeladen), die Freunde als Mitarbeiter
+   einladen (brauchen ein GitHub-Konto), oder die zwei Setup-Dateien aus dem
+   Release auf den Webspace legen und dessen Links in die `.env` eintragen.
 
 ## Variante B — auf einem Windows-PC selbst bauen
 
@@ -31,7 +64,8 @@ Voraussetzungen (nur auf dem Build-PC): Python 3.11/3.12 und
 [Inno Setup 6](https://jrsoftware.org/isinfo.php).
 
 ```
-.\packaging\build_windows.ps1 -ServerUrl "https://garage16.deinedomain.de"
+.\packaging\build_windows.ps1                       # baut https://garage16.de ein
+.\packaging\build_windows.ps1 -ServerUrl "https://andere-adresse.example"   # eine andere Adresse
 ```
 
 Ergebnis:
@@ -43,7 +77,7 @@ Ergebnis:
 | `dist\Garage16\` | die fertige App als Ordner |
 
 Ohne Inno Setup entsteht trotzdem die Portable-Zip; das Skript sagt es
-klar. Ohne `-ServerUrl` fragt die App beim ersten Start nach der Adresse.
+klar. Mit `-ServerUrl ""` entsteht ein Paket, das beim ersten Start nach der Adresse fragt.
 
 ## Verteilen
 
@@ -105,6 +139,14 @@ den neuen Server ist, braucht er das Update wie oben.
       Anmeldung bleibt, kein neues Einrichtungsfenster
 - [ ] Deinstallieren → Anmeldung/Runden bleiben (`%USERPROFILE%\.lmu_garage`,
       `%LOCALAPPDATA%\Garage16`)
+- [ ] **Client + Analysetool** (V0.9.2): *Open analysis* → Fenster „Garage16 — Analysis“
+      öffnet sich **angemeldet**, ohne Eingabe; nach einer Runde *Analyse last lap* →
+      genau diese Runde als Runde 1
+- [ ] Haken „Open the analysis in my browser instead“ setzen → *Open analysis* öffnet den Browser
+- [ ] `Garage16-Client-Setup.exe` über das Analysetool installieren → Haken weg,
+      *Open analysis* öffnet den Browser, Anmeldung bleibt; und wieder zurück
+- [ ] `Garage16.exe --analysis-selftest` zeigt „Analysis window: ready“ und die
+      WebView2-Version
 - [ ] `Garage16.exe --version` in einer Eingabeaufforderung zeigt Version und Server
       (die App hat kein eigenes Konsolenfenster und dockt dafür an das
       Terminal an, aus dem du sie startest — dieser Weg ist unter Linux

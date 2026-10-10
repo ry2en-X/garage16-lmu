@@ -79,6 +79,23 @@ class WhoAmIOut(BaseModel):
     email_verified: bool = False
 
 
+class AppSessionResponse(BaseModel):
+    """POST /accounts/app-session (V0.9.2): a web session for the desktop app's
+    analysis window. Unlike LoginResponse this DOES carry the raw session token —
+    the caller is the desktop client, already holding a stronger credential (its
+    own auth token), and it hands the token straight to its own window, which
+    turns it into the usual HttpOnly cookie via /accounts/app-session/activate."""
+
+    session_token: str
+    driver_id: int
+    display_name: str
+    expires_in: int  # seconds
+
+
+class AppSessionActivateRequest(BaseModel):
+    session_token: str = Field(min_length=16, max_length=200)
+
+
 class LoginResponse(BaseModel):
     """No auth_token here (V0.7.2) — login's credential is an HttpOnly
     session cookie the browser holds automatically, not a value the
@@ -267,15 +284,24 @@ class LapSummary(BaseModel):
     ambient_temp: Optional[float] = None
     track_temp: Optional[float] = None
     uploaded_at: str
+    # V0.9.0: "full" or "basic" — whether the lap was recorded by a client that
+    # writes the extended channels (see server/versioning.py). Lists only; the
+    # analysis decides from the file itself.
+    data_level: Optional[str] = None
 
 
 class LeaderboardEntry(BaseModel):
+    # V0.9.0: the id of the ranked lap itself, so the lap-analysis view can
+    # open exactly the lap a leaderboard row shows. Optional only so a client
+    # that builds this model without it (older tests/tools) keeps working.
+    lap_id: Optional[int] = None
     driver_id: int
     driver_name: str
     lap_time: float
     sector_times: List[float]
     is_valid: bool
     uploaded_at: str
+    data_level: Optional[str] = None  # V0.9.0 — see LapSummary.data_level
 
 
 class TeamCreateRequest(BaseModel):
@@ -473,6 +499,7 @@ class TeamActivityItem(BaseModel):
 
 
 class TeamLeaderboardEntry(BaseModel):
+    lap_id: Optional[int] = None  # V0.9.0 — see LeaderboardEntry.lap_id
     driver_id: int
     driver_name: str
     lap_time: float

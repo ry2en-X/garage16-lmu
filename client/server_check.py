@@ -16,6 +16,7 @@ from typing import List, Optional
 
 from client.config import ClientConfig
 from client.migration import HEALTH_CHECK_TIMEOUT_SECONDS, apply_migration_if_safe, check_for_migration
+from client.edition import download_url_for_this_edition
 from client.update_notice import format_update_required_message, is_safe_download_url
 
 logger = logging.getLogger("lmu_garage.server_check")
@@ -77,12 +78,13 @@ def run_server_check(
         min_v = body.get("min_client_version")
         update_required = bool(min_v) and _version_tuple(client_version) < _version_tuple(min_v)
 
+    # V0.9.2: the download of THIS client's edition (Client / Client + analysis app)
+    download_url = download_url_for_this_edition(body, "client_download_url", "client_app_download_url")
     if update_required:
-        msg = format_update_required_message(body.get("min_client_version"), body.get("client_download_url"))
+        msg = format_update_required_message(body.get("min_client_version"), download_url)
         log_lines.append(msg)
         notice_parts.insert(0, msg)
 
-    download_url = body.get("client_download_url")
     return ServerCheckResult(
         config=migration.config,
         reachable=True,

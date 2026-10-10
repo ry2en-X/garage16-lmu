@@ -26,10 +26,12 @@ from __future__ import annotations
 import io
 import math
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, List
+from pathlib import Path
+from typing import TYPE_CHECKING, List, Union
 
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 
 if TYPE_CHECKING:
     # Only needed for the type hint below — validate_dataframe only ever
@@ -84,9 +86,41 @@ class ValidationResult:
 def validate_telemetry(telemetry_bytes: bytes, metadata: LapMetadata) -> ValidationResult:
     """Parse the uploaded parquet bytes and run the full plausibility
     check. Requires pandas + a parquet engine (pyarrow) to be installed —
-    see server/requirements.txt."""
+    see server/requirements.txt.
+
+    Kept for callers that already hold the bytes (and for tests). The upload
+    endpoint uses validate_telemetry_file() instead, which never loads the
+    whole file into memory."""
     try:
         df = pd.read_parquet(io.BytesIO(telemetry_bytes))
+    except Exception as exc:  # noqa: BLE001 — any parse failure means "not usable"
+        return ValidationResult(is_valid=False, reasons=[f"telemetry file could not be parsed: {exc}"])
+    return validate_dataframe(df, metadata)
+
+
+def validate_telemetry_file(
+    path: Union[str, Path], metadata: LapMetadata, *, full_check: bool = False
+) -> ValidationResult:
+    """Same plausibility check, straight from a file on disk (V0.9.1).
+
+    The upload used to do `read_bytes()` and parse the whole ~190-column file
+    just to check ten of its columns. Now only the columns the checks actually
+    use (REQUIRED_COLUMNS) are read — measured on a synthetic 15,000-sample lap:
+    ~5 MiB instead of ~46 MiB of extra memory and ~5 ms instead of ~40 ms.
+
+    Trade-off, stated plainly: a file damaged *only inside an extended-channel
+    column* is no longer caught here (the footer, schema and the ten checked
+    columns still are, and transport damage is excluded by the sha256 the
+    upload endpoint already verifies). Such a lap simply cannot show that
+    channel later — the analysis reports "could not be read" for it instead of
+    crashing. Pass full_check=True to decode every column as before.
+    """
+    try:
+        parquet = pq.ParquetFile(path)
+        present = set(parquet.schema_arrow.names)
+        columns = None if full_check else sorted(REQUIRED_COLUMNS & present)
+        table = parquet.read(columns=columns)
+        df = table.to_pandas()
     except Exception as exc:  # noqa: BLE001 — any parse failure means "not usable"
         return ValidationResult(is_valid=False, reasons=[f"telemetry file could not be parsed: {exc}"])
     return validate_dataframe(df, metadata)

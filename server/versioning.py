@@ -17,3 +17,20 @@ def parse_version(v: str) -> tuple:
 
 def is_client_outdated(client_version: str, min_client_version: str) -> bool:
     return parse_version(client_version) < parse_version(min_client_version)
+
+
+# V0.9.0: the first client version that records the extended channels (suspension,
+# tyre forces, accelerations, driver aids, ...). Older clients keep working — their
+# laps just carry the basic channels — and the analysis says so.
+FULL_DATA_CLIENT_VERSION = "0.9.0"
+
+
+def data_level_for_client_version(client_version) -> str:
+    """"full" or "basic" from the version the lap was uploaded with. Used for
+    lists, where reading every lap's file would be far too slow; the analysis
+    itself decides from the file's actual columns (see
+    telemetry_analysis.recording_level), which is authoritative."""
+    if not client_version:
+        return "basic"
+    return "basic" if is_client_outdated(client_version, FULL_DATA_CLIENT_VERSION) else "full"
+

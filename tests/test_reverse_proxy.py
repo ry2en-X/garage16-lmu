@@ -22,6 +22,7 @@ Two layers:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -199,3 +200,93 @@ def test_real_caddy_passes_the_upload_path_and_a_lap_through(proxied, client, tm
     _write_recorded_lap(lap_dir)
     uploader = Uploader(recorder=LapRecorder(data_dir=str(lap_dir)), backend_url=base, auth_token=account["auth_token"], client_secret=account["client_secret"])
     assert uploader.run_once() == 1
+
+
+# ---------------------------------------------------------------------------
+# V0.9.1 — what the analysis relies on Caddy for: compression, validators, caching
+# ---------------------------------------------------------------------------
+
+def _upload_two_laps_via(base: str, tmp_path) -> tuple:
+    from client.telemetry.recorder import LapRecorder
+    from client.uploader.uploader import Uploader
+    from tests.test_v091_pipeline import _write_lap_file
+
+    account = _register_via(base, "ProxyAnalyst")
+    ids = []
+    for index in range(2):
+        folder = tmp_path / f"proxy_lap_{index}"
+        folder.mkdir()
+        meta = _write_lap_file(folder, n=4000, extra_columns=8)
+        if index:
+            # a genuinely different lap (identical bytes would be - correctly - a duplicate)
+            import pandas as pd
+
+            parquet = folder / "lap.parquet"
+            frame = pd.read_parquet(parquet)
+            frame["t"] = frame["t"] * (88.0 / 90.0)
+            frame["speed"] = frame["speed"] * (90.0 / 88.0)
+            frame.to_parquet(parquet, index=False, compression="zstd")
+            data = json.loads(meta.read_text())
+            data["lap_time"], data["sector_times"] = 88.0, [29.0, 29.0, 30.0]
+            meta.write_text(json.dumps(data))
+        uploader = Uploader(recorder=LapRecorder(data_dir=str(folder)), backend_url=base,
+                            auth_token=account["auth_token"], client_secret=account["client_secret"])
+        assert uploader.upload_one(meta) is True
+    laps = requests.get(base + "/telemetry/laps", headers={"Authorization": f"Bearer {account['auth_token']}"}, timeout=10).json()
+    return account, sorted(lap["id"] for lap in laps)
+
+
+@needs_caddy
+def test_real_caddy_compresses_analysis_json_once_and_keeps_validators_working(proxied, client, tmp_path):
+    base, direct = proxied
+    account, (a, b) = _upload_two_laps_via(base, tmp_path)
+    headers = {"Authorization": f"Bearer {account['auth_token']}"}
+    params = {"lap_a": a, "lap_b": b, "channels": "speed,throttle,brake", "max_points": 1000}
+
+    resp = requests.get(base + "/telemetry/analysis/compare", params=params, headers={**headers, "Accept-Encoding": "gzip"}, timeout=10, stream=True)
+    wire_bytes = len(resp.raw.read(decode_content=False))     # what actually crossed the wire
+    resp = requests.get(base + "/telemetry/analysis/compare", params=params, headers={**headers, "Accept-Encoding": "gzip"}, timeout=10)
+    assert resp.status_code == 200 and _is_json(resp)
+    assert resp.headers.get("Content-Encoding") == "gzip", "Caddy's `encode gzip` compresses the analysis response"
+    assert resp.json()["grid"]["count"] <= 1000          # requests undid exactly ONE layer of gzip: no double compression
+    assert resp.headers["Cache-Control"] == "private, no-cache" and "Authorization" in resp.headers["Vary"]
+    etag = resp.headers["ETag"]
+
+    # the app answered with a validator; does it still validate THROUGH the proxy?
+    again = requests.get(base + "/telemetry/analysis/compare", params=params, headers={**headers, "Accept-Encoding": "gzip", "If-None-Match": etag}, timeout=10)
+    assert again.status_code == 304, f"conditional request through Caddy gave {again.status_code} (ETag sent: {etag}, ETag returned: {resp.headers['ETag']})"
+    assert again.content == b""
+    # without a session the proxy must not hand out the cached answer
+    assert requests.get(base + "/telemetry/analysis/compare", params=params, headers={"If-None-Match": etag}, timeout=10).status_code in (401, 403)
+
+    # compression really shrinks what is sent, and a client that does not ask for it gets plain JSON
+    raw = requests.get(base + "/telemetry/analysis/compare", params=params, headers={**headers, "Accept-Encoding": "identity"}, timeout=10)
+    assert "Content-Encoding" not in raw.headers
+    assert wire_bytes < len(raw.content) / 2, f"{wire_bytes} bytes on the wire for {len(raw.content)} bytes of JSON"
+
+
+@needs_caddy
+def test_real_caddy_serves_the_public_channel_catalog_with_a_content_validator(proxied):
+    base, _ = proxied
+    first = requests.get(base + "/telemetry/analysis/channels", headers={"Accept-Encoding": "gzip"}, timeout=10)
+    assert first.status_code == 200 and first.headers["Cache-Control"] == "public, max-age=300"
+    etag = first.headers["ETag"]
+    again = requests.get(base + "/telemetry/analysis/channels", headers={"Accept-Encoding": "gzip", "If-None-Match": etag}, timeout=10)
+    assert again.status_code == 304, f"catalog revalidation through Caddy gave {again.status_code} (ETag {etag})"
+
+
+@needs_caddy
+def test_real_caddy_makes_the_browser_revalidate_the_frontend_files(proxied):
+    """The V0.9.1 header: modules are re-checked on every load (a cheap 304), so an update never
+    leaves a browser running a mix of old and new JavaScript files."""
+    base, _ = proxied
+    for path in ("/", "/js/pages/analysis.js", "/js/analysis/layout.js", "/css/styles.css", "/some/spa/route"):
+        resp = requests.get(base + path, timeout=5)
+        assert resp.status_code == 200, path
+        assert resp.headers.get("Cache-Control") == "no-cache", (path, resp.headers.get("Cache-Control"))
+    js = requests.get(base + "/js/analysis/layout.js", timeout=5)
+    etag = js.headers.get("ETag")
+    assert etag, "file_server provides a validator"
+    assert requests.get(base + "/js/analysis/layout.js", headers={"If-None-Match": etag}, timeout=5).status_code == 304
+    # the header belongs to the static-file block only: API answers keep the app's own policy
+    assert requests.get(base + "/health", timeout=5).headers.get("Cache-Control") != "no-cache"

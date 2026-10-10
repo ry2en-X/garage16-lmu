@@ -390,3 +390,247 @@ h2 {
   margin-top: 4px;
   color: var(--gold);
 }
+
+
+/* ======================================================================
+   V0.9.0 — lap analysis, circuit library
+   ====================================================================== */
+
+.panel--wide { max-width: none; }
+
+.field select,
+.awin__bar select,
+.editor select,
+.trackmap__controls select {
+  background: var(--panel-raised);
+  border: 1px solid var(--hairline);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+}
+
+.picker { margin-bottom: 24px; }
+.picker__tabs { margin-bottom: 14px; }
+.btn.active { border-color: var(--signal); color: var(--signal); }
+
+/* summary of the two laps */
+.analysis-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.analysis-summary .card + .card { margin-top: 0; }
+.analysis-lap__tag { font-family: var(--font-display); font-size: 12px; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: 4px; }
+.analysis-lap__who { font-size: 17px; font-weight: 600; }
+.analysis-lap__time { font-size: 30px; line-height: 1.2; }
+.analysis-lap__sectors { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--text-muted); }
+.analysis-diff--loss { color: var(--signal); }
+.analysis-diff--gain { color: var(--valid); }
+
+/* map + values */
+.analysis-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.analysis-top .card + .card { margin-top: 0; }
+@media (max-width: 1100px) { .analysis-top { grid-template-columns: 1fr; } }
+
+.trackmap__controls { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; font-size: 13px; color: var(--text-muted); }
+.trackmap__canvas { display: block; width: 100%; cursor: crosshair; background: var(--asphalt); border: 1px solid var(--hairline); }
+.trackmap__legend { display: flex; gap: 10px; align-items: center; margin-top: 8px; font-size: 12px; color: var(--text-muted); }
+.trackmap__bar { flex: 1; height: 8px; }
+
+.cursor-wrap { max-height: 430px; overflow: auto; }
+.cursor-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.cursor-table th,
+.cursor-table td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--hairline); white-space: nowrap; }
+.cursor-table th:not(:first-child),
+.cursor-table td:not(:first-child) { text-align: right; font-family: var(--font-mono); }
+.cursor-table thead th { position: sticky; top: 0; background: var(--panel); font-family: var(--font-display); font-weight: 500; }
+.cursor-table small { color: var(--text-muted); }
+.cursor-group td { color: var(--text-muted); font-family: var(--font-display); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; padding-top: 12px; text-align: left !important; }
+.cursor-meta td { background: var(--panel-raised); }
+.cursor-diff { color: var(--text-muted); }
+
+
+/* charts */
+.charts { margin-bottom: 24px; }
+.chart { background: var(--panel); border: 1px solid var(--hairline); border-bottom: none; }
+.charts .chart:last-child { border-bottom: 1px solid var(--hairline); }
+.chart__head { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 12px 0; font-size: 12px; gap: 12px; }
+.chart__title { font-family: var(--font-display); letter-spacing: 0.03em; font-size: 13px; }
+.chart__title small { color: var(--text-muted); font-family: var(--font-mono); }
+.chart__legend { display: flex; gap: 16px; font-family: var(--font-mono); font-weight: 500; }
+.chart__canvas { display: block; width: 100%; cursor: crosshair; touch-action: pan-y; }
+
+/* car physics */
+.analysis-physics > summary { cursor: pointer; font-family: var(--font-display); font-size: 16px; padding: 10px 0; }
+.phys { display: grid; grid-template-columns: minmax(0, 1fr) 330px minmax(0, 1fr); gap: 16px; margin-top: 12px; }
+@media (max-width: 1200px) { .phys { grid-template-columns: 1fr; } }
+.phys .card + .card { margin-top: 0; }
+.phys__title { font-family: var(--font-display); border-bottom: 2px solid var(--hairline); padding-bottom: 6px; margin-bottom: 12px; }
+.phys__car { display: flex; flex-direction: column; gap: 8px; }
+.phys__row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.phys__chassis { height: 26px; border: 1px dashed var(--hairline); margin: 0 26%; }
+.phys__wheel { border: 1px solid var(--hairline); padding: 8px; background: var(--panel-raised); font-size: 11px; }
+.phys__wheel-title { font-family: var(--font-display); font-size: 13px; margin-bottom: 4px; }
+.phys__row { display: grid; grid-template-columns: 44px 1fr 64px; gap: 6px; align-items: center; margin: 4px 0; }
+.phys__name { color: var(--text-muted); }
+.phys__bar { display: block; height: 6px; background: var(--hairline); }
+.phys__fill { display: block; height: 100%; width: 0; }
+.phys__num { text-align: right; font-family: var(--font-mono); }
+.phys__needle-box { position: relative; display: block; height: 16px; }
+.phys__needle { position: absolute; left: 50%; top: 0; width: 2px; height: 16px; margin-left: -1px; background: var(--text); transform-origin: 50% 100%; }
+.phys__gg { display: block; width: 100%; }
+.phys__gg-readout { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+
+/* circuit library */
+.circuits { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
+.circuits .circuit + .circuit { margin-top: 0; }
+.circuit__layout + .circuit__layout { border-top: 1px solid var(--hairline); margin-top: 16px; padding-top: 16px; }
+.circuit__name { font-weight: 600; margin-bottom: 8px; }
+.circuit__canvas { display: block; width: 100%; height: 170px; }
+.circuit__outline { background: var(--asphalt); border: 1px solid var(--hairline); margin-bottom: 8px; min-height: 40px; }
+.circuit__meta { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 8px; }
+.circuit__fastest { margin-bottom: 10px; }
+.circuit__action { display: inline-block; font-size: 13px; padding: 8px 14px; }
+
+/* laps recorded by a client older than 0.9.0 */
+.tag--basic { color: var(--gold); border-color: var(--gold); }
+.notice--basic { border-color: var(--gold); color: var(--text); background: rgba(216, 168, 62, 0.08); }
+
+
+/* ---------------------------------------------------------------------------
+   V0.9.1 — configurable analysis windows
+   A 12-column grid; a window spans a share of it that depends on the screen, so
+   windows can never overlap, be cut off or push the page sideways.
+     desktop  (>1280px)  small 4 · medium 6 · large 12
+     laptop   (<=1280px) small 6 · medium 6 · large 12
+     tablet   (<=900px)  small 6 · medium 12 · large 12
+     phone    (<=640px)  everything 12 (one column, in layout order)
+   --------------------------------------------------------------------------- */
+.awin-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; align-items: start; margin-bottom: 24px; }
+.awin { grid-column: span 12; min-width: 0; position: relative; }
+.awin--small { grid-column: span 4; }
+.awin--medium { grid-column: span 6; }
+.awin--large { grid-column: span 12; }
+.awin__body { min-width: 0; max-width: 100%; overflow-x: auto; }
+.awin__body .chart { border-top: 1px solid var(--hairline); }
+.awin .card { margin-top: 0; }
+@media (max-width: 1280px) { .awin--small { grid-column: span 6; } }
+@media (max-width: 900px) { .awin--small { grid-column: span 6; } .awin--medium { grid-column: span 12; } }
+@media (max-width: 640px) { .awin, .awin--small, .awin--medium, .awin--large { grid-column: span 12; } .awin-grid { gap: 12px; } }
+
+/* edit mode */
+.awin-grid--editing .awin { outline: 1px dashed var(--hairline); outline-offset: 4px; }
+.awin__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 0 8px; }
+.awin__name { font-family: var(--font-display); font-size: 13px; letter-spacing: 0.04em; margin-right: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.awin__handle { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; min-width: 40px; min-height: 36px; font-size: 18px; line-height: 1; background: var(--panel-raised, transparent); color: var(--text); border: 1px solid var(--hairline); border-radius: 4px; }
+.awin__handle:active { cursor: grabbing; }
+.awin--dragging { opacity: 0.55; }
+.awin--drop-target { outline: 2px solid var(--gold, #D8A83E) !important; }
+.awin__bar select { max-width: 100%; }
+.awin__colors { display: inline-flex; align-items: center; gap: 4px; }
+.awin__colors input[type="color"], .editor__color input[type="color"] { width: 32px; height: 28px; padding: 0; border: 1px solid var(--hairline); background: none; }
+.editor { margin-bottom: 16px; }
+.editor__row { margin-bottom: 8px; flex-wrap: wrap; align-items: center; gap: 10px; }
+.editor__color { display: inline-flex; align-items: center; gap: 6px; }
+.analysis-customize { margin-left: auto; opacity: 0.85; }
+.analysis-toolbar { flex-wrap: wrap; }
+
+/* delta facts, sector table */
+.delta-facts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.delta-fact { font-family: var(--font-mono); font-size: 13px; padding: 4px 10px; border: 1px solid var(--hairline); border-radius: 4px; background: transparent; color: var(--text); }
+button.delta-fact { cursor: pointer; }
+.delta-fact--gain { border-color: rgba(76, 190, 120, 0.7); }
+.delta-fact--loss { border-color: rgba(224, 71, 43, 0.7); }
+.delta-fact--none { color: var(--text-muted); }
+.sector-title { font-family: var(--font-display); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin: 8px 0 4px; }
+.sector-row { font-family: var(--font-mono); font-size: 14px; padding: 3px 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+.sector-row--total { border-top: 1px solid var(--hairline); margin-top: 4px; padding-top: 6px; font-weight: 600; }
+.sector-row__badge { font-family: var(--font-body, inherit); font-size: 11px; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--hairline); }
+.sector-row__badge--gain { border-color: rgba(76, 190, 120, 0.7); }
+.sector-row__badge--loss { border-color: rgba(224, 71, 43, 0.7); }
+.sector-row--best { background: rgba(76, 190, 120, 0.08); }
+.sector-row--worst { background: rgba(224, 71, 43, 0.08); }
+
+/* "Runde vergleichen" dialog */
+.compare-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, 0.6); }
+.compare-dialog { width: min(480px, 100%); max-height: 100%; overflow-y: auto; background: var(--panel, #1B1F23); border: 1px solid var(--hairline); border-radius: 6px; padding: 20px; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); }
+.compare-dialog h2 { margin-top: 0; }
+.compare-dialog__option { display: block; padding: 8px 0; cursor: pointer; }
+.compare-dialog__hint { font-size: 12px; color: var(--text-muted); margin-left: 24px; }
+.compare-dialog__lapid { margin: 4px 0 8px 24px; }
+.compare-dialog__lapid input { width: 12em; }
+.compare-dialog__message { min-height: 1.4em; margin: 8px 0; font-size: 14px; }
+.compare-dialog__message--error { color: #E8715A; }
+.compare-dialog__message--info { color: var(--text); }
+.compare-dialog__actions { margin-top: 8px; }
+.quick__status { margin-top: 8px; min-height: 1.2em; font-size: 14px; }
+.quick__status--error { color: #E8715A; }
+
+
+/* ---------------------------------------------------------------------------
+   V0.9.1 — language: first-visit popup and the EN | DE switch in the menu
+   --------------------------------------------------------------------------- */
+.pitwall__lang { display: flex; align-items: center; padding: 12px 0; }
+.lang-switch { display: inline-flex; border: 1px solid var(--hairline); border-radius: 4px; overflow: hidden; }
+.lang-switch__button { background: transparent; color: var(--text-muted); border: 0; padding: 4px 9px; min-height: 28px; cursor: pointer; font-family: var(--font-display); font-size: 12px; letter-spacing: 0.08em; }
+.lang-switch__button + .lang-switch__button { border-left: 1px solid var(--hairline); }
+.lang-switch__button.active { background: var(--panel-raised); color: var(--text); }
+.lang-switch__button:focus-visible { outline: 2px solid var(--gold, #D8A83E); outline-offset: -2px; }
+.lang-overlay { position: fixed; inset: 0; z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, 0.75); }
+.lang-popup { width: min(420px, 100%); background: var(--panel, #1B1F23); border: 1px solid var(--hairline); border-radius: 6px; padding: 24px; text-align: center; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); }
+.lang-popup h2 { margin: 0 0 18px; font-size: 20px; }
+.lang-popup__buttons { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.lang-popup__button { min-width: 140px; min-height: 44px; font-size: 16px; }
+.lang-popup__button--suggested { outline: 2px solid var(--gold, #D8A83E); outline-offset: 2px; }
+.lang-popup__note { margin: 16px 0 0; font-size: 12px; color: var(--text-muted); }
+
+/* V0.9.1 — the track search fields show their whole hint ("Search a track, e.g. Fuji, Le Mans,
+   Spa…", in German even longer); they were cut off at ~200px. Never wider than the screen. */
+.field:has(input[type="search"]) { width: 420px; max-width: 100%; }
+.field input[type="search"] { width: 100%; box-sizing: border-box; }
+
+/* V0.9.1 — on phones nothing may push the page sideways. The content column is a grid item,
+   whose default min-width (auto = its widest content) let one wide table stretch the whole page
+   (dashboard, team and driver pages overflowed by up to ~200px). Now the column keeps the screen
+   width, tables scroll inside themselves, and rows of a card wrap instead of overflowing. */
+.panel { min-width: 0; }
+@media (max-width: 860px) {
+  .panel table { display: block; max-width: 100%; overflow-x: auto; }
+  .card-row { flex-wrap: wrap; gap: 4px 12px; }
+  .card-row > * { min-width: 0; overflow-wrap: anywhere; }
+  .inline-form { flex-wrap: wrap; }
+  .inline-form > * { max-width: 100%; }
+}
+
+/* V0.9.1 — corner analysis */
+.corners__wrap { overflow-x: auto; }
+.corners__table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.corners__table th, .corners__table td { padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--hairline); white-space: nowrap; }
+.corners__table th:first-child, .corners__table td:first-child { text-align: left; }
+.corners__table thead th { font-family: var(--font-display); font-weight: 500; color: var(--text-muted); }
+.corners__table td { font-family: var(--font-mono); }
+.corner-row { cursor: pointer; }
+.corner-row:hover, .corner-row:focus-visible { background: var(--panel-raised); outline: none; }
+.corner-row--loss { background: rgba(224, 71, 43, 0.08); }
+.corner-row--gain { background: rgba(76, 190, 120, 0.08); }
+.corner-row--total { cursor: default; font-weight: 600; }
+.corner-row--total:hover { background: none; }
+
+/* V0.9.2 — download page: the two client editions side by side (stacked on narrow screens) */
+.download-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin: 16px 0; }
+.download-card, .download-grid > .card + .card { display: flex; flex-direction: column; margin: 0; min-width: 0; }
+.download-card--app { border-color: var(--signal); }
+.download-card__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.download-card__head h2 { margin: 0; }
+.download-card__tag { font-size: 12px; color: var(--signal); text-transform: uppercase; letter-spacing: 0.06em; }
+.download-card__points { margin: 12px 0 16px; padding-left: 18px; line-height: 1.6; flex: 1; }
+.download-card__action .btn { display: inline-block; text-align: center; }
+.download-notes p { margin: 4px 0; }

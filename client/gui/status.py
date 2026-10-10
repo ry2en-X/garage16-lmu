@@ -37,6 +37,9 @@ class StatusUpdate:
     # Optional link shown as an 'Open download page' button under the
     # banner (only offered when it passes update_notice.is_safe_download_url).
     notice_url: Optional[str] = None
+    # V0.9.2: the server's id of the lap that was just uploaded — enables the
+    # window's "Analyse last lap" button. None leaves it untouched.
+    last_lap_id: Optional[int] = None
 
 
 def format_time(seconds: Optional[float]) -> str:

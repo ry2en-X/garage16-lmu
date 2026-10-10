@@ -101,7 +101,7 @@ services:
       LMU_GARAGE_SECRET_KEY: ${LMU_GARAGE_SECRET_KEY:?set a real Fernet key in .env}
       LMU_GARAGE_REGISTRATION_SECRET: ${LMU_GARAGE_REGISTRATION_SECRET:?set a registration secret in .env}
       LMU_GARAGE_ADMIN_TOKEN: ${LMU_GARAGE_ADMIN_TOKEN:?set an admin token in .env}
-      LMU_GARAGE_CORS_ORIGINS: ${LMU_GARAGE_CORS_ORIGINS:-https://your-domain.example}
+      LMU_GARAGE_CORS_ORIGINS: ${LMU_GARAGE_CORS_ORIGINS:-https://garage16.de}
       LMU_GARAGE_REQUIRE_HTTPS: "1"
       LMU_GARAGE_LOG_FORMAT: json
       LMU_GARAGE_STORAGE_DIR: /data/telemetry
@@ -116,12 +116,15 @@ services:
       LMU_GARAGE_SMTP_USER: ${LMU_GARAGE_SMTP_USER:-}
       LMU_GARAGE_SMTP_PASSWORD: ${LMU_GARAGE_SMTP_PASSWORD:-}
       LMU_GARAGE_SMTP_FROM: ${LMU_GARAGE_SMTP_FROM:-garage16@localhost}
-      LMU_GARAGE_FRONTEND_URL: ${LMU_GARAGE_FRONTEND_URL:-https://your-domain.example}
+      LMU_GARAGE_FRONTEND_URL: ${LMU_GARAGE_FRONTEND_URL:-https://garage16.de}
       # V0.7.2 §7 — leave unset normally; set only on the OLD instance during a deliberate cutover.
       LMU_GARAGE_MIGRATED_TO: ${LMU_GARAGE_MIGRATED_TO:-}
       # V0.8.6 — where too-old desktop clients are sent to update (shown as an
       # 'Open download page' button). Optional; see docs/CLIENT_BUILD.md.
       LMU_GARAGE_CLIENT_DOWNLOAD_URL: ${LMU_GARAGE_CLIENT_DOWNLOAD_URL:-}
+      # V0.9.2 — the "Client + analysis app" download (website Download page,
+      # and the update button of that edition). Optional; see .env.example.
+      LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL: ${LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL:-}
       # V0.7.2 — off by default in production; see .env.example.
       LMU_GARAGE_ENABLE_API_DOCS: ${LMU_GARAGE_ENABLE_API_DOCS:-false}
       # Uncomment these three (and set the matching four plain values just

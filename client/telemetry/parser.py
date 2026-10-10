@@ -14,12 +14,15 @@ Usage:
 
 from __future__ import annotations
 
+from array import array
+
 import os
 from dataclasses import dataclass, field
 from math import sqrt
-from typing import List, Optional
+from typing import List, Optional, Sequence
 import logging
 
+from .channels import extract_extended
 from .reader import Frame
 
 logger = logging.getLogger("lmu_garage.parser")
@@ -52,6 +55,13 @@ class TelemetrySample:
     tire_pressures: tuple   # (FL, FR, RL, RR)
     tire_temps_outer: tuple
     brake_temps: tuple
+    # V0.9.0: every extended channel (suspension, tire forces/loads/slip
+    # velocities, accelerations, driver aids, ...) as one flat tuple in
+    # channels.EXTENDED_COLUMNS order. A single tuple instead of ~160 fields
+    # keeps per-frame cost and memory low and the column order defined in
+    # exactly one place. None for samples built without it (older tests,
+    # tools) — the recorder then simply writes the core columns only.
+    ext: Optional[Sequence[float]] = None  # float32 array (V0.9.1) in EXTENDED_COLUMNS order
 
 
 @dataclass
@@ -348,6 +358,11 @@ class LapParser:
             tire_pressures=tuple(w.pressure for w in wheels),
             tire_temps_outer=tuple(sum(w.temperature) / 3.0 for w in wheels),
             brake_temps=tuple(w.brake_temp for w in wheels),
+            # V0.9.1: float32 array, not a tuple of Python floats — 180 values take 720 bytes
+            # instead of ~5.6 KB (each Python float is its own 24-byte object). For a 15,000-sample
+            # lap that is ~10 MiB of RAM on the driver's PC instead of ~83 MiB. The file stores
+            # these channels as float32 anyway, so the saved values are identical.
+            ext=array("f", extract_extended(tele)),
         )
 
     @staticmethod

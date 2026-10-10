@@ -32,7 +32,7 @@ def test_client_update_and_migration_settings_reach_the_server_container():
     NAS at all — the settings would exist in server/config.py but never
     arrive inside the container."""
     env = COMPOSE["services"]["server"]["environment"]
-    for var in ("LMU_GARAGE_MIGRATED_TO", "LMU_GARAGE_CLIENT_DOWNLOAD_URL", "LMU_GARAGE_MIN_CLIENT_VERSION"):
+    for var in ("LMU_GARAGE_MIGRATED_TO", "LMU_GARAGE_CLIENT_DOWNLOAD_URL", "LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL", "LMU_GARAGE_MIN_CLIENT_VERSION"):
         assert var in env, var
 
 

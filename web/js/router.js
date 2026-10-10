@@ -13,11 +13,19 @@ import { renderVerifyEmail } from "./pages/verify_email.js";
 import { renderDriverProfile } from "./pages/driver.js";
 import { renderAdmin } from "./pages/admin.js";
 import { renderLanding } from "./pages/landing.js";
+import { renderAnalysis } from "./pages/analysis.js";
+import { renderCircuits } from "./pages/circuits.js";
+import { renderDownload } from "./pages/download.js";
+import { startDesktopAppBridge } from "./app_bridge.js";
 
+import { applyStaticTranslations, createLanguageSwitch, ensureLanguageChosen, t } from "./i18n.js";
 const routes = {
   landing: renderLanding,
   leaderboard: renderLeaderboard,
   dashboard: renderDashboard,
+  analysis: renderAnalysis,
+  circuits: renderCircuits,
+  download: renderDownload,
   teams: renderTeams,
   account: renderAccount,
   admin: renderAdmin,
@@ -67,7 +75,7 @@ function updateStatus() {
   // default. store.isSignedIn() already covers both credential shapes.
   const signedIn = store.isSignedIn();
   statusDot.classList.toggle("on", signedIn);
-  statusText.textContent = signedIn ? `signed in as ${session.displayName}` : "not signed in";
+  statusText.textContent = signedIn ? t("signed in as {0}", [session.displayName]) : t("not signed in");
 }
 
 async function render() {
@@ -76,6 +84,7 @@ async function render() {
   const driverId = matchDriverDetail(path);
   updateNavActive(path);
   app.innerHTML = "";
+  app.classList.remove("panel--wide"); // the analysis and circuit pages ask for the full width
   pitwall.classList.remove("open");
   try {
     if (teamId) {
@@ -94,14 +103,14 @@ async function render() {
     app.innerHTML = "";
     const notice = document.createElement("div");
     notice.className = "notice notice--error";
-    notice.textContent = err.message || "Something went wrong rendering this page.";
+    notice.textContent = err.message || t("Something went wrong rendering this page.");
     app.appendChild(notice);
   }
 }
 
 function renderNotFound(container) {
   const h1 = document.createElement("h1");
-  h1.textContent = "Page not found";
+  h1.textContent = t("Page not found");
   container.appendChild(h1);
 }
 
@@ -109,5 +118,15 @@ window.addEventListener("hashchange", render);
 store.subscribe(updateStatus);
 mobileToggle.addEventListener("click", () => pitwall.classList.toggle("open"));
 
+// Language (V0.9.1): translate the static menu, add the EN | DE switch, and on the very first
+// visit ask which language to use (see i18n.js).
+applyStaticTranslations();
+document.getElementById("langSwitchSlot").appendChild(createLanguageSwitch());
+ensureLanguageChosen();
+
 updateStatus();
 render();
+
+// V0.9.2: inside the desktop app's analysis window, sign in through the app (does
+// nothing in a normal browser — see app_bridge.js)
+startDesktopAppBridge({ onSignedIn: render });

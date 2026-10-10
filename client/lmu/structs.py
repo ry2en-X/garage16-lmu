@@ -187,7 +187,17 @@ class TelemWheelV01(ctypes.Structure):
         ("toe", ctypes.c_double),
         ("tire_carcass_temperature", ctypes.c_double),
         ("tire_inner_layer_temperature", ctypes.c_double * 3),
-        ("expansion", ctypes.c_uint8 * 24),
+        # V0.9.0: named from the reserve block (24 -> 4 + 1 + 1 + 18 bytes, so
+        # the struct stays 260 bytes). LMU "spends" reserve bytes for new
+        # fields instead of growing the struct — see the V1.3 note on
+        # TelemInfoV01 below. Verified field-for-field against two
+        # independent implementations (LMU Pitwall, TinyPedal's
+        # pyLMUSharedMemory) and, per those projects, LMU's own
+        # SharedMemoryInterface.hpp.
+        ("optimal_temp", ctypes.c_float),
+        ("compound_index", ctypes.c_uint8),
+        ("compound_type", ctypes.c_uint8),
+        ("expansion", ctypes.c_uint8 * 18),
     ]
 
 
@@ -271,7 +281,53 @@ class TelemInfoV01(ctypes.Structure):
         ("electric_boost_motor_temperature", ctypes.c_double),
         ("electric_boost_water_temperature", ctypes.c_double),
         ("electric_boost_motor_state", ctypes.c_uint8),
-        ("expansion", ctypes.c_uint8 * 103),
+        # --- LMU v1.3+: electronics / driver aids, carved out of the former
+        # 103-byte reserve block (V0.9.0). The struct size is unchanged
+        # (1888 bytes) and `wheel` stays last at offset 848 — both asserted
+        # in tests/test_lmu_structs.py. The C names are mLapInvalidated,
+        # mABSActive, mTCActive, mSpeedLimiterActive, mWiperState, mTC,
+        # mTCMax, mTCSlip, mTCSlipMax, mTCCut, mTCCutMax, mABS, mABSMax,
+        # mMotorMap(Max), mMigration(Max), m{Front,Rear}AntiSway(Max),
+        # mLiftAndCoastProgress, mTrackLimitsSteps, mRegen, mStateOfCharge
+        # (mSoC), mVirtualEnergy, mTimeGap*, mVehicleModel, mVehicleClass,
+        # mVehicleChampionship. Field order and sizes were cross-checked
+        # between two independent projects (LMU Pitwall bridge/types.rs and
+        # TinyPedal pyLMUSharedMemory lmu_data.py); both add up to exactly
+        # 103 bytes: 23 (u8 block) + 28 (7 x f32) + 30 (model) + 2 + 20.
+        ("lap_invalidated", ctypes.c_uint8),
+        ("abs_active", ctypes.c_uint8),
+        ("tc_active", ctypes.c_uint8),
+        ("speed_limiter_active", ctypes.c_uint8),
+        ("wiper_state", ctypes.c_uint8),
+        ("tc_level", ctypes.c_uint8),
+        ("tc_max", ctypes.c_uint8),
+        ("tc_slip_level", ctypes.c_uint8),
+        ("tc_slip_max", ctypes.c_uint8),
+        ("tc_cut_level", ctypes.c_uint8),
+        ("tc_cut_max", ctypes.c_uint8),
+        ("abs_level", ctypes.c_uint8),
+        ("abs_max", ctypes.c_uint8),
+        ("motor_map", ctypes.c_uint8),
+        ("motor_map_max", ctypes.c_uint8),
+        ("brake_migration", ctypes.c_uint8),
+        ("brake_migration_max", ctypes.c_uint8),
+        ("front_anti_sway", ctypes.c_uint8),
+        ("front_anti_sway_max", ctypes.c_uint8),
+        ("rear_anti_sway", ctypes.c_uint8),
+        ("rear_anti_sway_max", ctypes.c_uint8),
+        ("lift_and_coast_progress", ctypes.c_uint8),
+        ("track_limits_steps", ctypes.c_uint8),
+        ("regen", ctypes.c_float),
+        ("state_of_charge", ctypes.c_float),
+        ("virtual_energy", ctypes.c_float),
+        ("time_gap_car_ahead", ctypes.c_float),
+        ("time_gap_car_behind", ctypes.c_float),
+        ("time_gap_place_ahead", ctypes.c_float),
+        ("time_gap_place_behind", ctypes.c_float),
+        ("vehicle_model", ctypes.c_char * 30),
+        ("vehicle_class_enum", ctypes.c_uint8),
+        ("vehicle_championship_enum", ctypes.c_uint8),
+        ("expansion", ctypes.c_uint8 * 20),
         ("wheel", TelemWheelV01 * 4),
     ]
 

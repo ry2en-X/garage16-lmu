@@ -2,18 +2,19 @@
 
 import { api } from "../api.js";
 import { store } from "../state.js";
-import { el } from "../format.js";
+import { el, roleLabel } from "../format.js";
 import { renderSignInPrompt } from "./auth.js";
 
+import { t } from "../i18n.js";
 export async function renderTeams(container) {
   if (!store.isSignedIn()) {
-    renderSignInPrompt(container, "Sign in to manage teams.");
+    renderSignInPrompt(container, t("Sign in to manage teams."));
     return;
   }
 
-  container.appendChild(el("h1", {}, "Teams"));
+  container.appendChild(el("h1", {}, t("Teams")));
   container.appendChild(
-    el("p", { class: "subtitle" }, "Teams share a best-lap board and can get their own Discord announcements.")
+    el("p", { class: "subtitle" }, t("Teams share a best-lap board and can get their own Discord announcements."))
   );
 
   // --- pending invitations addressed to me (V0.7.2 §9.2) ---
@@ -31,11 +32,11 @@ export async function renderTeams(container) {
     const pending = invites.filter((i) => i.status === "pending");
     if (!pending.length) return;
 
-    invitesBox.appendChild(el("h2", {}, "Invitations"));
+    invitesBox.appendChild(el("h2", {}, t("Invitations")));
     const card = el("div", { class: "card" });
     pending.forEach((inv) => {
-      const acceptBtn = el("button", { class: "btn" }, "Accept");
-      const declineBtn = el("button", { class: "btn btn--ghost" }, "Decline");
+      const acceptBtn = el("button", { class: "btn" }, t("Accept"));
+      const declineBtn = el("button", { class: "btn btn--ghost" }, t("Decline"));
       const rowOut = el("div");
       acceptBtn.addEventListener("click", async () => {
         acceptBtn.disabled = true;
@@ -61,7 +62,7 @@ export async function renderTeams(container) {
         el("div", { class: "card-row" }, [
           el("div", {}, [
             el("strong", {}, inv.team_name),
-            el("div", { class: "subtitle", style: "margin:2px 0 0;" }, `Invited by ${inv.created_by_display_name}`),
+            el("div", { class: "subtitle", style: "margin:2px 0 0;" }, t("Invited by {0}", [inv.created_by_display_name])),
           ]),
           el("div", { class: "inline-form" }, [acceptBtn, declineBtn]),
         ])
@@ -76,21 +77,21 @@ export async function renderTeams(container) {
 
   async function loadTeams() {
     listBox.innerHTML = "";
-    listBox.appendChild(el("h2", {}, "Your teams"));
+    listBox.appendChild(el("h2", {}, t("Your teams")));
     try {
       const teams = await api.myTeams();
       if (!teams.length) {
-        listBox.appendChild(el("div", { class: "empty-state" }, "You're not on a team yet — create one or join with an invite code."));
+        listBox.appendChild(el("div", { class: "empty-state" }, t("You're not on a team yet — create one or join with an invite code.")));
         return;
       }
       const card = el("div", { class: "card" });
-      teams.forEach((t) => {
+      teams.forEach((item) => {
         const row = el("div", { class: "card-row" }, [
           el("div", {}, [
-            el("a", { href: `#/team/${t.id}` }, [el("strong", {}, t.name)]),
-            el("div", { class: "subtitle", style: "margin:2px 0 0;" }, `${t.member_count} member(s) — ${t.role}`),
+            el("a", { href: `#/team/${item.id}` }, [el("strong", {}, item.name)]),
+            el("div", { class: "subtitle", style: "margin:2px 0 0;" }, t("{0} member(s) — {1}", [item.member_count, roleLabel(item.role)])),
           ]),
-          el("span", { class: "tag" }, `invite: ${t.invite_code}`),
+          el("span", { class: "tag" }, t("invite: {0}", [item.invite_code])),
         ]);
         card.appendChild(row);
       });
@@ -102,12 +103,12 @@ export async function renderTeams(container) {
 
   // --- create team ---
   const createCard = el("div", { class: "card" });
-  createCard.appendChild(el("h2", {}, "Create a team"));
+  createCard.appendChild(el("h2", {}, t("Create a team")));
   const nameField = el("div", { class: "field" }, [
-    el("label", { for: "teamName" }, "Team name"),
+    el("label", { for: "teamName" }, t("Team name")),
     el("input", { id: "teamName", type: "text" }),
   ]);
-  const createBtn = el("button", { class: "btn" }, "Create");
+  const createBtn = el("button", { class: "btn" }, t("Create"));
   const createOut = el("div");
   createBtn.addEventListener("click", async () => {
     const name = nameField.querySelector("input").value.trim();
@@ -116,7 +117,7 @@ export async function renderTeams(container) {
     createOut.innerHTML = "";
     try {
       const team = await api.createTeam(name);
-      createOut.appendChild(el("div", { class: "notice notice--success" }, `Created "${team.name}" — invite code ${team.invite_code}`));
+      createOut.appendChild(el("div", { class: "notice notice--success" }, t("Created \"{0}\" — invite code {1}", [team.name, team.invite_code])));
       nameField.querySelector("input").value = "";
       await loadTeams();
     } catch (err) {
@@ -131,12 +132,12 @@ export async function renderTeams(container) {
 
   // --- join team ---
   const joinCard = el("div", { class: "card" });
-  joinCard.appendChild(el("h2", {}, "Join a team"));
+  joinCard.appendChild(el("h2", {}, t("Join a team")));
   const codeField = el("div", { class: "field" }, [
-    el("label", { for: "inviteCode" }, "Invite code"),
-    el("input", { id: "inviteCode", type: "text", placeholder: "e.g. 8F3KQ2LP" }),
+    el("label", { for: "inviteCode" }, t("Invite code")),
+    el("input", { id: "inviteCode", type: "text", placeholder: t("e.g. 8F3KQ2LP") }),
   ]);
-  const joinBtn = el("button", { class: "btn btn--ghost" }, "Join");
+  const joinBtn = el("button", { class: "btn btn--ghost" }, t("Join"));
   const joinOut = el("div");
   joinBtn.addEventListener("click", async () => {
     const code = codeField.querySelector("input").value.trim();
@@ -145,7 +146,7 @@ export async function renderTeams(container) {
     joinOut.innerHTML = "";
     try {
       const team = await api.joinTeam(code);
-      joinOut.appendChild(el("div", { class: "notice notice--success" }, `Joined "${team.name}".`));
+      joinOut.appendChild(el("div", { class: "notice notice--success" }, t("Joined \"{0}\".", [team.name])));
       codeField.querySelector("input").value = "";
       await loadTeams();
     } catch (err) {

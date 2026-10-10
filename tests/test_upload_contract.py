@@ -84,7 +84,14 @@ def test_uploaded_field_stripped_from_wire_metadata():
 
 
 def test_client_version_is_current():
-    """client_version should reflect the actual release, not 0.1.0."""
+    """client_version should reflect the actual release, not 0.1.0.
+
+    V0.9.1: this used to compare with the literal "0.9.0" and would have needed editing at
+    every release. The contract it protects is "the client reports the version it really is,
+    and that is not an ancient placeholder": the envelope carries CLIENT_VERSION (the single
+    source packaging/sync_version.py also reads) and it is at least 0.9.0 (the first client
+    with the extended channels). That README, CHANGELOG and installer state the same version is
+    checked in tests/test_packaging.py."""
     from client.uploader.uploader import Uploader
     from client.telemetry.recorder import LapRecorder
 
@@ -97,4 +104,8 @@ def test_client_version_is_current():
             client_secret="secret",
         )
         payload = uploader._build_payload(meta_path)
-        assert payload["envelope"]["client_version"] == "0.8.6"
+        from client.uploader.uploader import CLIENT_VERSION
+    from server.versioning import parse_version
+
+    assert payload["envelope"]["client_version"] == CLIENT_VERSION
+    assert parse_version(CLIENT_VERSION) >= parse_version("0.9.0")

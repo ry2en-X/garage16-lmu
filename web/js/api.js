@@ -14,6 +14,7 @@
 //     same-origin production case.
 import { store } from "./state.js";
 
+import { t } from "./i18n.js";
 export const API_BASE_URL =
   typeof window.LMU_GARAGE_API_BASE_URL === "string"
     ? window.LMU_GARAGE_API_BASE_URL
@@ -44,7 +45,7 @@ async function request(path, { method = "GET", params, body, auth = false, admin
       headers.Authorization = `Bearer ${session.authToken}`;
     } else if (!session?.viaCookie) {
       // Neither a bearer token nor a cookie session — genuinely signed out.
-      throw new ApiError("Not signed in.", 401);
+      throw new ApiError(t("Not signed in."), 401);
     }
     // else: cookie session (V0.7.2) — no header to add, the browser
     // attaches the HttpOnly session cookie automatically as long as
@@ -69,14 +70,14 @@ async function request(path, { method = "GET", params, body, auth = false, admin
     });
   } catch (err) {
     throw new ApiError(
-      `Could not reach the backend at ${API_BASE_URL}. Is it running, and is CORS enabled? (${err.message})`,
+      t("Could not reach the backend at {0}. Is it running, and is CORS enabled? ({1})", [API_BASE_URL, err.message]),
       0
     );
   }
 
   if (res.status === 401 && !adminToken) {
     store.signOut();
-    throw new ApiError("Session expired — sign in again.", 401);
+    throw new ApiError(t("Session expired — sign in again."), 401);
   }
 
   if (!res.ok) {
@@ -395,12 +396,62 @@ export const api = {
     return request(`/admin/drivers/${driverId}/unlock`, { method: "POST", adminToken });
   },
 
+  // V0.9.2: the desktop app's analysis window turns the session it got from the
+  // desktop client into the usual HttpOnly cookie (see app_bridge.js)
+  activateAppSession(sessionToken) {
+    return request("/accounts/app-session/activate", { method: "POST", body: { session_token: sessionToken } });
+  },
   health() {
     return request("/health");
   },
 
   recentActivity(limit = 15) {
     return request("/leaderboard/recent", { params: { limit } });
+  },
+
+  // ---- Lap analysis (V0.9.0) — server/routers/analysis.py
+  analysisChannels() {
+    return request("/telemetry/analysis/channels");
+  },
+
+  // Two laps (or one, without lapB) on a common distance grid. `channels` is an
+  // array of catalog keys; `step` is the grid spacing in metres.
+  // V0.9.1: `maxPoints` bounds the points per series (server-side downsampling);
+  // `start`/`end` (metres) ask for just one stretch of track.
+  analysisCompare({ lapA, lapB, channels, step, maxPoints, start, end }) {
+    return request("/telemetry/analysis/compare", {
+      auth: true,
+      params: { lap_a: lapA, lap_b: lapB, channels: channels ? channels.join(",") : undefined, step, max_points: maxPoints, start, end },
+    });
+  },
+
+  // The lap to compare lapId with: kind = "wr" (Garage16 Best) | "team_best" | "my_best".
+  analysisReference({ kind, lapId, scope }) {
+    return request("/telemetry/analysis/reference", { auth: true, params: { kind, lap_id: lapId, scope } });
+  },
+
+  // "You vs ..." in one call; without `track` the track of my most recent lap.
+  analysisQuick({ mode, track, carModel, scope }) {
+    return request("/telemetry/analysis/quick", { auth: true, params: { mode, track_name: track, car_model: carModel, scope } });
+  },
+
+  analysisLap(lapId) {
+    return request(`/telemetry/analysis/laps/${encodeURIComponent(lapId)}`, { auth: true });
+  },
+
+  analysisDriverLaps(driverId, { trackName, carModel, limit = 50 } = {}) {
+    return request(`/telemetry/analysis/drivers/${encodeURIComponent(driverId)}/laps`, {
+      auth: true,
+      params: { track_name: trackName, car_model: carModel, limit },
+    });
+  },
+
+  analysisCircuits(q) {
+    return request("/telemetry/analysis/circuits", { params: { q } });
+  },
+
+  analysisOutline(trackName) {
+    return request("/telemetry/analysis/circuits/outline", { auth: true, params: { track_name: trackName } });
   },
 };
 

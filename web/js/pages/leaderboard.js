@@ -15,15 +15,16 @@
 import { api } from "../api.js";
 import { el, formatLapTime, formatDate } from "../format.js";
 
+import { t, tp } from "../i18n.js";
 export async function renderLeaderboard(container) {
-  container.appendChild(el("h1", {}, "Leaderboard"));
-  container.appendChild(el("p", { class: "subtitle" }, "Each driver's best valid lap, fastest first."));
+  container.appendChild(el("h1", {}, t("Leaderboard")));
+  container.appendChild(el("p", { class: "subtitle" }, t("Each driver's best valid lap, fastest first.")));
 
   let mode = "class"; // "class" | "car"
 
   const modeToggle = el("div", { class: "inline-form" }, [
-    el("button", { class: "btn btn--ghost", id: "modeClassBtn" }, "By class"),
-    el("button", { class: "btn btn--ghost", id: "modeCarBtn" }, "By exact car"),
+    el("button", { class: "btn btn--ghost", id: "modeClassBtn" }, t("By class")),
+    el("button", { class: "btn btn--ghost", id: "modeCarBtn" }, t("By exact car")),
   ]);
   container.appendChild(modeToggle);
 
@@ -33,22 +34,22 @@ export async function renderLeaderboard(container) {
   // appear by themselves once LMU sends them (see server/catalog.py).
   const form = el("div", { class: "inline-form section" });
 
-  const trackSearch = el("input", { id: "trackSearch", type: "search", placeholder: "Search a track, e.g. Fuji, Le Mans, Spa…", autocomplete: "off" });
-  const searchField = el("div", { class: "field" }, [el("label", { for: "trackSearch" }, "Find a track"), trackSearch]);
+  const trackSearch = el("input", { id: "trackSearch", type: "search", placeholder: t("Search a track, e.g. Fuji, Le Mans, Spa…"), autocomplete: "off" });
+  const searchField = el("div", { class: "field" }, [el("label", { for: "trackSearch" }, t("Find a track")), trackSearch]);
 
-  const venueSelect = el("select", { id: "venueSelect" }, [el("option", { value: "" }, "Loading tracks…")]);
-  const venueField = el("div", { class: "field" }, [el("label", { for: "venueSelect" }, "Track"), venueSelect]);
+  const venueSelect = el("select", { id: "venueSelect" }, [el("option", { value: "" }, t("Loading tracks…"))]);
+  const venueField = el("div", { class: "field" }, [el("label", { for: "venueSelect" }, t("Track")), venueSelect]);
 
   const layoutSelect = el("select", { id: "layoutSelect" });
-  const layoutField = el("div", { class: "field", style: "display:none;" }, [el("label", { for: "layoutSelect" }, "Layout"), layoutSelect]);
+  const layoutField = el("div", { class: "field", style: "display:none;" }, [el("label", { for: "layoutSelect" }, t("Layout")), layoutSelect]);
 
-  const classSelect = el("select", { id: "classSelect" }, [el("option", { value: "" }, "Pick a track first")]);
-  const classField = el("div", { class: "field" }, [el("label", { for: "classSelect" }, "Class"), classSelect]);
+  const classSelect = el("select", { id: "classSelect" }, [el("option", { value: "" }, t("Pick a track first"))]);
+  const classField = el("div", { class: "field" }, [el("label", { for: "classSelect" }, t("Class")), classSelect]);
 
-  const carSelect = el("select", { id: "carSelect" }, [el("option", { value: "" }, "Pick a track first")]);
-  const carField = el("div", { class: "field", style: "display:none;" }, [el("label", { for: "carSelect" }, "Car"), carSelect]);
+  const carSelect = el("select", { id: "carSelect" }, [el("option", { value: "" }, t("Pick a track first"))]);
+  const carField = el("div", { class: "field", style: "display:none;" }, [el("label", { for: "carSelect" }, t("Car")), carSelect]);
 
-  const searchBtn = el("button", { class: "btn" }, "Search");
+  const searchBtn = el("button", { class: "btn" }, t("Search"));
   [searchField, venueField, layoutField, classField, carField, searchBtn].forEach((node) => form.appendChild(node));
   container.appendChild(form);
 
@@ -61,7 +62,7 @@ export async function renderLeaderboard(container) {
   let currentTrack = ""; // the exact track string LMU sent for the chosen layout
 
   function lapsLabel(n) {
-    return n ? `${n} lap${n === 1 ? "" : "s"}` : "no laps yet";
+    return n ? tp("{0} lap", "{0} laps", n) : t("no laps yet");
   }
 
   function fillSelect(select, values, placeholder) {
@@ -72,14 +73,14 @@ export async function renderLeaderboard(container) {
       return;
     }
     select.disabled = false;
-    select.appendChild(el("option", { value: "" }, "Choose…"));
+    select.appendChild(el("option", { value: "" }, t("Choose…")));
     values.forEach((v) => select.appendChild(el("option", { value: v }, v)));
   }
 
   function fillClassOptions(options) {
     classSelect.innerHTML = "";
     classSelect.disabled = false;
-    classSelect.appendChild(el("option", { value: "" }, "Choose…"));
+    classSelect.appendChild(el("option", { value: "" }, t("Choose…")));
     options.forEach((o) => classSelect.appendChild(el("option", { value: o.name }, `${o.name} · ${lapsLabel(o.lap_count)}`)));
   }
 
@@ -90,18 +91,18 @@ export async function renderLeaderboard(container) {
     } catch (err) {
       venues = [];
       venueSelect.innerHTML = "";
-      venueSelect.appendChild(el("option", { value: "" }, "Couldn't load tracks"));
+      venueSelect.appendChild(el("option", { value: "" }, t("Couldn't load tracks")));
       return;
     }
     venueSelect.innerHTML = "";
     if (!venues.length) {
-      venueSelect.appendChild(el("option", { value: "" }, q ? `No track matches "${q}"` : "No tracks yet"));
+      venueSelect.appendChild(el("option", { value: "" }, q ? t("No track matches \"{0}\"", [q]) : t("No tracks yet")));
       venueSelect.disabled = true;
       await onVenueChange();
       return;
     }
     venueSelect.disabled = false;
-    venueSelect.appendChild(el("option", { value: "" }, "Choose a track…"));
+    venueSelect.appendChild(el("option", { value: "" }, t("Choose a track…")));
     venues.forEach((v) => venueSelect.appendChild(el("option", { value: v.venue }, `${v.venue} · ${lapsLabel(v.lap_count)}`)));
     if (previous && venues.some((v) => v.venue === previous)) {
       venueSelect.value = previous;
@@ -117,19 +118,19 @@ export async function renderLeaderboard(container) {
     layoutField.style.display = "none";
     currentTrack = "";
     if (!venue) {
-      fillSelect(classSelect, [], "Pick a track first");
-      fillSelect(carSelect, [], "Pick a track first");
+      fillSelect(classSelect, [], t("Pick a track first"));
+      fillSelect(carSelect, [], t("Pick a track first"));
       return;
     }
     if (venue.layouts.length === 0) {
       // A known track nobody has driven yet — still selectable, with every class.
-      hintBox.appendChild(el("div", { class: "notice" }, `No laps recorded at ${venue.venue} yet — be the first!`));
+      hintBox.appendChild(el("div", { class: "notice" }, t("No laps recorded at {0} yet — be the first!", [venue.venue])));
       try {
         fillClassOptions(await api.catalogClassOptions());
       } catch {
-        fillSelect(classSelect, [], "Couldn't load classes");
+        fillSelect(classSelect, [], t("Couldn't load classes"));
       }
-      fillSelect(carSelect, [], "No cars yet");
+      fillSelect(carSelect, [], t("No cars yet"));
       return;
     }
     if (venue.layouts.length > 1) {
@@ -149,10 +150,10 @@ export async function renderLeaderboard(container) {
     try {
       const [classOptions, cars] = await Promise.all([api.catalogClassOptions(currentTrack), api.catalogCars(currentTrack)]);
       fillClassOptions(classOptions);
-      fillSelect(carSelect, cars, "No cars at this track yet");
+      fillSelect(carSelect, cars, t("No cars at this track yet"));
     } catch (err) {
-      fillSelect(classSelect, [], "Couldn't load classes");
-      fillSelect(carSelect, [], "Couldn't load cars");
+      fillSelect(classSelect, [], t("Couldn't load classes"));
+      fillSelect(carSelect, [], t("Couldn't load cars"));
     }
   }
 
@@ -185,7 +186,7 @@ export async function renderLeaderboard(container) {
     if (!track || !key) {
       resultsBox.innerHTML = "";
       resultsBox.appendChild(
-        el("div", { class: "notice" }, `Pick both a track and a ${mode === "class" ? "class" : "car"} to search.`)
+        el("div", { class: "notice" }, mode === "class" ? t("Pick both a track and a class to search.") : t("Pick both a track and a car to search."))
       );
       return;
     }
@@ -206,7 +207,7 @@ export async function renderLeaderboard(container) {
   searchBtn.addEventListener("click", runSearch);
 
   resultsBox.appendChild(
-    el("div", { class: "empty-state" }, "Pick a track and class (or an exact car) to see the standings.")
+    el("div", { class: "empty-state" }, t("Pick a track and class (or an exact car) to see the standings."))
   );
 
   await loadVenues("");
@@ -214,7 +215,7 @@ export async function renderLeaderboard(container) {
 
 function renderTable(entries) {
   if (!entries.length) {
-    return el("div", { class: "empty-state" }, "No valid laps recorded here yet.");
+    return el("div", { class: "empty-state" }, t("No valid laps recorded here yet."));
   }
 
   const rows = entries.map((entry, i) => {
@@ -231,14 +232,16 @@ function renderTable(entries) {
       el(
         "td",
         {},
-        el("span", { class: `tag ${entry.is_valid ? "tag--valid" : "tag--invalid"}` }, entry.is_valid ? "valid" : "invalid")
+        el("span", { class: `tag ${entry.is_valid ? "tag--valid" : "tag--invalid"}` }, entry.is_valid ? t("valid") : t("invalid"))
       ),
       el("td", {}, formatDate(entry.uploaded_at)),
+      // V0.9.1: open this exact lap in the analysis as Lap 1, then "Runde vergleichen" picks what to compare it with.
+      el("td", {}, entry.lap_id != null ? el("a", { href: `#/analysis?a=${entry.lap_id}` }, t("Analyse")) : ""),
     ]);
   });
 
   const table = el("table", { class: "timing-table" }, [
-    el("thead", {}, el("tr", {}, ["#", "Driver", "Lap", "Sectors", "", "Set"].map((h) => el("th", {}, h)))),
+    el("thead", {}, el("tr", {}, ["#", t("Driver"), t("Lap"), t("Sectors"), "", t("Set"), ""].map((h) => el("th", {}, h)))),
     el("tbody", {}, rows),
   ]);
 

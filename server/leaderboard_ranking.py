@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from .models import Driver, Lap
 from .schemas import LeaderboardEntry
+from .versioning import data_level_for_client_version
 
 
 def ranked_leaderboard(db: Session, filters: Sequence[ColumnElement], limit: int) -> List[LeaderboardEntry]:
@@ -37,6 +38,7 @@ def ranked_leaderboard(db: Session, filters: Sequence[ColumnElement], limit: int
             Lap.sector_times,
             Lap.is_valid,
             Lap.uploaded_at,
+            Lap.client_version,
             func.row_number()
             .over(partition_by=Lap.driver_id, order_by=(Lap.lap_time.asc(), Lap.id.asc()))
             .label("rank"),
@@ -47,8 +49,8 @@ def ranked_leaderboard(db: Session, filters: Sequence[ColumnElement], limit: int
 
     stmt = (
         select(
-            ranked.c.driver_id, ranked.c.lap_time, ranked.c.sector_times, ranked.c.is_valid,
-            ranked.c.uploaded_at, Driver.display_name,
+            ranked.c.id, ranked.c.driver_id, ranked.c.lap_time, ranked.c.sector_times, ranked.c.is_valid,
+            ranked.c.uploaded_at, ranked.c.client_version, Driver.display_name,
         )
         .join(Driver, Driver.id == ranked.c.driver_id)
         .where(ranked.c.rank == 1)
@@ -58,12 +60,14 @@ def ranked_leaderboard(db: Session, filters: Sequence[ColumnElement], limit: int
     rows = db.execute(stmt).all()
     return [
         LeaderboardEntry(
+            lap_id=lap_id,
             driver_id=driver_id,
             driver_name=display_name,
             lap_time=lap_time,
             sector_times=sector_times,
             is_valid=is_valid,
             uploaded_at=uploaded_at.isoformat(),
+            data_level=data_level_for_client_version(client_version),
         )
-        for driver_id, lap_time, sector_times, is_valid, uploaded_at, display_name in rows
+        for lap_id, driver_id, lap_time, sector_times, is_valid, uploaded_at, client_version, display_name in rows
     ]

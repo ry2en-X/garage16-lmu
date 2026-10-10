@@ -40,11 +40,14 @@ from ..sessions import (
     SESSION_COOKIE_NAME,
     SESSION_LIFETIME,
     create_session,
+    get_driver_for_session_token,
     revoke_all_sessions_for_driver,
     revoke_session,
 )
 from ..team_lifecycle import TeamOwnershipConflict, resolve_owned_teams_before_driver_deletion
 from ..schemas import (
+    AppSessionActivateRequest,
+    AppSessionResponse,
     AccountExport,
     ChangePasswordRequest,
     DiscordLinkStatusOut,
@@ -364,6 +367,11 @@ def login(
 
     raw_session_token = create_session(db, driver, user_agent=request.headers.get("user-agent"))
     db.commit()
+    _set_session_cookie(response, raw_session_token)
+    return LoginResponse(driver_id=driver.id, display_name=driver.display_name)
+
+
+def _set_session_cookie(response: Response, raw_session_token: str) -> None:
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=raw_session_token,
@@ -373,6 +381,89 @@ def login(
         samesite="lax",
         path="/",
     )
+
+
+# ---------------------------------------------------------------- desktop app (V0.9.2)
+#
+# The "Client + analysis app" edition shows the web analysis in its own window. That
+# window must be signed in without asking for an email and password the driver may
+# never have set (many drivers only have the desktop client's credentials). Two steps:
+#
+#   1. POST /accounts/app-session — called by the DESKTOP CLIENT with its own Bearer
+#      auth token (never with a cookie: a browser must not be able to mint sessions
+#      for itself this way). Creates an ordinary web session (same table, same 30-day
+#      lifetime, listed under the account's sessions as the desktop app, revocable
+#      there) and returns its raw token to the client.
+#   2. POST /accounts/app-session/activate — called by the WINDOW (same origin as this
+#      server) with that token; sets it as the usual HttpOnly cookie. From then on the
+#      window is an ordinary signed-in browser and the token is no longer in any script.
+#
+# Step 2 grants nothing a holder of the token could not already do (the token IS the
+# cookie value); it exists because an embedded window cannot set an HttpOnly cookie
+# itself. It only answers same-origin requests, so another site cannot sign a visitor's
+# browser into someone else's account (login CSRF).
+
+APP_SESSION_USER_AGENT = "Garage16 desktop app (analysis window)"
+
+
+def _is_same_origin(request: Request) -> bool:
+    """True when the browser says the request comes from this server's own pages.
+    Modern browsers (WebView2 included) send Sec-Fetch-Site and, on a POST, Origin;
+    both must agree when present, and at least one must be present."""
+    fetch_site = request.headers.get("sec-fetch-site")
+    origin = request.headers.get("origin")
+    if fetch_site is not None and fetch_site != "same-origin":
+        return False
+    if origin is None:
+        return fetch_site == "same-origin"
+    from urllib.parse import urlparse
+
+    parsed = urlparse(origin)
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    allowed = {o.rstrip("/") for o in settings.cors_origins}
+    return (bool(parsed.netloc) and parsed.netloc == host) or origin.rstrip("/") in allowed
+
+
+@router.post("/app-session", response_model=AppSessionResponse)
+def create_app_session(
+    request: Request,
+    response: Response,
+    authorization: Optional[str] = Header(None),
+    driver: Driver = Depends(get_current_driver),
+    db: Session = Depends(get_db),
+    _rl: None = Depends(rate_limit("app_session", per_driver=True)),
+) -> AppSessionResponse:
+    if not (authorization and authorization.startswith("Bearer ")):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Only the Garage16 desktop app can open an app session.")
+    raw_session_token = create_session(db, driver, user_agent=APP_SESSION_USER_AGENT)
+    db.commit()
+    response.headers["Cache-Control"] = "no-store"
+    return AppSessionResponse(
+        session_token=raw_session_token,
+        driver_id=driver.id,
+        display_name=driver.display_name,
+        expires_in=int(SESSION_LIFETIME.total_seconds()),
+    )
+
+
+@router.post("/app-session/activate", response_model=LoginResponse)
+def activate_app_session(
+    body: AppSessionActivateRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    _rl: None = Depends(rate_limit("app_session")),
+) -> LoginResponse:
+    if not _is_same_origin(request):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Cross-site request refused.")
+    driver = get_driver_for_session_token(db, body.session_token)
+    if driver is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session expired or invalid — sign in again.")
+    if driver.is_locked:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This account has been locked.")
+    db.commit()  # last_used_at
+    _set_session_cookie(response, body.session_token)
+    response.headers["Cache-Control"] = "no-store"
     return LoginResponse(driver_id=driver.id, display_name=driver.display_name)
 
 

@@ -673,7 +673,7 @@ def _with_delta(entries) -> List[TeamLeaderboardEntry]:
     leader_time = entries[0].lap_time if entries else 0.0
     return [
         TeamLeaderboardEntry(
-            driver_id=e.driver_id, driver_name=e.driver_name, lap_time=e.lap_time, sector_times=e.sector_times,
+            lap_id=e.lap_id, data_level=e.data_level, driver_id=e.driver_id, driver_name=e.driver_name, lap_time=e.lap_time, sector_times=e.sector_times,
             is_valid=e.is_valid, uploaded_at=e.uploaded_at, delta_to_leader=round(e.lap_time - leader_time, 3),
         )
         for e in entries

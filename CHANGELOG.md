@@ -1,5 +1,428 @@
 # Changelog
 
+## V0.9.2 — Analysis app on the PC: "Client" or "Client + analysis app"
+
+Server `0.9.2`; Desktop-Client `0.9.2`. **No migration** (Alembic unchanged). New dependency
+**only in the "Client + analysis app" edition**: `pywebview` (`client/requirements-analysis.txt`);
+server and plain client have none. Everything is additive; clients 0.8.x–0.9.1 keep working.
+
+### Two downloads, one app
+- The desktop client is built in **two editions** from the same code:
+  - **Client** — `Garage16-Client-Setup.exe` (+ `Garage16-Portable.zip`): records and uploads
+    laps; "Open analysis" opens the web analysis **in the browser**.
+  - **Client + analysis app** — `Garage16-Client-Analysis-Setup.exe`
+    (+ `Garage16-Analysis-Portable.zip`): the same, plus the analysis **in its own window**.
+- Both install as the **same app** (one AppId, one folder): installing the other download over an
+  existing installation switches the edition; login and recorded laps stay (they live outside the
+  program folder). The installer clears only its own `_internal` folder first, so nothing of the
+  analysis window is left behind when switching back.
+- **GitHub**: the `build-client` workflow builds both editions (matrix). **Actions → build-client →
+  Run workflow** (or a pushed `client-v*` tag) publishes a **GitHub release with all four files**,
+  tagged `client-v<CLIENT_VERSION>`, marked *Latest*, with a description saying which download is
+  which — drivers download from *Releases → Latest* and double-click; no terminal anywhere. Re-running
+  replaces that release's files. The README starts with this download section.
+- `packaging/build_windows.ps1` also finds Inno Setup when it is installed per user
+  (`%LOCALAPPDATA%\Programs\Inno Setup 6`), not only under Program Files (found on the first real
+  Windows build).
+- **Website**: a new **Download** page (menu, and a button on the start page) shows both editions
+  **side by side** — "Client" | "Client + analysis app" — with what each does and what the app
+  needs. The links come from the server: `LMU_GARAGE_CLIENT_DOWNLOAD_URL` (existing) and the new
+  `LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL`; a missing one shows as "not available yet", never as a
+  broken button. A too-old client is sent to the download of **its own** edition (`/health` and the
+  426 answer gained `client_app_download_url` / `app_download_url`).
+
+### The analysis app window
+- Client window: **"Open analysis"** and **"Analyse last lap"** (enabled once a lap was uploaded
+  in this session — the uploader now remembers the server's lap id). In the analysis edition a tick
+  box **"Open the analysis in my browser instead"** (saved in
+  `client_config.json` as `analysis_view`).
+- The window (`client/analysis_window.py`) shows **the same web analysis** of the driver's own
+  server — so it is always in sync with the website (laps, comparisons, layout options), and every
+  improvement of the web analysis is in the app too. Nothing is computed or stored locally.
+- It runs as **its own process** (`Garage16.exe --analysis-window [--lap N]`): recording and
+  uploading never wait for it, its memory is returned when it closes, at most one is open; asked for
+  another lap it reopens on that lap; quitting the client closes it.
+- **No extra login.** When the page in the window is not signed in, it asks the app; the client asks
+  the server with its own credential (`POST /accounts/app-session`, Bearer token only — a browser
+  cookie cannot do this) for an ordinary web session, and the page turns it into the usual HttpOnly
+  cookie (`POST /accounts/app-session/activate`, same-origin only). The session is listed (and can be
+  ended) under Account → sessions as "Garage16 desktop app (analysis window)". The window keeps its
+  cookie, language and layout, so this happens about once a month.
+- The bridge between page and app only answers pages of the driver's own server, exposes no
+  credential to the page, and opens links to other sites in the default browser.
+- **Fallbacks**: no WebView2 runtime, a broken installation or a window that fails to start → the
+  analysis opens in the browser, and the client says why once. `Garage16.exe --analysis-selftest`
+  reports whether the window can be shown (also run by the build on every packaged exe).
+
+### Verified
+- Server: app-session endpoints (Bearer only, same-origin activation, revoked/locked/expired, rate
+  limit), download links in `/health` and the 426 answer — `tests/test_v092_app_session.py`.
+- Client: edition, preference, launcher, bridge, fallbacks, uploader, the real Tk window under Xvfb
+  — `tests/test_v092_analysis_app.py`. Web: sign-in inside the app and the download page (jsdom) —
+  `tests/js/desktop_app.test.mjs`; German texts complete.
+- **The real window, end to end**: the real `client/analysis_window.py` with real pywebview (Qt
+  WebEngine backend under Xvfb — the Linux engine, not WebView2) against the real stack (app + real
+  Caddy, seeded laps): it opened on the lap, signed itself in without any input, showed the standard
+  layout with drawn charts; the session cookie was not readable by scripts, no token was stored in
+  the page, the page saw only the three bridge methods; a second start reused the cookie (one app
+  session on the server in total).
+- **Real PyInstaller builds of both editions** (Linux): the edition is baked in, the plain client
+  contains no pywebview, the analysis edition's packaged engine imports (`--analysis-selftest`).
+- Download page in a real Chromium, English and German, desktop and phone: both cards side by side
+  (stacked on the phone), no sideways scrolling.
+
+- **Real Windows build (Windows 11, Python 3.12):** both editions built with
+  `build_windows.ps1`; the packaged analysis edition's `--analysis-selftest` loaded pythonnet and the
+  WebView2 assemblies and reported "Analysis window: ready" (WebView2 runtime 154); the plain client
+  reported that it opens the browser. Installers built after the Inno Setup path fix.
+
+### Not verified
+Implemented but requires a real run: the window on WebView2 itself (opening it, signing in), the
+Inno Setup edition switch, and the GitHub workflow/release job (first run on GitHub). The repository is private: friends cannot download release files from
+it — put the two setup files on the webspace (`download.garage16.de`) and set the two `.env` links.
+
+## V0.9.1 — Analysis: compare in two clicks, your own layout, much less data moved
+
+Server `0.9.1`; Desktop-Client `0.9.1`. **No migration** (Alembic is unchanged), no new
+dependency. Laps from clients 0.8.x and 0.9.0 keep working; clients older than 0.9.1 can still
+upload. The V0.9.0 API is unchanged — everything below is additive.
+
+### Analysis page (web)
+- **"Compare lap"** (German: "Runde vergleichen") opens a dialog **"Compare with"**: *Garage16 Best*,
+  *Team Best*, *My Best* or a *Lap ID*. The server decides what each means (`server/analysis_reference.py`);
+  a missing reference is a plain message ("No Team Best available.", "Lap not found.",
+  "This lap cannot be analysed.") and **never** a substitute lap. If you already
+  are the best, the dialog says so and offers the next-fastest lap (one more click) — the same
+  lap is never loaded twice. No raw error or stack trace is ever shown.
+- **"WR" is called "Garage16 Best"** in the interface: Garage16 has no official world record,
+  it is the fastest valid lap *on Garage16* for the same track layout and car — exactly the rule
+  that produces the `WR` record events (`server/records.py`), so the two cannot disagree.
+- **"You vs. Garage16 Best / Team Best / My Best"** on the analysis start page (and the circuit
+  library's "Compare my lap with it") pair your best lap with the right reference in one step.
+- **The Garage16 standard layout** is what everyone sees first: summary, delta, corners, speed,
+  throttle, brake, track map (coloured by delta), values at the cursor, car physics. Nothing to set up.
+  **"Customise view"** (quiet button) opens the editor: reorder windows (drag handle or ↑/↓),
+  size (small/medium/large), which channel a window shows, colours (lap 1, lap 2, delta, and per
+  window), add/remove windows, **"Restore standard layout"**. Stored in *this browser only*
+  (`localStorage`, versioned, migratable) — no database field, no telemetry in the browser. A broken
+  or hand-edited value falls back to the standard layout; colours can only be `#rrggbb`, so the
+  defaults cannot be broken by a stored configuration. Users of V0.9.0 keep their channel selection
+  (it becomes their first layout).
+- **Windows can only be moved by their handle in edit mode**, so dragging a chart still pans it.
+  The grid is pure CSS (12 columns; desktop / laptop / tablet / phone breakpoints), so windows
+  cannot overlap or push the page sideways.
+- **Delta**: biggest gain and biggest loss — the steepest change of the delta over a corner-sized
+  stretch (1/40 of the lap, 100–400 m: ~340 m at Le Mans), with its position (click = move the cursor
+  there) — and the net result (signs: see below). **Sectors**: per-sector difference, total, best and
+  worst sector marked; "biggest gain" / "biggest loss" only where a sector really gained / lost.
+- **Touch**: tap (on lifting the finger) = cursor, sideways drag = scrub, vertical drag = the page
+  scrolls (the cursor stays put), hold = pin, double tap = reset zoom, two fingers = pinch zoom + pan.
+- **Record names**: the server's record types are shown as words, never as codes ("WR" → *Garage16
+  Best*, "TEAM_BEST" → *Team Best*, "PR" → *Personal best*), and the team feed no longer calls a
+  Garage16 best a "world record" (spec §51).
+- **Phones**: no page can be pushed sideways any more — wide tables scroll inside themselves (the
+  dashboard, team and driver pages overflowed by up to ~200 px since before V0.9). Track search
+  fields are wide enough to show their whole hint.
+- **Zoom refinement**: the first load is a coarse overview of the whole lap. Zoom in far (at least 2x,
+  fewer than 600 overview points inside the view) and, once the gesture has settled (300 ms), the page
+  fetches just that stretch — the view plus a margin, at a finer step, never more than ~2,000 points —
+  and swaps it in under the same view and cursor. Panning out of the stretch shows the overview *at
+  once* (never a half-empty chart) and fetches the next stretch; zooming out returns to the overview.
+  Only the **view** can trigger a request, never the cursor. Summary, sector table, "biggest gain/loss"
+  and the track map always stay on the whole-lap overview. Stretches already fetched are remembered
+  (6, in memory), a failed request leaves the overview in place without an error screen, and after a
+  "too many requests" answer (429) the page stops asking for a minute. A "biggest gain/loss" click
+  outside the visible stretch moves the view there first.
+- **One cursor, no requests**: moving it (mouse, touch, arrow keys) never calls the server. Requests
+  happen on open, when a window needs a channel that is not loaded yet, and when the laps change.
+- Leaderboard "Analyse" now opens that lap as **Lap 1** (then "Compare lap"); the circuit
+  card shows **My Best**.
+- **One sign convention in the whole analysis: Lap 1 minus Lap 2.** Negative = Lap 1 faster (time
+  gained, green), positive = Lap 1 slower (time lost, red) — the delta chart, the sector table, the lap
+  difference, "Biggest gain" (shown as e.g. −0.182 s), "Biggest loss" (+0.317 s) and "Net" (the lap's
+  real difference, so the same number as the end of the delta curve). Captions say so on screen.
+
+### Language: English by default, German on request
+- **First visit: a popup "Choose your language · Sprache wählen"** with *English* and *Deutsch* (the
+  browser's language is pre-selected; there is no way to skip it). **Menu: an EN | DE switch** at any
+  time. The choice is kept in this browser (`localStorage`, key `garage16_language`); changing it
+  reloads the page, so no stale text stays on screen.
+- **The whole web interface is translated** — menu, every page, the analysis, dialogs, notices,
+  tooltips, confirm questions, dates (formatted for the chosen language). The English text in the code
+  is the key (`t("Choose Lap 1")`, `tp("{0} lap", "{0} laps", n)`; `web/js/i18n.js`), the German texts
+  are in `web/js/i18n/de.js`. A text without a German entry is shown in English, never as a key.
+- **Not translated, on purpose:** error messages the *server* sends (they stay English), driver /
+  track / car names, the channel names, units and groups the server defines for the analysis, lap
+  times (m:ss.mmm in both languages). The Discord bot is unchanged.
+- **Safety net:** `scripts/i18n_check.py` and `tests/test_i18n.py` fail the build on a text without a
+  German entry, a stale entry, differing `{0}` placeholders, a file that calls `t()` without importing
+  it, or a local variable called `t` that would hide it (the conversion found and fixed three of those).
+  `tests/js/i18n_pages.test.mjs` renders the real router and pages in German, in English and on a
+  first visit (with the popup) and fails on a leftover English phrase, "{0}", "undefined" or an error.
+
+### Server: less data read, computed and sent
+- `GET /telemetry/analysis/compare` — new optional parameters `max_points` (upper bound of points
+  per series; the grid is widened to fit, the raw file is untouched), `start`/`end` (one stretch
+  of track, for zoom-in at a finer `step`). Without them the response is what V0.9.0 returned;
+  `analysis_version` is added. Only the requested channels' parquet columns are read (plus the
+  ~22 calibration columns every lap needs).
+- **Cache** (`server/analysis_cache.py`): in-process LRU, bounded in entries (128), bytes (48 MiB)
+  and age (15 min), versioned (`ANALYSIS_CACHE_VERSION` is part of every key), keyed by the laps'
+  content hashes **in order** (the delta flips sign when the laps swap). It is an optimisation, never
+  a data source or an authorisation shortcut: permissions and file checks run before every lookup,
+  the rate limit counts cache hits too, and nothing depends on a hit (several workers each have
+  their own). No Redis.
+- **HTTP caching**: `ETag` + `If-None-Match` → `304` on `/compare` (`private, no-cache`, `Vary:
+  Authorization, Cookie`) and, publicly cacheable, on the channel catalog. User-specific responses
+  are never public. Caddy's existing `encode gzip` compresses the JSON; nothing is gzipped twice.
+- The default of the `analysis` rate limit is raised from 300 to **900 per hour** (per driver and per IP,
+  `LMU_GARAGE_RATELIMIT_ANALYSIS_MAX` still overrides): zoom refinement adds one request per settled
+  zoom/pan. Cache hits and `304` answers count like any other request.
+- `GET /telemetry/analysis/reference?kind=wr|team_best|my_best&lap_id=` and
+  `GET /telemetry/analysis/quick?mode=…[&track_name=&car_model=]` (see the README).
+
+### Upload and storage
+- Client: the sha256 is computed in 1 MiB chunks and the file is **streamed** to the server with an
+  exact `Content-Length` — `requests`' own `files=` copies the whole file into the request body
+  (measured: 85 MiB peak for a 40 MiB file; now < 3 MiB). No extra gzip around the parquet.
+- Server: validation runs **from the file** and reads only the columns it checks — measured on a
+  synthetic lap ~6 ms / ~1.6 MiB instead of ~45 ms / ~17.5 MiB (Python heap; the process grew by
+  ~46 MiB → ~6 MiB). Trade-off: damage confined to an extended-channel column is no longer caught at
+  upload; the analysis reports such a lap as unreadable instead of crashing
+  (`validate_telemetry_file(..., full_check=True)` restores the old behaviour).
+- The upload endpoint now also removes its temp file when the final move fails, and removes the
+  stored file after a failed commit only if no committed lap points at it.
+- zstd level is pinned to **3** (pyarrow's default was 1). Row groups were benchmarked and *not*
+  adopted. Parquet + zstd + float32 + BYTE_STREAM_SPLIT unchanged; content-addressed storage unchanged.
+- **Local retention** (client): the local `.parquet` of an *uploaded* lap is deleted after **14 days**
+  (`LMU_GARAGE_LOCAL_RETENTION_DAYS` or `local_retention_days` in `client_config.json`; `0` = never).
+  Pending and rejected laps are never touched; the `.json` stays, so nothing is uploaded twice.
+  **Consequence for admins:** after that the server (and its backup) holds the only copy.
+
+### More exact, less load (final review)
+A second pass over how times are computed, what the charts show and what every part costs. Numbers
+are from the synthetic 14.4 km lap of the review stack and `scripts/benchmark_pipeline.py`, measured
+on the build machine — not on a real LMU session, a real server or a real phone.
+
+*More exact*
+- **New window "Corners"** (in the standard layout, after the delta): every corner of the lap with
+  its apex position, the time Lap 1 gained or lost there, where Lap 1 braked compared with Lap 2
+  ("12 m later"), minimum and exit speed of both laps. Measured on the **raw samples** (full sample
+  rate), not on the chart grid: braking point = first sample with ≥ 10 % brake, exit = first sample
+  after the apex with ≥ 95 % throttle. Corners are found on the two laps' average speed (a drop of
+  ≥ 10 km/h before and after, ≥ 120 m apart; a corner right at the start or finish line is still
+  found). Each corner runs from its braking zone to the next one, the first also holds the straight
+  from the line — so the **corners add up exactly to the lap-time difference** (the table's total
+  equals "Net"). Most lost / most gained corner are marked; click or Enter zooms onto braking zone,
+  apex and exit and pins the cursor at the apex. Whole lap only, both laps need speed.
+- **Nothing hides between grid points any more**: the overview has ~1,500 points, so a brake tap or a
+  kerb strike shorter than a grid cell could vanish. The server now also sends, for each cell whose
+  raw samples reach further than the drawn line (by more than 2 % of the channel's range), the raw
+  minimum and maximum; the chart draws them as thin vertical strokes. Usually a handful per lap,
+  nothing at all once the grid is as fine as the samples.
+- **"Biggest gain / loss" is the same on every screen**: it was found on the chart's grid, whose step
+  depends on the window width, so a phone and a desktop could differ by a millisecond and a few
+  metres. The server now measures it on a fixed 0.5 m grid (`delta_facts` in the response; the browser
+  still computes it itself for older responses).
+- **Precision per unit instead of "3 decimals for everything"**: km/h 1 decimal, % 2, rpm and gears
+  whole numbers, G 3, times and the delta 3 (= milliseconds), … (`DECIMALS_BY_UNIT` in
+  `server/telemetry_analysis.py`). No displayed digit is lost; the JSON got a little smaller
+  (V0.9.0-style request 987 → 882 KiB raw). Tests prove: delta at the line = lap-time difference to
+  the millisecond, corner times = the true ones to the millisecond, braking points exact to the sample.
+
+*Less load*
+- **Browser — cursor**: a chart now keeps its grid, axes and lines in a cached layer; moving the
+  cursor only copies that layer and draws the cursor line (script per cursor move 1.56 → 0.36 ms for
+  the standard layout). During a zoom or pan gesture the charts draw directly (copying a layer every
+  frame would cost as much again) and cache the layer once the view has been still for 120 ms.
+- **Browser — zoom refinement**: finer data is swapped **into** the existing charts instead of
+  rebuilding every window: a zoom step that brings in finer data went from ~1,020 ms of main-thread
+  work to ~3.5 ms, a pan step from ~90 ms to ~2.4 ms. Cursor, view, pin and a drag in progress are
+  kept; the y-axes keep the whole lap's range, so nothing jumps. No leaks over repeated zooming
+  (DOM nodes, listeners and heap stay flat).
+- **Server**: the lap file is opened memory-mapped and only the needed columns are decoded; decoded
+  laps stay in a small LRU (32 MiB per process, keyed by file, size, modification time and columns —
+  a replaced file is never served stale). A standard-layout request whose laps are in that cache
+  takes ~21 ms instead of ~50 ms (cold, in-process), a zoom refinement ~19 instead of ~41 ms — which
+  is what a zoom or a second comparison with the same lap usually hits. Corner detection was made 4x cheaper before release (~4 ms for a
+  14 km lap with 12 corners). Corners, spikes and facts are computed only for whole-lap requests.
+- **Client (desktop app)**: each frame (60 per second) it used to copy LMU's **whole** shared-memory
+  block (~317 KiB) to read three small parts of it; now it copies just those three (player
+  telemetry, scoring info, player's scoring entry — < 10 KB) and checks that the game did not write
+  in between (copy twice, compare). 351 → 11 µs per frame, i.e. ~2 % → ~0.07 % of a CPU core,
+  measured on a synthetic memory block. The extended values of each sample are kept as `float32`
+  (as they are written to the file anyway) instead of Python floats: a 15,000-sample lap holds
+  ~26 MiB instead of ~98 MiB while recording. The written file is byte-for-byte the same.
+- `ANALYSIS_CACHE_VERSION` is now **3** (precision, spikes, corners, `delta_facts`): old cache
+  entries are never reused. All response fields are additive.
+
+### Tests and tooling
+- New: `tests/test_v091_pipeline.py`, `test_v091_analysis_api.py`, `test_v091_upload_atomicity.py`,
+  `test_v091_retention.py`, `tests/js/analysis_layout.test.mjs`, `analysis_layout_page.test.mjs`;
+  `scripts/benchmark_pipeline.py` (reproducible storage / hash / validation / endpoint benchmark).
+- `tests/js/analysis_page.test.mjs` was adapted in three places (the standard layout asks for three
+  channels instead of eight; the channel chooser became the layout editor; the circuit button uses
+  the quick pairing) — reasons are written at the top of that file. No test was deleted.
+- `tests/conftest.py` clears the analysis cache and the lap cache around every test.
+- Final review: `tests/test_v091_accuracy.py` (spikes, corners against a lap with known corners,
+  corner totals = lap-time difference, delta at the line, fixed-grid gain/loss, per-unit precision,
+  cache version) and `tests/test_v091_client_load.py` (the three-part shared-memory read gives
+  exactly the same frame as the full copy, declines the same cases, copies < 10 KB, survives torn
+  reads; float32 samples write an identical lap file). jsdom tests check that a cursor move strokes
+  no chart line, that zoom frames draw directly and that finer data does not rebuild a window.
+- Full suite: **780 passed, 1 skipped** (the opt-in PyInstaller build), 0 failed — with the real
+  Caddy 2.8.4 and Tk available.
+- `tests/test_reverse_proxy.py` gained three tests that run the **real Caddy (2.8.4, local binary)** in
+  front of the real app: the analysis JSON is gzip-compressed exactly once, `If-None-Match` still gives
+  `304` through the proxy (also for the public channel catalog and never without a session), and the
+  frontend files carry `Cache-Control: no-cache` with a working validator. The deployed image is
+  `caddy:2-alpine`, i.e. a newer Caddy than the one the test used — it was not run against that image.
+
+### Not verified
+Implemented but requires real LMU verification / a real deployment: file sizes and CPU/RAM of real
+recordings (all numbers here are from a synthetic lap), the client's three-part shared-memory read
+against the running game (same structures and offsets as before, tested against a synthetic memory
+block only), the corner thresholds (10 km/h, 120 m, 10 % brake, 95 % throttle) on real laps, the Cloudflare tunnel path in front of Caddy,
+touch on real phones (verified in a real headless Chromium 153 with emulated touch, see below — not
+on iOS Safari or real devices), PostgreSQL
+behaviour of the new upload cleanup under real concurrency, and the sign conventions of TC, ABS,
+motor map and brake migration, steering/G signs and map mirroring (still decided from each lap's own
+data, as in V0.9.0 — not proven against the game).
+
+### Review in a real browser (before release)
+The whole frontend was driven in a real headless Chromium 153 against the real stack — the app,
+real Caddy with `docker/Caddyfile`, laps uploaded by the real client (three drivers, a 14 km lap,
+one lap from a 0.8.6 client, a team) — in English and German, desktop and phone (touch emulated).
+That found what jsdom could not, all fixed before release:
+- **Touch was broken on every real phone/tablet**: `setTimeout` was stored as an object method and
+  browsers throw "Illegal invocation" when it is called that way (Node does not check). Every touch
+  on a chart threw; a long press could never pin. Fixed, with a regression test that makes
+  `setTimeout` as strict as a browser.
+- A tap pinned the cursor (the browser's emulated mouse click after a touch); a scroll starting on
+  a chart moved the cursor first. The emulated click is now ignored right after a touch, and a tap
+  counts when the finger lifts without moving.
+- "Biggest gain / loss" reported "+4.5 s at 7.2 km" for a lap that loses time steadily — the largest
+  rise between ANY two points is most of the lap. Now the steepest change over a corner-sized stretch.
+- The sector table called the least-bad of three losing sectors "biggest gain" and tinted it green.
+- A drag (pan) was cut off halfway when finer zoom data arrived or the overview came back, because
+  the charts were rebuilt under the pointer. The data is now swapped *into* the existing charts
+  (see "More exact, less load" above), so nothing is rebuilt and the drag simply continues.
+- "You vs. Garage16 Best" without a track (it uses the track of the latest lap) said "you already
+  drive the fastest lap" without saying where; it now names the track and offers that lap alone.
+- Raw record codes and "world record" (above), page overflow on phones, cut-off search hints,
+  "—" instead of 0:00.000 at the start of the lap in the values table.
+- The test suite left a database and up to ~20 MB of test telemetry in the temp folder per run (since
+  before V0.9); `tests/conftest.py` now removes them.
+- Not changed, worth knowing: the web app loads its fonts from Google Fonts, i.e. every visitor's IP
+  address goes to Google — a known GDPR topic for a site run in Germany. Self-hosting the two fonts
+  (Oswald, IBM Plex Mono; both under the SIL Open Font License) would avoid it.
+
+## V0.9.0 — Lap analysis: all channels, lap-vs-lap comparison, track map, car physics, circuit library
+
+Server `0.9.0`; Desktop-Client `0.9.0`. **No new migration.** Old clients keep
+uploading exactly as before (the basic columns are unchanged).
+
+Idea and feature list inspired by the open-source project ApexDash (MIT) — no code
+was taken from it; see `THIRD_PARTY_NOTICES.md`. Everything is built on Garage16's
+own data (Shared Memory, uploaded to the server) and styled like the rest of the app.
+
+### Client: records everything LMU offers
+- `client/lmu/structs.py`: the structs now name the fields LMU 1.3+ added **inside
+  the former reserve bytes** — driver aids (TC level/slip/cut, ABS, engine/motor map,
+  brake migration, anti-roll bars, active-intervention flags), hybrid values, time gaps,
+  track-limit steps, and per tyre `optimal_temp`/compound. Struct sizes are unchanged
+  (1888 / 260 bytes); every new offset is pinned by `tests/test_lmu_structs.py`. The layout
+  was cross-checked against two independent open-source readers (LMU Pitwall,
+  TinyPedal's pyLMUSharedMemory) that both follow LMU's own `SharedMemoryInterface.hpp`.
+- `client/telemetry/channels.py` (new): ~180 extra columns per sample — filtered inputs,
+  body velocity/acceleration/angular velocity, orientation, engine/chassis/aero values,
+  driver aids and, per wheel (FL, FR, RL, RR): suspension travel, ride height, pushrod
+  force, brake pressure, wheel speed, patch/ground velocities (-> slip angle), camber,
+  lateral/longitudinal force, load, sliding share, tyre temperatures (3 + carcass + 3 inner
+  layer), wear, surface, deflection, toe. Raw units, float32. A test fills a REAL struct
+  with a distinct value in every field and checks that every column holds the field it
+  is named after.
+- Recorder: columns are built vectorised, floats are stored byte-stream-split + zstd
+  (a 4-minute lap is roughly 4-10 MB instead of ~14 MB with the default encoding).
+- New `client/telemetry/async_saver.py`: finished laps are written on a background
+  thread; the 60 Hz frame loop no longer stalls at the start/finish line (it would have
+  lost the first metres of the next lap). Laps are saved in order and flushed on exit.
+
+### Server
+- `server/telemetry_channels.py`: the channel catalog (96 channels, grouped, with display
+  units: km/h, °C, kPa, mm, G, °, ...) and the **orientation self-calibration** (see README).
+- `server/telemetry_analysis.py`: reads only the needed parquet columns, makes the distance
+  axis strictly increasing, computes channels at native rate and resamples to a common
+  distance grid, delta time, sector distances, track map (with mirror detection).
+- `server/routers/analysis.py`: `/telemetry/analysis/{channels,compare,laps/{id},
+  drivers/{id}/laps,circuits,circuits/outline}`. Access rules and file-path safety are
+  described in the module docstring; tests cover cross-driver access, invalid laps, vanished
+  files, a `telemetry_path` outside the storage directory, different tracks, channel limits
+  and the rate limit.
+- Leaderboard rows (global and team) now carry `lap_id`, so any row can be opened.
+- New rate-limit bucket `analysis` (default 300/hour).
+
+### Web
+- New pages **Analysis** and **Circuits**; "Analyse" links on leaderboard rows and in
+  "My Laps"; pages in `web/js/analysis/` (charts, track map, physics view, shared view
+  state) and `web/js/pages/{analysis,analysis_picker,circuits}.js`. Plain JavaScript and
+  Canvas, no build step — `web/` is still served as-is.
+
+### Older clients stay compatible — and the dashboard says what they lack
+- No change for old clients on the wire: uploads from 0.8.x clients (and their basic
+  file format) are accepted and validated exactly as before; covered by tests that upload
+  through the real `Uploader` claiming client `0.8.6`.
+- The analysis marks laps recorded without the extended channels: a **"Basic data · client
+  0.8.6"** tag on the lap card and an explanatory notice above the charts (which lap, how
+  many of the 96 channels exist, what is missing, what to do: update the client and drive
+  the lap again). The server sends `recording` per lap
+  (`{level: "full"|"basic", client_version, channels_available, channels_total}`) in
+  `/telemetry/analysis/compare` and `/telemetry/analysis/laps/{id}`. The verdict is taken from
+  the **file's actual columns**, not from the version label.
+- Lists carry a cheap, version-based `data_level` (own laps, leaderboard rows, a driver's lap
+  list) and show a "basic data" tag: in the lap picker (with a legend), and in the dashboard's
+  "My Laps" (with a short explanation). Comparing two old-client laps works on the basic channels
+  incl. delta and track map.
+
+### Dashboard on garage16.de
+- `.env.example` and the `docker-compose.yml` defaults now point at `https://garage16.de`
+  (`LMU_GARAGE_CORS_ORIGINS`, `LMU_GARAGE_FRONTEND_URL`); a Gmail example block is included.
+  The web app and the API share this one address, so `web/config.js` is unchanged.
+- The client build bakes `https://garage16.de` in by default (`build_windows.ps1`, the GitHub
+  workflow; `-ServerUrl ""` still builds a package that asks). The client code itself still
+  contains no address — a test checks that.
+- `docs/ADMIN_GUIDE.md` chapter 10 is rewritten for the apex domain: DNS records to remove (A/AAAA/
+  CNAME of `@` and `www`, **not** MX/TXT), the tunnel's Public Hostname with an empty subdomain,
+  moving the All-Inkl webspace to a subdomain, and a **client migration path**: the old Quick
+  Tunnel keeps running while `LMU_GARAGE_MIGRATED_TO=https://garage16.de` makes running clients
+  (0.8.6+, HTTPS both ends) switch on their own; a client already on the new address does nothing.
+- `tests/test_domain_config.py` pins all of this: every variable and service name the guide uses
+  exists in the stack, the addresses agree everywhere, and the migration behaviour is as described.
+
+### Tests
+605 passed, 1 skipped (the opt-in PyInstaller build) — run with a real Caddy 2.11
+binary, so the reverse-proxy tests ran too (the new `/telemetry/analysis/*` paths are
+covered by the existing `/telemetry/*` route). Includes jsdom tests of the pages and
+interaction tests that were mutation-checked (a deliberately broken hover, zoom
+direction, sector sign and drag/click handling each turn them red).
+
+### Deployment notes
+- Rebuild the server image: `docker compose --profile tunnel up -d --build`; hard-reload
+  the browser (Ctrl+F5) once.
+- Friends need the **V0.9.0 client** to record the new channels; their old laps stay valid
+  and comparable on the basic channels.
+- **Storage**: roughly 4-10 MB per lap from now on (estimate — measure after the first
+  real sessions). Backups grow with it. See `docs/ADMIN_GUIDE.md`.
+- New verification items (h)-(l) in `docs/LMU_VERIFICATION_PROTOCOL.md` — they need a real
+  LMU session on Windows and have NOT been run yet.
+
+### Known limits
+- TC/ABS/engine-map levels need **LMU 1.3 or newer**; one source claims the live
+  in-cockpit levels are not exposed, two others read them from shared memory — verification
+  item (h) settles it for your game version. If they stay at 0 the charts simply show 0.
+- Comparing needs two laps on the same track string (layout), and any signed-in driver can
+  open any valid lap — there is no per-driver opt-out in 0.9.
+
 ## V0.8.10 — Windows-Fix: Text-Kodierung (Testsuite brach mit UTF-8-Mojibake ab)
 
 Server `0.8.10`; Desktop-Client unverändert `0.8.6`. Keine neue Migration.

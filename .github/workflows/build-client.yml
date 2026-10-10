@@ -1,22 +1,42 @@
-# Builds the friend-facing Windows client (installer + portable zip).
-# V0.8.6. NOT verifiable from the project's dev sandbox (no Windows
-# runner there) — the first real run on GitHub is its first real test;
-# see docs/CLIENT_BUILD.md.
+# Builds the friend-facing Windows client in its two editions (V0.9.2) and publishes
+# them as a GitHub release, so drivers only ever download and double-click:
+#   standard  Garage16-Client-Setup.exe / Garage16-Portable.zip
+#             the plain client — the analysis opens in the browser
+#   analysis  Garage16-Client-Analysis-Setup.exe / Garage16-Analysis-Portable.zip
+#             "Client + analysis app" — the analysis in its own window (WebView2)
 #
-# Set the repository VARIABLE  GARAGE16_SERVER_URL  (Settings -> Secrets
-# and variables -> Actions -> Variables) to bake your server's address
-# into the package so friends never type it. Trigger manually from the
-# Actions tab, or by pushing a tag like  client-v0.8.6.
+# How to publish a new client (no terminal needed):
+#   GitHub -> Actions -> build-client -> "Run workflow" (green button) -> Run.
+#   After ~10 minutes the release "Garage16 client <version>" (tag client-v<version>,
+#   version = CLIENT_VERSION in client/uploader/uploader.py) holds all four files and
+#   is marked "Latest", so these links always point at the newest client:
+#     https://github.com/<owner>/<repo>/releases/latest/download/Garage16-Client-Setup.exe
+#     https://github.com/<owner>/<repo>/releases/latest/download/Garage16-Client-Analysis-Setup.exe
+#   Running it again for the same version replaces the files of that release.
+#   Pushing a tag client-v* does the same. Untick "Publish" to only build (artifacts).
+#
+# The server address baked into the package defaults to https://garage16.de.
+# To use a different one, set the repository VARIABLE  GARAGE16_SERVER_URL
+# (Settings -> Secrets and variables -> Actions -> Variables).
 name: build-client
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the installers as a GitHub release (Latest)"
+        type: boolean
+        default: true
   push:
     tags: ["client-v*"]
 
 jobs:
   windows:
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        edition: [standard, analysis]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -26,11 +46,66 @@ jobs:
         run: choco install innosetup -y --no-progress
       - name: Build client (PyInstaller + installer)
         shell: pwsh
-        run: .\packaging\build_windows.ps1 -ServerUrl "${{ vars.GARAGE16_SERVER_URL }}"
+        run: .\packaging\build_windows.ps1 -Edition ${{ matrix.edition }} -ServerUrl "${{ vars.GARAGE16_SERVER_URL || 'https://garage16.de' }}"
+      - name: Check that the installer was built
+        shell: pwsh
+        run: |
+          $setup = if ("${{ matrix.edition }}" -eq "analysis") { "dist-installer\Garage16-Client-Analysis-Setup.exe" } else { "dist-installer\Garage16-Client-Setup.exe" }
+          if (-not (Test-Path $setup)) { throw "$setup was not built" }
       - uses: actions/upload-artifact@v4
         with:
-          name: garage16-client-windows
+          name: garage16-client-windows-${{ matrix.edition }}
           path: |
-            dist-installer/Garage16-Client-Setup.exe
-            dist-installer/Garage16-Portable.zip
+            dist-installer/*.exe
+            dist-installer/*.zip
           if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/client-v') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: files
+          merge-multiple: true
+      - name: Publish the GitHub release with both editions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION=$(python3 -c "import sys; sys.path.insert(0, 'packaging'); from sync_version import read_client_version; print(read_client_version())")
+          TAG="client-v${VERSION}"
+          if [[ "${GITHUB_REF}" == refs/tags/client-v* && "${GITHUB_REF_NAME}" != "${TAG}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match CLIENT_VERSION ${VERSION} in client/uploader/uploader.py" >&2
+            exit 1
+          fi
+          ls -la files
+          cat > notes.md <<'NOTES'
+          Choose ONE of the two downloads (Windows 10/11) — download, double-click, done:
+
+          | Download | What you get |
+          |---|---|
+          | **Garage16-Client-Setup.exe** | **Client** — records and uploads your laps. The analysis opens in your browser. |
+          | **Garage16-Client-Analysis-Setup.exe** | **Client + analysis app** — the same, plus the analysis in its own window (no browser needed, always in sync with the server). Needs the Microsoft Edge WebView2 Runtime, which Windows 11 and updated Windows 10 already have. |
+
+          Updating or switching later: run the other (or newer) setup over the existing installation — your login and recorded laps stay.
+          Windows may warn ("Windows protected your PC"): click "More info" -> "Run anyway" (the app is not code-signed).
+          The `*-Portable.zip` files are the same apps without an installer (unzip, run Garage16.exe).
+
+          ---
+          Wähle EINEN der beiden Downloads (Windows 10/11) — herunterladen, doppelklicken, fertig:
+          **Garage16-Client-Setup.exe** = Client (Analyse im Browser) ·
+          **Garage16-Client-Analysis-Setup.exe** = Client + Analysetool (Analyse im eigenen Fenster).
+          Wechseln oder aktualisieren: einfach die andere bzw. neuere Datei darüber installieren — Anmeldung und Runden bleiben.
+          NOTES
+          if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" files/* --repo "${GITHUB_REPOSITORY}" --clobber
+            gh release edit "${TAG}" --repo "${GITHUB_REPOSITORY}" --notes-file notes.md --latest
+          else
+            gh release create "${TAG}" files/* --repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" \
+              --title "Garage16 client ${VERSION}" --notes-file notes.md --latest
+          fi
