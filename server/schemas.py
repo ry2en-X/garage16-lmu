@@ -236,6 +236,7 @@ class LapReport(BaseModel):
     # never matched the measured duration (kept as LMU reported it) — diagnosis only
     lap_time_corrected: Optional[LapTimeCorrection] = None
     lap_time_unconfirmed: Optional[LapTimeUnconfirmed] = None
+    sectors_late_s: Optional[float] = Field(default=None, ge=-1, le=600)
 
     @field_validator("reasons")
     @classmethod

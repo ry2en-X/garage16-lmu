@@ -72,6 +72,22 @@ additive, reversible: `alembic downgrade 0014`; changes no existing value and no
   (`client/telemetry/parser.py` `_maybe_correct_lap_time`). Only LMU's own time is ever sent;
   `lap_report.lap_time_corrected` / `lap_time_unconfirmed` record what happened (kept in
   `laps.check_inputs`).
+- **Valid LMU laps rejected for "lap_dist has implausible backward jumps" / "lap_dist (22m) does
+  not match distance implied by the speed trace"** (found on the NAS: Fuji, Spa, Silverstone,
+  client 0.9.2): LMU sometimes resets the lap distance a few frames BEFORE the lap number
+  changes. The client waited for a reset that had already happened and put the first metres of
+  the next lap at the end of the lap. Client 0.9.4 starts the next lap at that reset
+  (`_early_reset_index`); the server reads such stored files correctly — a single reset in the
+  last 3 s, after which the distance stays near zero, is the next lap's tail
+  (`server/validation.py` `trailing_reset`), for the plausibility check, the track limits and
+  the figures. The plausibility check's own reasons now count as automatic rejections, so
+  `scripts.revalidate_laps --apply --restore` lets these laps count again (into the review
+  queue). Laps an admin, a report or a moderator rejected are never touched.
+- **Sector times LMU writes late** no longer reject a lap: the client waits for them in the late
+  window (`lap_report.sectors_late_s`); a split at or beyond the lap time counts as not yet
+  updated; `[S1, 0, 0]` means "sectors unknown" and is no longer a plausibility failure;
+  `sector_times_implausible` is a review finding (was: invalid), reported by the server itself
+  too. Older clients' unexplained rejections (0.9.2: pit lane, no time or LMU's flag) stay invalid.
 - The Stint Analyzer shows under every invalid lap why the server did not count it.
 
 ### Icon

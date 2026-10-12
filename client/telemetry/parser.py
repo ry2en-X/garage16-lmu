@@ -17,7 +17,7 @@ from __future__ import annotations
 from array import array
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from math import sqrt
 from typing import List, Optional, Sequence
 import logging
@@ -166,6 +166,10 @@ class LapParser:
         self._late: Optional[lap_verdict.LateWindow] = None
         self._pending: Optional[Lap] = None
         self._pending_fix: Optional[dict] = None   # V0.9.4: lap time to confirm in the late window
+        # V0.9.4: samples of the NEXT lap found at the end of the buffer when the lap number
+        # changed (LMU reset the distance first) — they start the next lap
+        self._carry: Optional[list] = None
+        self._force_reset = False
         self._previous_lmu_time: Optional[float] = None
 
     MAX_GRID_VEHICLES = 128
@@ -203,6 +207,8 @@ class LapParser:
         self._pending = None
         self._pending_fix = None
         self._previous_lmu_time = None
+        self._carry = None
+        self._force_reset = False
 
     # ------------------------------------------------------------------ late window
 
@@ -224,14 +230,15 @@ class LapParser:
     def _release(self, complete: bool) -> Lap:
         lap, late = self._pending, self._late
         self._pending, self._late = None, None
-        if self._pending_fix is not None:
+        if self._pending_fix is not None and self._pending_fix.get("time", True):
             # LMU never reported a matching time: the lap goes out with what LMU said at the
             # line, and the report says so (the server's plausibility check then decides)
             report = dict(lap.lap_report or {})
+            measured = self._pending_fix["measured"]
             report["lap_time_unconfirmed"] = {"lmu": round(self._pending_fix["stale"], 4),
-                                              "measured": round(self._pending_fix["measured"], 3)}
+                                              "measured": round(measured, 3) if measured is not None else -1.0}
             lap.lap_report = report
-            self._pending_fix = None
+        self._pending_fix = None
         report = dict(lap.lap_report or {})
         if late is not None:
             report["late"] = late.report(complete)
@@ -277,22 +284,37 @@ class LapParser:
             return
         scoring = frame.scoring
         value = float(scoring.last_lap_time)
-        if value == fix["stale"] or not self._time_matches(value, fix["measured"]):
-            return
         lap = self._pending
+        after = round(float(frame.telemetry.elapsed_time) - fix["line_et"], 2)
+        if fix.get("time", True):
+            if value == fix["stale"] or not self._time_matches(value, fix["measured"]):
+                return
+        elif value != fix["stale"]:
+            return                     # LMU moved on to another time: leave the lap as it is
+        s1, s2 = float(scoring.last_sector1), float(scoring.last_sector2)
+        sectors_ok = 0 < s1 < s2 < value
+        if not fix.get("time", True) and not sectors_ok:
+            return                     # still waiting for the sector times
         lap.sector_times = self._derive_sector_splits(scoring)
         reasons = self._reasons(scoring, fix["pit"], fix["game_state"])
         report = dict(lap.lap_report or {})
         report["reasons"] = reasons
-        report["lap_time_corrected"] = {"from": round(fix["stale"], 4), "to": round(value, 4),
-                                        "after_s": round(float(frame.telemetry.elapsed_time) - fix["line_et"], 2)}
+        if fix.get("time", True):
+            report["lap_time_corrected"] = {"from": round(fix["stale"], 4), "to": round(value, 4), "after_s": after}
+            logger.info("Lap %d: LMU reported the lap time late — %.3f s instead of %.3f s.", lap.lap_number, value, fix["stale"])
+        else:
+            report["sectors_late_s"] = after
+            logger.info("Lap %d: LMU reported the sector times %.2f s late.", lap.lap_number, after)
         lap.lap_report = report
         lap.lap_time = value
         lap.is_valid = lap_verdict.is_valid(reasons)
         self._previous_lmu_time = value
         if self._late is not None:
             self._late.set_lap_time(value)
-        logger.info("Lap %d: LMU reported the lap time late — %.3f s instead of %.3f s.", lap.lap_number, value, fix["stale"])
+        if fix.get("time", True) and not sectors_ok:
+            # the time is right now; the sector times may still follow
+            self._pending_fix = {**fix, "time": False, "stale": value}
+            return
         self._pending_fix = None
 
     def _observe_late(self, frame: Frame) -> None:
@@ -389,10 +411,11 @@ class LapParser:
             else:
                 self._reset_wait_frames += 1
                 prev_lap_dist = self._buffer[-1].lap_dist if self._buffer else None
-                reset_detected = (
+                reset_detected = self._force_reset or (
                     prev_lap_dist is not None
                     and scoring.lap_dist < prev_lap_dist - self._RESET_DROP_THRESHOLD_METERS
                 )
+                self._force_reset = False
                 if not reset_detected and self._reset_wait_frames <= self._MAX_RESET_WAIT_FRAMES:
                     # Still the completing lap's tail — keep it there.
                     self._buffer.append(self._build_sample(frame))
@@ -458,9 +481,12 @@ class LapParser:
                 if self._late is not None:
                     self._late.set_lap_time(scoring.last_lap_time)
                     self._pending = completed
+                    # V0.9.4: also when only the sector times are not there yet (LMU writes them late)
+                    sectors_missing = "sector_times_implausible" in reasons and float(scoring.last_lap_time) > 0
                     self._pending_fix = {"stale": float(scoring.last_lap_time), "measured": measured,
                                          "pit": self._pit_this_lap, "game_state": game_state,
-                                         "line_et": self._late.line_et} if stale else None
+                                         "line_et": self._late.line_et,
+                                         "time": stale} if (stale or sectors_missing) else None
                     completed = None
                 self._current_lap_number = self._pending_lap_number
                 self._awaiting_lap_dist_reset = False
@@ -469,9 +495,17 @@ class LapParser:
                 # None: the common tail (below) sets it lazily from this
                 # very frame — the one where lap_dist actually reset,
                 # which is the true first sample of the new lap.
+                completing_start = self._lap_start_time
                 self._lap_start_time = None
                 self._buffer = []
                 self._pit_this_lap = False
+                if self._carry:
+                    # V0.9.4: the next lap had already begun (LMU reset the distance before
+                    # the lap number changed) — its first samples move over, re-timed
+                    carry, self._carry = self._carry, None
+                    base = carry[0].t
+                    self._buffer = [replace(sample, t=sample.t - base) for sample in carry]
+                    self._lap_start_time = (completing_start or 0.0) + base
                 if scoring.in_pits:
                     self._pit_this_lap = True
                 # Falls through to the common tail: this frame (the
@@ -502,6 +536,22 @@ class LapParser:
                 # lag was confirmed insufficient by further real testing).
                 # Enter a wait state instead: keep attributing frames to
                 # the completing lap until lap_dist actually drops.
+                # V0.9.4: LMU sometimes resets the lap distance a few frames BEFORE the lap
+                # number changes (seen on Fuji, Spa, Silverstone). The reset this branch waits
+                # for has then already happened: the samples after it belong to the new lap.
+                early = self._early_reset_index()
+                if early is not None:
+                    self._carry = self._buffer[early:]
+                    self._buffer = self._buffer[:early]
+                    released = self._start_late_window(frame)
+                    self._observe_late(frame)
+                    self._awaiting_lap_dist_reset = True
+                    self._pending_lap_number = tele.lap_number
+                    self._reset_wait_frames = 0
+                    self._tail_start = len(self._buffer)
+                    self._force_reset = True
+                    again = self.feed(frame)   # finalised at once: this frame is past the reset
+                    return released or again
                 # V0.9.3.1: the finish line — the late window starts here
                 released = self._start_late_window(frame)
                 self._observe_late(frame)
@@ -543,6 +593,23 @@ class LapParser:
                 and self._late.done(tele.elapsed_time):
             completed = self._release(complete=True)
         return released or completed
+
+    _EARLY_RESET_LOOKBACK = 300   # samples (5 s at 60 Hz)
+
+    def _early_reset_index(self) -> Optional[int]:
+        """Index of the first sample after a lap-distance reset near the end of the buffer
+        (the next lap already began), or None. Only a clear reset counts: a drop of more than
+        _RESET_DROP_THRESHOLD_METERS, after which the distance stays near the start."""
+        buf = self._buffer
+        n = len(buf)
+        if n < 20:
+            return None
+        for i in range(n - 1, max(n - self._EARLY_RESET_LOOKBACK, 1) - 1, -1):
+            if buf[i].lap_dist < buf[i - 1].lap_dist - self._RESET_DROP_THRESHOLD_METERS:
+                if i < 10 or max(s.lap_dist for s in buf[i:]) > self._RESET_DROP_THRESHOLD_METERS:
+                    return None
+                return i
+        return None
 
     def _build_sample(self, frame: Frame) -> TelemetrySample:
         tele = frame.telemetry
@@ -598,7 +665,7 @@ class LapParser:
         s1 = scoring.last_sector1
         s2_cumulative = scoring.last_sector2
         total = scoring.last_lap_time
-        if s1 <= 0 or s2_cumulative <= 0 or total <= 0 or s2_cumulative <= s1:
+        if s1 <= 0 or s2_cumulative <= 0 or total <= 0 or s2_cumulative <= s1 or s2_cumulative >= total:
             # Missing/invalid sector data (e.g. first lap out of the pits,
             # or a session/track without three timed sectors) — report
             # what we can and leave the rest at 0 rather than emitting a

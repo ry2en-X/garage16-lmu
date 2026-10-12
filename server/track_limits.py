@@ -131,7 +131,10 @@ RULES: Dict[str, Rule] = {
     # --- decided Garage16 rules
     "no_lap_time": Rule(TIER_RULE, INVALID, True, "LMU reported no lap time for the lap."),
     "pit_lane": Rule(TIER_RULE, INVALID, True, "The car was in the pit lane during the lap (Garage16 rule: no pit laps in comparisons)."),
-    "sector_times_implausible": Rule(TIER_RULE, INVALID, True, "LMU's sector times are missing or not increasing."),
+    # V0.9.4: review, not invalid — LMU writes the sector times a little late, so at the moment
+    # the lap is finalised they can still be the previous lap's or missing, on laps LMU counts.
+    "sector_times_implausible": Rule(TIER_HEURISTIC, REVIEW, True,
+                                     "LMU's sector times were missing or not increasing when the lap was finalised (LMU writes them late). The lap time is LMU's; only the sector split is unknown."),
     "client_invalid": Rule(TIER_RULE, INVALID, True,
                            "An older client rejected the lap without saying why (before 0.9.3: pit lane, no time or LMU's count flag)."),
     # --- heuristics: review only, unless promoted by the operator
@@ -388,6 +391,7 @@ def assess(columns: Dict[str, np.ndarray], *, tail_samples: int = 0, client_vali
     lap_dist = columns.get("lap_dist")
     if t is None or lap_dist is None or len(t) < 3:
         _client_findings(add, signals, client_valid, client_reasons, client_state, sectors_ok, findings)
+        _sector_finding(add, sectors_ok, findings)
         _late_findings(add, late, steps_per_point)
         add("not_verifiable", "file")
         return _verdict(findings, signals)
@@ -564,6 +568,9 @@ def assess(columns: Dict[str, np.ndarray], *, tail_samples: int = 0, client_vali
 
     # --- 9. what the client concluded
     _client_findings(add, signals, client_valid, client_reasons, client_state, sectors_ok, findings)
+    # V0.9.4: unknown sector times are no longer a plausibility failure of the file
+    # (server/validation.py) — the server says so itself, as a review finding
+    _sector_finding(add, sectors_ok, findings)
 
     track_signals = {"lap_invalidated", "track_limits_steps", "surface_type", "count_lap_flag", "track_edge"}
     if not track_signals.intersection(signals):
@@ -607,6 +614,13 @@ def _late_findings(add, late: Optional[dict], steps_per_point: Optional[int] = N
         elif abs(final - at_line) > 0.0005:
             add("game_lap_time_changed", "late_window",
                 detail={"lap_time": round(float(at_line), 3), "became": round(float(final), 3)})
+
+
+def _sector_finding(add, sectors_ok: Optional[bool], findings: List[Finding]) -> None:
+    """V0.9.4: unknown sector times are no longer a plausibility failure of the file
+    (server/validation.py) — the server reports them itself, as a review finding."""
+    if sectors_ok is False and not any(f.code == "sector_times_implausible" for f in findings):
+        add("sector_times_implausible", "sectors")
 
 
 def _client_findings(add, signals: List[str], client_valid: bool, client_reasons: Optional[Sequence[str]],

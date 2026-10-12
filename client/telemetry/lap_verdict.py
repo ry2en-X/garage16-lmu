@@ -33,11 +33,14 @@ from typing import List, Optional
 
 # --- the rules (must match server/track_limits.py RULES; see the module docstring)
 INVALIDATING = frozenset({
-    "no_lap_time", "pit_lane", "sector_times_implausible",
+    "no_lap_time", "pit_lane",
     "game_invalidated", "game_time_not_counted", "game_lap_not_counted",
 })
+# V0.9.4: sector_times_implausible moved here — LMU writes the sector times late; a lap LMU
+# counts is not rejected for an unknown sector split (the client also waits for them, parser.py)
 REVIEW_ONLY = frozenset({
     "track_limits_points", "penalty_added", "late_track_limits", "game_last_lap_time_withdrawn",
+    "sector_times_implausible",
 })
 
 LATE_WINDOW_SECONDS = 6.0           # LMU: 2-5 s after rejoining, plus a margin
@@ -63,7 +66,9 @@ def lap_reasons(*, lap_time: float, in_pits: bool, sector1: float, sector2: floa
         reasons.append("no_lap_time")
     if in_pits:
         reasons.append("pit_lane")
-    if sector1 <= 0 or sector2 <= sector1:
+    # V0.9.4: a split at or beyond the lap time cannot belong to this lap (the previous lap's
+    # values, LMU had not updated them yet)
+    if sector1 <= 0 or sector2 <= sector1 or (lap_time > 0 and sector2 >= lap_time):
         reasons.append("sector_times_implausible")
     state = game_state or {}
     flag = state.get("count_lap_flag")

@@ -266,11 +266,20 @@ sudo docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 - „telemetry duration (… s) does not match claimed lap_time (… s)“ oder „sector_times sum …“:
   sehr wahrscheinlich die zu spät gemeldete LMU-Rundenzeit (oben) — die Zeit dieser Runde ist
   dann auch falsch gespeichert (die der Vorrunde).
+- „lap_dist has implausible backward jumps“ / „lap_dist (22m) does not match distance implied
+  by the speed trace“ bei `client_ok = t`: LMU hat die Rundendistanz ein paar Frames VOR dem
+  Rundenwechsel zurückgesetzt, und der Client 0.9.2 hat die ersten Meter der nächsten Runde
+  an die Runde gehängt. Die Runde selbst ist vollständig und LMUs Zeit stimmt. Der Server 0.9.4
+  liest solche Dateien richtig; Client 0.9.4 macht es gar nicht erst.
+- „sector_times sum (… s) does not match lap_time“ bei `client_ok = f`: LMU hatte die
+  Sektorzeiten noch nicht geschrieben. Client 0.9.4 wartet darauf. Bei 0.9.2-Runden kann der
+  Server nicht ausschließen, dass der Client sie auch wegen der Boxengasse verworfen hat — sie
+  bleiben ungültig.
 - Ab V0.9.4 zeigt `scripts.revalidate_laps` (Schritt 5) im Probelauf, welche Runden nach
-  den aktuellen Regeln zählen würden („invalid -> valid (restorable)“); `--apply --restore`
-  lässt sie wieder zählen (sie stehen danach zur Kontrolle in der Track-Limit-Prüfung). Eine
-  Runde mit falscher (veralteter) Zeit bleibt besser gestrichen — ihre echte Zeit ist nicht
-  gespeichert.
+  den aktuellen Regeln zählen würden („invalid -> valid (restorable)“) — dazu gehören die
+  „lap_dist“-Runden oben; `--apply --restore` lässt sie wieder zählen (sie stehen danach zur
+  Kontrolle in der Track-Limit-Prüfung). Eine Runde mit falscher (veralteter) Zeit bleibt
+  besser gestrichen — ihre echte Zeit ist nicht gespeichert.
 
 Es gibt eine **Datenbank-Migration** (`0015`, nach `0014`): Sie legt die Spalte
 `laps.lap_context` (Boxenstopp-Zähler, Reifenmischung, Schaden, Tankgröße, Position, Restzeit

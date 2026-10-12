@@ -27,7 +27,7 @@ import io
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Union
+from typing import TYPE_CHECKING, List, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -77,6 +77,9 @@ DISTANCE_INTEGRAL_TOLERANCE_MIN_METERS = 50.0
 class ValidationResult:
     is_valid: bool
     reasons: List[str] = field(default_factory=list)
+    # V0.9.4: samples at the END of the file that already belong to the next lap (LMU reset
+    # the lap distance before the client switched laps) — checked as the tail, not the lap
+    reset_tail: int = 0
 
     def fail(self, reason: str) -> None:
         self.is_valid = False
@@ -146,10 +149,63 @@ def validate_and_read(path: Union[str, Path], metadata: LapMetadata, extra_colum
         df = pd.DataFrame({name: [] for name in REQUIRED_COLUMNS})
     else:
         df = pd.DataFrame({name: columns[name] for name in REQUIRED_COLUMNS if name in columns})
+    tail = trailing_reset(columns.get("lap_dist"), columns.get("t"))
+    if tail:
+        result = validate_dataframe(df.iloc[: len(df) - tail], metadata, sample_count_total=len(df))
+        result.reset_tail = tail
+        return result, columns
     return validate_dataframe(df, metadata), columns
 
 
-def validate_dataframe(df: pd.DataFrame, metadata: LapMetadata) -> ValidationResult:
+# V0.9.4: how every reason written by this module begins — so a stored lap rejected by the
+# plausibility check (and not by an admin) is recognised as automatically rejected and may be
+# judged again by scripts/revalidate_laps.py (server/lap_check.py is_automatic_reason).
+PLAUSIBILITY_REASON_PREFIXES = (
+    "telemetry file has no samples", "telemetry is missing required columns", "telemetry contains NaN/Inf",
+    "sample_count mismatch", "speed out of", "throttle out of", "brake out of", "steering out of",
+    "gear out of", "rpm out of", "telemetry timestamps are not monotonically", "telemetry duration (",
+    "lap_dist has implausible backward jumps", "lap_dist (", "sector_times sum (",
+    "telemetry file could not be parsed", "validation error:",
+)
+
+
+# V0.9.4: clients up to 0.9.3.1 sometimes kept the first samples of the NEXT lap at the end of a
+# lap: LMU had already reset the lap distance (to ~0 m) a few frames before the telemetry lap
+# number changed, so the client did not see the reset it was waiting for. The lap itself is
+# complete — its last part simply continues past the line. Such a file failed "lap_dist has
+# implausible backward jumps" / "lap_dist (20m) does not match …" although LMU counted the lap.
+# A single reset (a drop of more than half the lap) within the last TRAILING_RESET_MAX_S seconds
+# is therefore treated as the start of the next lap: the samples after it are the tail.
+TRAILING_RESET_MAX_S = 3.0
+TRAILING_RESET_MIN_DROP_M = 500.0
+
+
+def trailing_reset(lap_dist, t=None) -> int:
+    """Number of samples after a lap-distance reset at the very end of the file, else 0."""
+    if lap_dist is None:
+        return 0
+    d = np.asarray(lap_dist, dtype=float)
+    if d.size < 10 or not np.isfinite(d).all():
+        return 0
+    span = float(np.max(d))
+    drops = np.flatnonzero(np.diff(d) < -max(TRAILING_RESET_MIN_DROP_M, 0.5 * span))
+    if drops.size != 1:
+        return 0
+    k = int(drops[0]) + 1                     # first sample of the next lap
+    after = d[k:]
+    if after.size == 0 or float(np.max(after)) > 0.1 * span:
+        return 0                              # more than a few metres of the next lap: not a tail
+    if t is not None:
+        times = np.asarray(t, dtype=float)
+        if times.size == d.size and np.isfinite(times[[k - 1, -1]]).all() and times[-1] - times[k - 1] > TRAILING_RESET_MAX_S:
+            return 0
+    # the part before the reset must itself be a whole lap without other jumps
+    if np.any(np.diff(d[:k]) < -MAX_LAP_DIST_REGRESSION_METERS):
+        return 0
+    return int(d.size - k)
+
+
+def validate_dataframe(df: pd.DataFrame, metadata: LapMetadata, sample_count_total: Optional[int] = None) -> ValidationResult:
     """The actual plausibility checks, against an already-parsed
     DataFrame. Split out from validate_telemetry() so this — the part
     with real logic worth testing — doesn't need pyarrow to test."""
@@ -176,8 +232,9 @@ def validate_dataframe(df: pd.DataFrame, metadata: LapMetadata) -> ValidationRes
 
     if metadata.sample_count is not None:
         tolerance = max(SAMPLE_COUNT_TOLERANCE_MIN, SAMPLE_COUNT_TOLERANCE_FRACTION * metadata.sample_count)
-        if abs(len(df) - metadata.sample_count) > tolerance:
-            result.fail(f"sample_count mismatch: metadata claims {metadata.sample_count}, file has {len(df)}")
+        in_file = sample_count_total if sample_count_total is not None else len(df)   # V0.9.4: with the tail
+        if abs(in_file - metadata.sample_count) > tolerance:
+            result.fail(f"sample_count mismatch: metadata claims {metadata.sample_count}, file has {in_file}")
 
     if (df["speed"] < -0.5).any() or (df["speed"] > MAX_SPEED_MS).any():
         result.fail("speed out of realistic range")
@@ -234,7 +291,12 @@ def validate_dataframe(df: pd.DataFrame, metadata: LapMetadata) -> ValidationRes
                 )
 
     sector_sum = sum(metadata.sector_times)
-    if metadata.lap_time > 0:
+    # V0.9.4: [S1, 0, 0] (or all zero) is the client's way of saying "LMU's sector times were
+    # not usable when the lap was finalised" — LMU writes them late, like the lap time. The
+    # sectors are then unknown, not wrong: the lap is judged by its time and its telemetry, and
+    # the client's reason (sector_times_implausible) sends it to review (server/track_limits.py).
+    sectors_unknown = len(metadata.sector_times) >= 3 and all(float(x) == 0.0 for x in metadata.sector_times[1:])
+    if metadata.lap_time > 0 and not sectors_unknown:
         # No longer gated on `sector_sum > 0` — an all-zero sector_times
         # list for a lap with a real lap_time is itself implausible and
         # was previously let through silently (V0.5.2 audit finding).

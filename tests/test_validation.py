@@ -144,11 +144,21 @@ def test_sample_count_mismatch_rejected():
 
 
 # V0.6.0: closed gap where sector_times=[0,0,0] skipped the sum check entirely.
-def test_all_zero_sector_times_rejected_for_real_lap():
+# V0.9.4: [S1, 0, 0] / [0, 0, 0] is the client's marker for "LMU's sector times were not there
+# yet" (LMU writes them late). Such a lap is no longer rejected by the plausibility check — the
+# track-limits verdict reports the unknown sectors for review instead (never silently).
+def test_unknown_sector_times_are_not_a_plausibility_failure_but_a_review():
+    from server import track_limits as tl
+    from server.lap_check import sectors_ok
+
     df = _good_dataframe(lap_time=90.0)
     result = validate_dataframe(df, _meta(lap_time=90.0, sector_times=(0.0, 0.0, 0.0)))
-    assert result.is_valid is False
-    assert any("sector_times" in r for r in result.reasons)
+    assert result.is_valid is True
+    verdict = tl.assess({}, client_valid=True, sectors_ok=sectors_ok([0.0, 0.0, 0.0]))
+    assert [f.code for f in verdict.findings if f.severity == tl.REVIEW] == ["sector_times_implausible"]
+    # real (non-zero) sectors that do not add up are still wrong
+    bad = validate_dataframe(df, _meta(lap_time=90.0, sector_times=(30.0, 20.0, 10.0)))
+    assert bad.is_valid is False and any("sector_times" in r for r in bad.reasons)
 
 
 # V0.6.0: lap_dist inconsistent with the speed trace (distance-integral check).

@@ -37,7 +37,7 @@ from sqlalchemy.orm import Session
 from . import car_identity, lap_insights, track_limits
 from .config import settings
 from .models import Lap
-from .validation import ValidationResult, validate_and_read
+from .validation import PLAUSIBILITY_REASON_PREFIXES, ValidationResult, validate_and_read
 
 logger = logging.getLogger("lmu_garage.lap_check")
 
@@ -93,7 +93,9 @@ def is_automatic_reason(text) -> bool:
         return False
     if text == CLIENT_INVALID_TEXT or text.startswith("track limits:"):
         return True
-    return False
+    # V0.9.4: the plausibility check's own reasons (server/validation.py) — e.g. the lap whose file
+    # ended with the next lap's first metres, which the current check reads correctly
+    return text.startswith(PLAUSIBILITY_REASON_PREFIXES)
 
 
 def reference_distance(db: Session, track_name: str, exclude_lap_id: Optional[int] = None) -> Optional[float]:
@@ -200,6 +202,9 @@ def check_lap(db: Session, path: Path, metadata, *, client_valid: bool, exclude_
         validation, columns = ValidationResult(is_valid=False, reasons=[f"validation error: {exc}"]), {}
 
     tail = int(inputs.get("tail_samples") or 0)
+    # V0.9.4: the next lap's first samples at the end of the file (LMU reset the distance
+    # before the client switched laps) are tail too — for the track limits and the figures
+    tail = max(tail, int(getattr(validation, "reset_tail", 0) or 0))
     client_ok = bool(inputs.get("client_valid", client_valid))
     try:
         reference = reference_distance(db, metadata.track_name, exclude_lap_id) if columns else None

@@ -305,3 +305,131 @@ def ext_v094(monkeypatch):
          "lap_invalidated": float(tele.lap_invalidated), "num_penalties": float(scoring.num_penalties),
          "path_lateral": scoring.path_lateral, "track_edge": scoring.track_edge}.get(name, 0.0)
         for name in EXTENDED_COLUMNS))
+
+
+# ---------------------------------------------------------------------------
+# V0.9.4 — laps LMU counts that earlier versions rejected (seen on the NAS: Fuji, Spa, Silverstone)
+# ---------------------------------------------------------------------------
+
+def test_a_reset_at_the_end_of_the_file_is_the_next_laps_tail():
+    import numpy as np
+    from server.validation import trailing_reset
+
+    d = np.concatenate([np.linspace(0, 4560, 5000), np.linspace(1, 22, 20)])   # 20 samples past the line
+    t = np.linspace(0, 92.5, d.size)
+    assert trailing_reset(d, t) == 20
+    assert trailing_reset(np.linspace(0, 4560, 5000), None) == 0, "a normal lap has no tail"
+    mid = np.concatenate([np.linspace(0, 2000, 2000), np.linspace(0, 2560, 3000)])
+    assert trailing_reset(mid, None) == 0, "a reset in the middle is not a tail"
+
+
+def test_a_stored_lap_with_the_next_laps_start_validates_again(client):
+    """The 0.9.2 file of such a lap: the first metres of the next lap at its end. The server
+    now judges the lap without them — the dry run of revalidate_laps lists it as restorable."""
+    import numpy as np
+    from server.lap_check import check_lap
+    from server.database import SessionLocal
+
+    me = register(client, "Fuji")
+    df = clean_lap(seed=7)
+    extra = df.iloc[-20:].copy()
+    extra["lap_dist"] = np.linspace(1, 20, 20)
+    extra["t"] = df["t"].iloc[-1] + np.linspace(0.016, 0.33, 20)
+    full = __import__("pandas").concat([df, extra], ignore_index=True)
+    lap_id = upload_df(client, me, full, lap_time=90.0)["lap_id"]
+    lap = lap_row(lap_id)
+    assert lap.is_valid, lap.invalid_reason
+    assert lap.check_inputs is not None
+
+
+def test_unknown_sector_times_no_longer_reject_a_lap(client):
+    me = register(client, "Sectors")
+    body = upload_df(client, me, clean_lap(seed=8), lap_time=90.0, sector_times=[30.0, 0.0, 0.0],
+                     lap_report={"reasons": ["sector_times_implausible"]})
+    lap = lap_row(body["lap_id"])
+    assert lap.is_valid is True and lap.review_status == "pending"
+
+
+def test_the_client_starts_the_next_lap_at_an_early_reset(ext_v094):
+    """LMU resets the distance BEFORE the lap number changes: the samples after the reset
+    belong to the next lap, the finished lap ends at the reset."""
+    from tests.test_v0931_client import _frame
+    from client.telemetry.parser import LapParser
+
+    parser = LapParser()
+    for i in range(200):                                       # lap 1: 0..3980 m over 20 s
+        assert parser.feed(_frame(1, i * 20.0, i * 0.1)) is None
+    # the distance resets at 20.0 s, the lap number only 3 frames later
+    for k, (dist, t) in enumerate([(2.0, 20.0), (6.0, 20.05), (10.0, 20.1)]):
+        assert parser.feed(_frame(1, dist, t)) is None
+    assert parser.feed(_frame(2, 14.0, 20.15)) is None         # held for the late window
+    lap, i = None, 0
+    while lap is None and i < 200:
+        i += 1
+        lap = parser.feed(_frame(2, 14.0 + i * 20, 20.15 + i * 0.1))
+    assert lap is not None and lap.lap_number == 1
+    dists = [s.lap_dist for s in lap.samples]
+    assert max(dists) == 3980.0 and min(dists[-5:]) > 3000, "the lap ends at the reset, no next-lap metres"
+    assert all(b >= a for a, b in zip(dists, dists[1:])), "no backward jump left in the lap"
+    nxt = parser._buffer
+    assert nxt[0].lap_dist == 2.0 and nxt[0].t == 0.0, "the next lap starts with the samples after the reset"
+
+
+def test_the_client_waits_for_late_sector_times(ext_v094):
+    from tests.test_v0931_client import _drive_to_line, _frame
+    from client.telemetry.parser import LapParser
+
+    parser = LapParser()
+    # the lap time is right (20.0 s measured, LMU says 20.02) but sector 2 is not there yet
+    import types
+    frames = []
+    assert _drive_to_line(parser, last_lap_time=20.02) == [None, None, None]
+    lap, i = None, 0
+    while lap is None and i < 200:
+        i += 1
+        t = 20.1 + i * 0.1
+        f = _frame(2, 2.0 + i * 20, t, last_lap_time=20.02)
+        late = t >= 20.8                       # until then LMU still shows the previous lap's splits
+        f.scoring.last_sector1 = 6.5 if late else 30.0
+        f.scoring.last_sector2 = 13.0 if late else 60.0
+        lap = parser.feed(f)
+    assert lap.lap_time == pytest.approx(20.02)
+    assert lap.sector_times == pytest.approx([6.5, 6.5, 7.02])
+    assert "sector_times_implausible" not in lap.lap_report["reasons"]
+    assert lap.lap_report["sectors_late_s"] > 0
+
+
+def test_a_092_lap_with_the_next_laps_start_is_restorable(client, capsys):
+    """What the NAS showed: valid in LMU, stored by 0.9.2 as invalid for 'lap_dist has implausible
+    backward jumps'. The current check reads the file correctly; --restore makes it count again
+    (into the review queue). A lap an ADMIN invalidated is still never touched."""
+    import numpy as np
+    import pandas as pd
+    from scripts import revalidate_laps
+    from server.database import SessionLocal
+    from server.models import Lap
+
+    me = register(client, "Restore094")
+    def with_next_lap_start(seed):
+        df = clean_lap(seed=seed)
+        extra = df.iloc[-20:].copy()
+        extra["lap_dist"] = np.linspace(1, 20, 20)
+        extra["t"] = df["t"].iloc[-1] + np.linspace(0.016, 0.33, 20)
+        return pd.concat([df, extra], ignore_index=True)
+
+    ids = [upload_df(client, me, with_next_lap_start(9 + n), lap_time=90.0, lap_number=n,
+                     recorded_at=1_700_000_000 + n)["lap_id"] for n in (1, 2)]
+    assert ids[0] != ids[1]
+    with SessionLocal() as db:
+        for lap_id, reason in zip(ids, (["lap_dist has implausible backward jumps", "lap_dist (19m) does not match distance implied by the speed trace (2554m)"],
+                                        ["moderator: cut the chicane"])):
+            db.query(Lap).filter(Lap.id == lap_id).update({"is_valid": False, "invalid_reason": reason, "check_inputs": None})
+        db.commit()
+
+    assert revalidate_laps.main(["--driver", str(me["driver_id"])]) == 0
+    out = capsys.readouterr().out
+    assert f"[{revalidate_laps.T_RESTORE}] lap {ids[0]:>6}" in out, out
+    assert f"[{revalidate_laps.T_KEPT}] lap {ids[1]:>6}" in out
+    assert revalidate_laps.main(["--apply", "--restore", "--driver", str(me["driver_id"])]) == 0
+    assert lap_row(ids[0]).is_valid is True and lap_row(ids[0]).review_status == "pending"
+    assert lap_row(ids[1]).is_valid is False

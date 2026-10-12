@@ -62,8 +62,8 @@ def test_every_rule_has_a_tier_and_only_heuristics_and_unconfirmed_signals_can_b
         assert rule.note, f"{code}: every rule says why it exists"
     assert {c for c, r in tl.RULES.items() if r.severity == tl.INVALID} == {
         "game_invalidated", "game_time_not_counted", "game_lap_not_counted",
-        "no_lap_time", "pit_lane", "sector_times_implausible", "client_invalid",
-    }, "only LMU's verdict and the decided Garage16 rules invalidate"
+        "no_lap_time", "pit_lane", "client_invalid",
+    }, "only LMU's verdict and the decided Garage16 rules invalidate (V0.9.4: unknown sector times only review)"
     heuristics = {c for c, r in tl.RULES.items() if r.tier == tl.TIER_HEURISTIC}
     assert {c for c in heuristics if tl.RULES[c].severity == tl.REVIEW} <= tl.PROMOTABLE
     assert all(tl.RULES[c].severity == tl.REVIEW for c in tl.PROMOTABLE)
@@ -242,7 +242,8 @@ def test_a_093_clients_steps_only_rejection_becomes_a_review():
 
 def test_a_093_clients_rejection_is_explained_from_its_summary_where_it_can_be():
     v = tl.assess(_columns(), client_valid=False, client_state={"count_lap_flag": 2}, sectors_ok=False)
-    assert codes(v, tl.INVALID) == ["sector_times_implausible"]
+    # V0.9.4: unknown sector times explain the rejection, but only send the lap to review
+    assert codes(v, tl.INVALID) == [] and codes(v, tl.REVIEW) == ["sector_times_implausible"]
     cols = _columns()
     del cols["count_lap_flag"]
     v = tl.assess(cols, client_valid=False, client_state={"count_lap_flag": 1})
