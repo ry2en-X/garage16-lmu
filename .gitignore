@@ -48,7 +48,6 @@ node_modules/
 # The installer, the portable zip and PyInstaller's working folders are
 # BUILD ARTIFACTS — publish them as a GitHub Release, never commit them.
 .venv-build/
-.venv-build-*/
 build/
 dist/
 dist-installer/

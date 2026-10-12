@@ -52,6 +52,21 @@ logging.basicConfig(level=resolve_log_level(), format="%(asctime)s [%(name)s] %(
 logger = logging.getLogger("lmu_garage.main")
 
 
+GRID_SCAN_EVERY_FRAMES = 600  # ~10 s at 60 Hz
+
+
+def _submit_held(parser: LapParser, saver) -> None:
+    """V0.9.3.1: a FINISHED lap still held for its late window is saved before the parser is
+    reset (game closed, telemetry error) — it is a complete lap, only its late window is
+    marked incomplete."""
+    try:
+        held = parser.flush_pending()
+        if held is not None:
+            saver.submit(held)
+    except Exception:  # noqa: BLE001 — never let this stop the loop's recovery
+        logger.exception("Could not save the lap held for its late window")
+
+
 def telemetry_loop(app: GarageApp, recorder: LapRecorder) -> None:
     reader = LMUSharedMemoryReader()
     parser = LapParser()
@@ -79,12 +94,29 @@ def telemetry_loop(app: GarageApp, recorder: LapRecorder) -> None:
 
     saver = AsyncLapSaver(recorder, on_saved=lap_saved)
     atexit.register(saver.flush, 15.0)
+    # V0.9.3.1: runs BEFORE the flush above (atexit is last-in, first-out): a finished lap
+    # still held for its late window is queued, then the queue is written
+    atexit.register(_submit_held, parser, saver)
 
     while True:
         try:
             reader.open()
             app.push(StatusUpdate(connected=True, log_line="Connected to LMU shared memory."))
-            for frame in reader.stream(poll_hz=60.0):
+            frames_until_grid = 0
+            for frame in reader.stream(poll_hz=60.0, idle_seconds=1.0):
+                if frame is None:
+                    # V0.9.3.1: no player car (menu, garage) — a lap held for its late
+                    # window after the finish line is sent once its time limit is over
+                    held = parser.idle()
+                    if held is not None:
+                        saver.submit(held)
+                    continue
+                # V0.9.3: the cars of the session (veh_filename -> model), every ~10 s —
+                # a few short strings per car, never on every frame
+                frames_until_grid -= 1
+                if frames_until_grid <= 0:
+                    frames_until_grid = GRID_SCAN_EVERY_FRAMES
+                    parser.observe_vehicles(reader.read_vehicle_catalog())
                 app.push(
                     StatusUpdate(
                         connected=True,
@@ -98,11 +130,13 @@ def telemetry_loop(app: GarageApp, recorder: LapRecorder) -> None:
                     saver.submit(completed_lap)
         except SharedMemoryNotFound:
             reader.close()
+            _submit_held(parser, saver)
             parser.reset()  # P0-7(b): discard stale lap buffer from previous session
             app.push(StatusUpdate(connected=False, log_line="Waiting for LMU to start..."))
             time.sleep(5)
         except Exception:
             reader.close()
+            _submit_held(parser, saver)
             parser.reset()  # P0-7(b): discard stale lap buffer
             logger.exception("Telemetry loop crashed, restarting in 5s")
             app.push(StatusUpdate(connected=False, log_line="Telemetry error — retrying..."))
@@ -288,6 +322,7 @@ def main() -> None:
     # V0.9.2: started by the window's "Open analysis" button (Client + analysis app)
     parser.add_argument("--analysis-window", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--lap", type=int, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--view", choices=("laptime", "stints"), default="laptime", help=argparse.SUPPRESS)
     parser.add_argument(
         "--analysis-selftest", action="store_true",
         help="Check that this installation can show the analysis app window (build smoke test, support).",
@@ -299,7 +334,7 @@ def main() -> None:
         raise SystemExit(analysis_selftest())
 
     if args.analysis_window:
-        raise SystemExit(run_analysis_window(args.lap))
+        raise SystemExit(run_analysis_window(args.lap, args.view))
 
     if args.version or args.follow_migration:
         _attach_parent_console()
@@ -397,7 +432,7 @@ def analysis_selftest() -> int:
     return 0
 
 
-def run_analysis_window(lap_id=None) -> int:
+def run_analysis_window(lap_id=None, view="laptime") -> int:
     """`Garage16.exe --analysis-window [--lap N]` — the analysis app window, in its own
     process (see client/analysis_window.py). Logs to its own file next to the client's
     (two processes must not rotate one log file)."""
@@ -418,11 +453,11 @@ def run_analysis_window(lap_id=None) -> int:
 
         from client.edition import analysis_url
 
-        webbrowser.open(analysis_url(default_api_url(), lap_id))
+        webbrowser.open(analysis_url(default_api_url(), lap_id, view))
         return 0
     from client import analysis_window
 
-    return analysis_window.run(config, lap_id)
+    return analysis_window.run(config, lap_id, view)
 
 
 if __name__ == "__main__":

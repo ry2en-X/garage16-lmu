@@ -31,9 +31,13 @@ class GarageApp:
         self._on_open_analysis = on_open_analysis
         self._analysis_choice = analysis_choice
         self._last_lap_id = None
+        from client.icon import apply_to_tk, set_windows_app_id
+
+        set_windows_app_id()          # V0.9.4: the taskbar shows the Garage16 icon, not Python's
         self.root = tk.Tk()
+        apply_to_tk(self.root)
         self.root.title("Garage16 — Client")
-        self.root.geometry("380x400" if analysis_choice is not None else "380x380")
+        self.root.geometry("440x400" if analysis_choice is not None else "440x380")   # V0.9.4: three analysis buttons
         self.root.resizable(False, False)
 
         self._queue: "queue.Queue[StatusUpdate]" = queue.Queue()
@@ -53,7 +57,7 @@ class GarageApp:
         self.notice_var = tk.StringVar(value="")
         self.notice_label = tk.Label(
             self.root, textvariable=self.notice_var, fg="#8a4b00", bg="#fff4d6",
-            wraplength=340, justify="left", anchor="w", padx=8, pady=6,
+            wraplength=400, justify="left", anchor="w", padx=8, pady=6,
         )
 
         self._notice_url = ""
@@ -81,7 +85,9 @@ class GarageApp:
         if self._on_open_analysis is not None:
             row = ttk.Frame(self.root)
             row.pack(fill="x", padx=12, pady=(0, 4))
-            ttk.Button(row, text="Open analysis", command=lambda: self._on_open_analysis(None)).pack(side="left")
+            # V0.9.4: two dashboards — one lap in detail, or the whole session
+            ttk.Button(row, text="LapTime Analyzer", command=lambda: self._on_open_analysis(None)).pack(side="left")
+            ttk.Button(row, text="Stint Analyzer", command=lambda: self._on_open_analysis(None, view="stints")).pack(side="left", padx=(6, 0))
             self.last_lap_button = ttk.Button(row, text="Analyse last lap", state="disabled",
                                               command=self._open_last_lap)
             self.last_lap_button.pack(side="left", padx=(6, 0))

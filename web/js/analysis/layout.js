@@ -29,14 +29,22 @@ export const SIZES = ["small", "medium", "large"];
 export const MAX_WIDGETS = 30;
 export const MAX_REQUEST_CHANNELS = 24; // the server's limit per request
 
-// Window types. "chart" may appear many times (one channel each); the others once.
-export const SINGLE_TYPES = ["summary", "delta", "corners", "trackmap", "cursor_table", "physics"];
-export const TYPES = [...SINGLE_TYPES, "chart"];
+// Window types. "chart" and "histogram" may appear many times (one channel each); the
+// others once. V0.9.3 added coaching, events, tyres, damper and histogram — additive, so the
+// stored layout keeps version 1 (an older Garage16 simply skips window types it does not know).
+// V0.9.4: + "line" (racing line comparison), "corner_detail", "sectors" — additive again.
+export const SINGLE_TYPES = ["summary", "delta", "corners", "coaching", "trackmap", "line", "corner_detail", "sectors", "events", "cursor_table", "physics", "tyres", "damper"];
+export const CHANNEL_TYPES = ["chart", "histogram"];
+export const TYPES = [...SINGLE_TYPES, ...CHANNEL_TYPES];
 export const TRACKMAP_MODES = ["delta", "none", "speed", "throttle", "brake", "gear", "rpm", "lat_g", "long_g"];
 
 const CHANNEL_KEY = /^[a-z0-9_]{1,48}$/;
 
 // The Garage16 standard layout. The same for everyone, always available.
+// V0.9.3: + "Where to find time" (coaching, from the corner analysis — no extra data) and
+// the track-limits/events window (one small request), appended so every window of the
+// V0.9.1 standard keeps its place. The heavier windows (tyres, damper histograms,
+// histograms) are one click away in "Customise view".
 const STANDARD = [
   { type: "summary", size: "large" },
   { type: "delta", size: "large" },
@@ -47,7 +55,15 @@ const STANDARD = [
   { type: "trackmap", size: "medium", mode: "delta" },
   { type: "cursor_table", size: "medium" },
   { type: "physics", size: "large" },
+  { type: "coaching", size: "medium" },
+  { type: "events", size: "medium" },
+  // V0.9.4: the racing lines of both laps and the corner in detail
+  { type: "line", size: "large" },
+  { type: "corner_detail", size: "large" },
 ];
+
+// Default sizes of windows that are not in the standard layout.
+const EXTRA_SIZES = { tyres: "large", damper: "large", histogram: "medium", sectors: "large" };
 
 function renumber(widgets) {
   return widgets.map((w, i) => ({ ...w, id: `w${i + 1}` }));
@@ -101,13 +117,13 @@ export function sanitizeLayout(raw, { validChannels } = {}) {
       if (!TYPES.includes(item.type)) continue;
       const size = SIZES.includes(item.size) ? item.size : defaultSize(item.type);
       const widget = { type: item.type, size };
-      if (item.type === "chart") {
+      if (CHANNEL_TYPES.includes(item.type)) {
         if (typeof item.channel !== "string" || !CHANNEL_KEY.test(item.channel)) continue;
         if (validChannels && !validChannels.has(item.channel)) continue;
-        if (seen.has(`chart:${item.channel}`)) continue; // one window per channel
-        seen.add(`chart:${item.channel}`);
-        const colors = cleanWidgetColors(item.colors);
+        if (seen.has(`${item.type}:${item.channel}`)) continue; // one window per channel and type
+        seen.add(`${item.type}:${item.channel}`);
         widget.channel = item.channel;
+        const colors = item.type === "chart" ? cleanWidgetColors(item.colors) : undefined;
         if (colors) widget.colors = colors;
       } else {
         if (seen.has(item.type)) continue;
@@ -125,7 +141,7 @@ export function sanitizeLayout(raw, { validChannels } = {}) {
 
 function defaultSize(type) {
   const found = STANDARD.find((w) => w.type === type);
-  return found ? found.size : "large";
+  return found ? found.size : EXTRA_SIZES[type] || "large";
 }
 
 // ---------------------------------------------------------------- versions
@@ -258,9 +274,9 @@ export function setSize(layout, id, size) {
 
 export function setChannel(layout, id, channel, validChannels) {
   const widget = layout.widgets.find((w) => w.id === id);
-  if (!widget || widget.type !== "chart" || typeof channel !== "string" || !CHANNEL_KEY.test(channel)) return layout;
+  if (!widget || !CHANNEL_TYPES.includes(widget.type) || typeof channel !== "string" || !CHANNEL_KEY.test(channel)) return layout;
   if (validChannels && !validChannels.has(channel)) return layout;
-  if (layout.widgets.some((w) => w.id !== id && w.type === "chart" && w.channel === channel)) return layout; // already shown
+  if (layout.widgets.some((w) => w.id !== id && w.type === widget.type && w.channel === channel)) return layout; // already shown
   return edit(layout, id, { channel });
 }
 
@@ -295,10 +311,10 @@ export function removeWidget(layout, id) {
 export function addWidget(layout, spec, validChannels) {
   if (layout.widgets.length >= MAX_WIDGETS || !spec || !TYPES.includes(spec.type)) return layout;
   const widget = { type: spec.type, size: SIZES.includes(spec.size) ? spec.size : defaultSize(spec.type) };
-  if (spec.type === "chart") {
+  if (CHANNEL_TYPES.includes(spec.type)) {
     if (typeof spec.channel !== "string" || !CHANNEL_KEY.test(spec.channel)) return layout;
     if (validChannels && !validChannels.has(spec.channel)) return layout;
-    if (layout.widgets.some((w) => w.type === "chart" && w.channel === spec.channel)) return layout;
+    if (layout.widgets.some((w) => w.type === spec.type && w.channel === spec.channel)) return layout;
     widget.channel = spec.channel;
   } else {
     if (layout.widgets.some((w) => w.type === spec.type)) return layout;
@@ -310,7 +326,9 @@ export function addWidget(layout, spec, validChannels) {
 // ---------------------------------------------------------------- what the layout needs
 
 // Catalog channels the charts show — what has to be requested from the server.
-// Trackmap colour channels are fetched on demand when that mode is chosen.
+// Trackmap colour channels are fetched on demand when that mode is chosen; histogram,
+// damper and tyre windows load their own data (distribution / on demand), so they add
+// nothing here.
 export function requiredChannels(layout) {
   const keys = [];
   for (const w of layout.widgets) {

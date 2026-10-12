@@ -22,8 +22,9 @@ from math import sqrt
 from typing import List, Optional, Sequence
 import logging
 
-from .channels import extract_extended
-from .reader import Frame
+from . import lap_verdict
+from .channels import EXTENDED_COLUMNS, extract_extended
+from .reader import Frame, _text, model_text
 
 logger = logging.getLogger("lmu_garage.parser")
 
@@ -84,6 +85,33 @@ class Lap:
     car_class: str = ""
     car_model: str = ""
     samples: List[TelemetrySample] = field(default_factory=list)
+    # V0.9.3 — car identity: LMU's own "brand & model" name (TelemInfoV01.mVehicleModel,
+    # LMU 1.3+). car_model above stays the raw veh_filename (which carries car number and
+    # season, e.g. "397_25_499P"); the server derives the model from both.
+    vehicle_model: str = ""
+    # V0.9.3 — how many samples at the END of `samples` were recorded after LMU had
+    # already switched to the next lap number (the variable lap_dist lag, see P0-7a).
+    # The game's per-lap flags (lap_invalidated, count_lap_flag, ...) already belong to the
+    # next lap there, so the track-limits check leaves exactly these samples out.
+    tail_samples: int = 0
+    # V0.9.3 — session context (ScoringInfoV01, recorded for comparability only)
+    track_grip_level: Optional[int] = None
+    fixed_setup: Optional[bool] = None
+    track_limits_steps_per_point: Optional[int] = None
+    track_limits_steps_per_penalty: Optional[int] = None
+    # V0.9.3 — what the client itself read from the game for this lap (summary of the
+    # per-sample columns; the server recomputes it from the file and decides)
+    game_lap_state: dict = field(default_factory=dict)
+    # V0.9.3 — every car seen in the session: [{"veh_file", "model", "class"}]. Lets the
+    # server learn which veh_filename belongs to which model for the whole grid at once.
+    grid_vehicles: List[dict] = field(default_factory=list)
+    # V0.9.3.1 — why the client judged the lap as it did, and what LMU reported in the
+    # first seconds after the finish line: {"reasons": [...], "late": {...}}
+    # (client/telemetry/lap_verdict.py). Sent to servers from 0.9.3.1 on.
+    lap_report: dict = field(default_factory=dict)
+    # V0.9.4 — the car and the session at the end of the lap, for the Stint Analyzer: pit
+    # stops so far, tyre compound, damage, tank size, position, time left (see lap_context()).
+    lap_context: dict = field(default_factory=dict)
 
 
 class LapParser:
@@ -100,7 +128,11 @@ class LapParser:
     trying to derive them from raw telemetry timestamps ourselves).
     """
 
-    def __init__(self):
+    def __init__(self, late_window_seconds: Optional[float] = None):
+        # V0.9.3.1: how long a finished lap is held after the line (lap_verdict.LateWindow);
+        # 0 returns it at once (the boundary-logic tests use that)
+        self._late_window_seconds = (lap_verdict.LATE_WINDOW_SECONDS if late_window_seconds is None
+                                     else max(float(late_window_seconds), 0.0))
         self._current_lap_number: Optional[int] = None
         self._lap_start_time: Optional[float] = None
         self._buffer: List[TelemetrySample] = []
@@ -125,6 +157,33 @@ class LapParser:
         self._awaiting_lap_dist_reset = False
         self._pending_lap_number: Optional[int] = None
         self._reset_wait_frames = 0
+        # V0.9.3: index in _buffer of the first sample recorded after the lap_number flip
+        self._tail_start: Optional[int] = None
+        # V0.9.3: cars seen in this session, keyed by veh_filename (see observe_vehicles)
+        self._grid: dict = {}
+        # V0.9.3.1: a finished lap is held for the late window after the finish line
+        # (lap_verdict.LateWindow) before it is returned — see feed() and flush_pending()
+        self._late: Optional[lap_verdict.LateWindow] = None
+        self._pending: Optional[Lap] = None
+        self._pending_fix: Optional[dict] = None   # V0.9.4: lap time to confirm in the late window
+        self._previous_lmu_time: Optional[float] = None
+
+    MAX_GRID_VEHICLES = 128
+
+    def observe_vehicles(self, vehicles) -> None:
+        """V0.9.3: remembers the cars of the session (called every few seconds by the
+        telemetry loop with reader.read_vehicle_catalog()). Bounded; blank names ignored."""
+        for entry in vehicles or ():
+            veh_file = (entry.get("veh_file") or "").strip()
+            if not veh_file or veh_file in self._grid:
+                continue
+            if len(self._grid) >= self.MAX_GRID_VEHICLES:
+                break
+            self._grid[veh_file] = {
+                "veh_file": veh_file[:64],
+                "model": (entry.get("model") or "").strip()[:64],
+                "class": (entry.get("class") or "").strip()[:64],
+            }
 
     def reset(self) -> None:
         self._current_lap_number = None
@@ -136,6 +195,114 @@ class LapParser:
         self._awaiting_lap_dist_reset = False
         self._pending_lap_number = None
         self._reset_wait_frames = 0
+        self._tail_start = None
+        self._grid = {}  # a new session may have a different grid
+        # A held lap is NOT silently dropped here: callers take it with flush_pending()
+        # first (client/main.py does). Whatever is still held now is discarded.
+        self._late = None
+        self._pending = None
+        self._pending_fix = None
+        self._previous_lmu_time = None
+
+    # ------------------------------------------------------------------ late window
+
+    def flush_pending(self) -> Optional[Lap]:
+        """The finished lap still held for its late window, returned now (the window is
+        marked incomplete) — e.g. when the session ends. None if nothing is held."""
+        if self._pending is None:
+            self._late = None
+            return None
+        return self._release(complete=False)
+
+    def idle(self, now: Optional[float] = None) -> Optional[Lap]:
+        """Called when no frame arrives (menu, garage). Releases a held lap once the late
+        window's wall-clock limit is over."""
+        if self._pending is not None and self._late is not None and self._late.timed_out(now):
+            return self._release(complete=False)
+        return None
+
+    def _release(self, complete: bool) -> Lap:
+        lap, late = self._pending, self._late
+        self._pending, self._late = None, None
+        if self._pending_fix is not None:
+            # LMU never reported a matching time: the lap goes out with what LMU said at the
+            # line, and the report says so (the server's plausibility check then decides)
+            report = dict(lap.lap_report or {})
+            report["lap_time_unconfirmed"] = {"lmu": round(self._pending_fix["stale"], 4),
+                                              "measured": round(self._pending_fix["measured"], 3)}
+            lap.lap_report = report
+            self._pending_fix = None
+        report = dict(lap.lap_report or {})
+        if late is not None:
+            report["late"] = late.report(complete)
+        lap.lap_report = report
+        return lap
+
+    def _start_late_window(self, frame: Frame) -> Optional[Lap]:
+        """At the finish line (telemetry lap number flipped). Returns a lap that was still
+        held from before (a lap shorter than the late window) — released incomplete."""
+        released = self._release(complete=False) if self._pending is not None else None
+        previous = self._buffer[-1].ext if self._buffer else None
+
+        def ext(name):
+            if previous is None:
+                return None
+            index = self._EXT_INDEX[name]
+            return previous[index] if len(previous) > index else None
+
+        self._late = lap_verdict.LateWindow(
+            frame.telemetry.elapsed_time, steps_at_line=ext("track_limits_steps"),
+            penalties_at_line=ext("num_penalties"), window=self._late_window_seconds,
+        )
+        return released
+
+    # V0.9.4: LMU's lap time at the moment the lap is finalised is sometimes still the PREVIOUS
+    # lap's (or not set yet) — the scoring struct lags the telemetry. Such a lap then failed the
+    # server's plausibility check ("telemetry duration does not match claimed lap_time") although
+    # LMU counted it. The measured duration (line time − lap start, from the telemetry clock) is
+    # only used to RECOGNISE a lap time that does not belong to this lap; the time that is sent
+    # is always LMU's own: the first value LMU reports during the late window that matches.
+    LAP_TIME_MATCH_FRACTION = 0.02
+    LAP_TIME_MATCH_MIN_S = 0.5
+
+    @classmethod
+    def _time_matches(cls, lap_time: float, measured: Optional[float]) -> bool:
+        if measured is None or measured <= 0:
+            return True   # nothing to compare with: trust LMU
+        return lap_time > 0 and abs(lap_time - measured) <= max(cls.LAP_TIME_MATCH_MIN_S, cls.LAP_TIME_MATCH_FRACTION * measured)
+
+    def _maybe_correct_lap_time(self, frame: Frame) -> None:
+        fix = self._pending_fix
+        if fix is None or self._pending is None:
+            return
+        scoring = frame.scoring
+        value = float(scoring.last_lap_time)
+        if value == fix["stale"] or not self._time_matches(value, fix["measured"]):
+            return
+        lap = self._pending
+        lap.sector_times = self._derive_sector_splits(scoring)
+        reasons = self._reasons(scoring, fix["pit"], fix["game_state"])
+        report = dict(lap.lap_report or {})
+        report["reasons"] = reasons
+        report["lap_time_corrected"] = {"from": round(fix["stale"], 4), "to": round(value, 4),
+                                        "after_s": round(float(frame.telemetry.elapsed_time) - fix["line_et"], 2)}
+        lap.lap_report = report
+        lap.lap_time = value
+        lap.is_valid = lap_verdict.is_valid(reasons)
+        self._previous_lmu_time = value
+        if self._late is not None:
+            self._late.set_lap_time(value)
+        logger.info("Lap %d: LMU reported the lap time late — %.3f s instead of %.3f s.", lap.lap_number, value, fix["stale"])
+        self._pending_fix = None
+
+    def _observe_late(self, frame: Frame) -> None:
+        tele, scoring = frame.telemetry, frame.scoring
+        self._maybe_correct_lap_time(frame)
+        self._late.observe(
+            tele.elapsed_time, last_lap_time=scoring.last_lap_time,
+            steps=getattr(tele, "track_limits_steps", None), penalties=getattr(scoring, "num_penalties", None),
+            off_track=lap_verdict.excursion(tele, scoring),
+        )
 
     # P0-7a (V0.6.6) tuning constants — see _awaiting_lap_dist_reset's
     # docstring in __init__ for the real-data background.
@@ -163,6 +330,10 @@ class LapParser:
         session = frame.session
 
         completed: Optional[Lap] = None
+        # V0.9.3.1: a lap released from its late window in this frame (see below)
+        released: Optional[Lap] = None
+        if self._late is not None:
+            self._observe_late(frame)
 
         if _DEBUG:
             if self._last_elapsed_time is not None and tele.elapsed_time == self._last_elapsed_time:
@@ -211,7 +382,9 @@ class LapParser:
                 self._pending_lap_number = None
                 self._lap_start_time = None
                 self._buffer = []
+                self._tail_start = None
                 self._pit_this_lap = False
+                released = self.flush_pending()
                 # Falls through to the common tail.
             else:
                 self._reset_wait_frames += 1
@@ -232,6 +405,9 @@ class LapParser:
                         "— finalizing the lap anyway (P0-7a)",
                         self._MAX_RESET_WAIT_FRAMES, self._current_lap_number, self._pending_lap_number,
                     )
+                tail = len(self._buffer) - self._tail_start if self._tail_start is not None else 0
+                game_state = self._game_lap_state(self._buffer, tail)
+                reasons = self._reasons(scoring, self._pit_this_lap, game_state)
                 completed = Lap(
                     track_name=session.track_name.decode(errors="replace").strip("\x00"),
                     car_name=tele.vehicle_name.decode(errors="replace").strip("\x00"),
@@ -239,13 +415,23 @@ class LapParser:
                     lap_number=self._current_lap_number,
                     lap_time=scoring.last_lap_time,
                     sector_times=self._derive_sector_splits(scoring),
-                    is_valid=self._derive_is_valid(scoring, pit_this_lap=self._pit_this_lap),
+                    is_valid=lap_verdict.is_valid(reasons),
                     started_at=self._lap_start_time if self._lap_start_time is not None else 0.0,
                     ambient_temp=session.ambient_temp,
                     track_temp=session.track_temp,
                     car_class=scoring.vehicle_class.decode(errors="replace").strip("\x00"),
                     car_model=scoring.veh_filename.decode(errors="replace").strip("\x00"),
                     samples=self._buffer,
+                    vehicle_model=model_text(getattr(tele, "vehicle_model", b"")),
+                    tail_samples=tail,
+                    track_grip_level=_small_int(getattr(session, "track_grip_level", None), 0, 4),
+                    fixed_setup=_bool_or_none(getattr(session, "is_fixed_setup", None)),
+                    track_limits_steps_per_point=_small_int(getattr(session, "track_limits_steps_per_point", None), 0, 255),
+                    track_limits_steps_per_penalty=_small_int(getattr(session, "track_limits_steps_per_penalty", None), 0, 255),
+                    game_lap_state=game_state,
+                    grid_vehicles=list(self._grid.values()),
+                    lap_report={"reasons": reasons},
+                    lap_context=lap_context(tele, scoring, session),
                 )
                 if _DEBUG:
                     actual_duration = tele.elapsed_time - (self._lap_start_time or 0.0)
@@ -256,9 +442,30 @@ class LapParser:
                         completed.lap_number, completed.lap_time, actual_duration,
                         completed.lap_time - actual_duration, self._reset_wait_frames,
                     )
+                # V0.9.3.1: held for the late window that started at the line; returned
+                # by a later frame (or flush_pending / idle)
+                # V0.9.4: does LMU's lap time belong to THIS lap? (see _maybe_correct_lap_time)
+                measured = None
+                if self._late is not None and self._lap_start_time is not None:
+                    measured = self._late.line_et - self._lap_start_time
+                # stale: does not fit the measured duration, or is exactly the previous lap's time
+                # (LMU had not updated it yet — two laps never match to 0.1 ms)
+                previous_time = self._previous_lmu_time
+                stale = (not self._time_matches(float(scoring.last_lap_time), measured)
+                         or (previous_time is not None and float(scoring.last_lap_time) > 0
+                             and abs(float(scoring.last_lap_time) - previous_time) < 1e-4))
+                self._previous_lmu_time = float(scoring.last_lap_time) if scoring.last_lap_time > 0 else previous_time
+                if self._late is not None:
+                    self._late.set_lap_time(scoring.last_lap_time)
+                    self._pending = completed
+                    self._pending_fix = {"stale": float(scoring.last_lap_time), "measured": measured,
+                                         "pit": self._pit_this_lap, "game_state": game_state,
+                                         "line_et": self._late.line_et} if stale else None
+                    completed = None
                 self._current_lap_number = self._pending_lap_number
                 self._awaiting_lap_dist_reset = False
                 self._pending_lap_number = None
+                self._tail_start = None
                 # None: the common tail (below) sets it lazily from this
                 # very frame — the one where lap_dist actually reset,
                 # which is the true first sample of the new lap.
@@ -295,13 +502,17 @@ class LapParser:
                 # lag was confirmed insufficient by further real testing).
                 # Enter a wait state instead: keep attributing frames to
                 # the completing lap until lap_dist actually drops.
+                # V0.9.3.1: the finish line — the late window starts here
+                released = self._start_late_window(frame)
+                self._observe_late(frame)
                 self._awaiting_lap_dist_reset = True
                 self._pending_lap_number = tele.lap_number
                 self._reset_wait_frames = 0
+                self._tail_start = len(self._buffer)  # this frame is the first of the tail
                 self._buffer.append(self._build_sample(frame))
                 if scoring.in_pits:
                     self._pit_this_lap = True
-                return None
+                return released
             else:
                 logger.info(
                     "Lap number jumped %d → %d (not +1) — discarding buffer (%d samples)",
@@ -310,7 +521,9 @@ class LapParser:
                 self._current_lap_number = tele.lap_number
                 self._lap_start_time = None
                 self._buffer = []
+                self._tail_start = None
                 self._pit_this_lap = False
+                released = self.flush_pending()
                 # Falls through to the common tail: this frame becomes the
                 # first sample of whatever context we're in now (same as
                 # the discard branch has always done).
@@ -326,7 +539,10 @@ class LapParser:
             self._lap_start_time = tele.elapsed_time
 
         self._buffer.append(self._build_sample(frame))
-        return completed
+        if completed is None and self._pending is not None and self._late is not None \
+                and self._late.done(tele.elapsed_time):
+            completed = self._release(complete=True)
+        return released or completed
 
     def _build_sample(self, frame: Frame) -> TelemetrySample:
         tele = frame.telemetry
@@ -362,7 +578,7 @@ class LapParser:
             # instead of ~5.6 KB (each Python float is its own 24-byte object). For a 15,000-sample
             # lap that is ~10 MiB of RAM on the driver's PC instead of ~83 MiB. The file stores
             # these channels as float32 anyway, so the saved values are identical.
-            ext=array("f", extract_extended(tele)),
+            ext=array("f", extract_extended(tele, scoring)),
         )
 
     @staticmethod
@@ -392,30 +608,154 @@ class LapParser:
         s3 = total - s2_cumulative
         return [s1, s2, max(s3, 0.0)]
 
+    # V0.9.3: positions of the per-sample game flags inside TelemetrySample.ext
+    _EXT_INDEX = {name: EXTENDED_COLUMNS.index(name) for name in (
+        "lap_invalidated", "track_limits_steps", "count_lap_flag", "num_penalties",
+    )}
+    # The first second of a lap is left out of the flag checks: if LMU clears last lap's
+    # flags a few frames late, they must not count against this lap.
+    _SETTLE_SECONDS = 1.0
+
+    @classmethod
+    def _game_lap_state(cls, samples: Sequence[TelemetrySample], tail: int) -> dict:
+        """What the game itself said about this lap, read from the samples of the lap's
+        body (without the first second and without the tail recorded after LMU switched to
+        the next lap number). Keys are present only when the client recorded them:
+          count_lap_flag     the value on the lap's last body sample (2 = time counts)
+          invalidated        LMU's mLapInvalidated was set during the lap
+          track_limits_steps how many track-limits steps were added during the lap
+          penalties_added    how many penalties were added during the lap
+        """
+        body = samples[: max(len(samples) - max(tail, 0), 0)]
+        body = [s for s in body if s.ext is not None and s.t >= cls._SETTLE_SECONDS] or [
+            s for s in samples[: max(len(samples) - max(tail, 0), 0)] if s.ext is not None
+        ]
+        if not body:
+            return {}
+
+        def column(name):
+            index = cls._EXT_INDEX[name]
+            values = [s.ext[index] for s in body if len(s.ext) > index]
+            return [v for v in values if v == v]  # drop NaN (not recorded)
+
+        state: dict = {}
+        flags = column("count_lap_flag")
+        if flags:
+            state["count_lap_flag"] = int(flags[-1])
+        invalidated = column("lap_invalidated")
+        if invalidated:
+            state["invalidated"] = any(v >= 0.5 for v in invalidated)
+        for name, key in (("track_limits_steps", "track_limits_steps"), ("num_penalties", "penalties_added")):
+            values = column(name)
+            if values:
+                state[key] = int(sum(max(b - a, 0.0) for a, b in zip(values, values[1:])))
+        return state
+
     @staticmethod
-    def _derive_is_valid(scoring, pit_this_lap: bool) -> bool:
+    def _derive_is_valid(scoring, pit_this_lap: bool, game_state: Optional[dict] = None) -> bool:
         """Validity from real, game-reported signals — not a fabricated
         `lap_valid` field (VehicleScoringInfoV01 has no such member; see
-        client/lmu/structs.py). `mCountLapFlag` is the game's own
-        "should this lap count" signal: 0 means don't count it (e.g. an
-        out-lap or a lap the game itself invalidated). We additionally
-        reject laps with no positive lap time, non-monotonic sector
-        cumulative times, or a pit-lane visit during the lap — a lap
-        through the pits is a real, completed lap but not a fair
+        client/lmu/structs.py). We reject laps with no positive lap time,
+        non-monotonic sector cumulative times, or a pit-lane visit during the
+        lap — a lap through the pits is a real, completed lap but not a fair
         comparison for records/leaderboards.
 
-        This mirrors `mCountLapFlag`'s meaning as documented for
-        VehicleScoringInfoV01; if LMU's actual semantics differ (e.g. a
-        value other than 0 also meaning "don't count"), tighten this once
-        confirmed against real session data rather than the reader
-        guessing further.
-        """
-        if scoring.last_lap_time <= 0:
-            return False
-        if pit_this_lap or scoring.in_pits:
-            return False
-        if scoring.count_lap_flag == 0:
-            return False
-        if scoring.last_sector1 <= 0 or scoring.last_sector2 <= scoring.last_sector1:
-            return False
-        return True
+        V0.9.3 — the game's own verdict, read from the lap's samples (game_state,
+        see _game_lap_state) when the client recorded them:
+          * mCountLapFlag must be 2 ("count lap AND time"). 1 means LMU counts the
+            lap but not its time — earlier versions wrongly accepted it.
+          * mLapInvalidated must not have been set during the lap.
+          * no track-limits steps may have been added during the lap.
+        Without game_state (older code paths) the flag of the given scoring frame is
+        used as before, now with the corrected meaning.
+
+        V0.9.3.1 — the same rules as the server (client/telemetry/lap_verdict.py): added
+        track-limits steps and penalties no longer reject a lap here. They are reported
+        (reason codes) and the server sends the lap to review; only LMU's own verdict and
+        the decided rules (no time, pit lane, sector times) reject it.
+
+        This is the CLIENT's opinion only. The server repeats every check on the
+        uploaded file and decides (server/track_limits.py)."""
+        return lap_verdict.is_valid(LapParser._reasons(scoring, pit_this_lap, game_state))
+
+    @staticmethod
+    def _reasons(scoring, pit_this_lap: bool, game_state: Optional[dict] = None) -> List[str]:
+        state = dict(game_state or {})
+        state.setdefault("count_lap_flag", scoring.count_lap_flag)
+        return lap_verdict.lap_reasons(
+            lap_time=scoring.last_lap_time, in_pits=bool(pit_this_lap or scoring.in_pits),
+            sector1=scoring.last_sector1, sector2=scoring.last_sector2, game_state=state,
+        )
+
+
+def _num(obj, name, lo, hi, digits=None):
+    try:
+        value = float(getattr(obj, name))
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if not (lo <= value <= hi) or value != value:
+        return None
+    return round(value, digits) if digits is not None else int(value)
+
+
+def lap_context(tele, scoring, session) -> dict:
+    """V0.9.4: what the Stint Analyzer needs to know about the car and the session at the end of
+    a lap. Read once per lap (a few fields), only what LMU reports — no value is guessed; a
+    field LMU does not offer (or that is out of range) is simply left out.
+
+      pitstops         stops so far in this session (VehicleScoringInfoV01.mNumPitstops)
+      place            position
+      compound_front / compound_rear   LMU's tyre compound index and name (to be confirmed with
+                       real data: docs/LMU_VERIFICATION_PROTOCOL.md (w))
+      fuel_capacity_l  tank size
+      damage           highest dent severity of the 8 body zones (0 none .. 2 heavy), engine
+                       overheating, a detached part
+      session_left_s   time left in the session, max_laps (0 = time-limited session)"""
+    out: dict = {}
+    for key, obj, name, lo, hi, digits in (
+        ("pitstops", scoring, "num_pitstops", 0, 500, None),
+        ("place", scoring, "place", 1, 255, None),
+        ("compound_front", tele, "front_tire_compound_index", 0, 255, None),
+        ("compound_rear", tele, "rear_tire_compound_index", 0, 255, None),
+        ("fuel_capacity_l", tele, "fuel_capacity", 0.5, 500.0, 1),
+        ("session_left_s", session, "session_time_remaining", 0.0, 10 * 86400.0, 0),
+        ("max_laps", session, "max_laps", 0, 100000, None),
+    ):
+        value = _num(obj, name, lo, hi, digits)
+        if value is not None:
+            out[key] = value
+    for key, name in (("compound_front_name", "front_tire_compound_name"), ("compound_rear_name", "rear_tire_compound_name")):
+        text = _decode(getattr(tele, name, b""))
+        if text:
+            out[key] = text[:18]
+    try:
+        dents = [int(v) for v in tele.dent_severity]
+        if dents and all(0 <= v <= 255 for v in dents):
+            out["damage"] = {"dent_max": max(dents), "overheating": bool(getattr(tele, "overheating", False)),
+                             "detached": bool(getattr(tele, "detached", False))}
+    except (AttributeError, TypeError, ValueError):
+        pass
+    return out
+
+
+def _decode(raw) -> str:
+    if isinstance(raw, (bytes, bytearray)):
+        return _text(bytes(raw))
+    return str(raw or "").strip()
+
+
+def _small_int(value, lo: int, hi: int) -> Optional[int]:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if lo <= number <= hi else None
+
+
+def _bool_or_none(value) -> Optional[bool]:
+    if value is None:
+        return None
+    try:
+        return bool(value)
+    except Exception:  # noqa: BLE001
+        return None

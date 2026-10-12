@@ -87,7 +87,7 @@ def test_old_links_and_the_bot_can_still_say_hyper(client):
     hyper = client.get("/leaderboard/class/Le%20Mans/Hyper").json()
     hypercar = client.get("/leaderboard/class/Le%20Mans/Hypercar").json()
     assert hyper == hypercar and len(hyper) == 1
-    assert client.get("/leaderboard/catalog/cars", params={"track_name": "Le Mans", "car_class": "Hyper"}).json() == ["397_25_499P"]
+    assert client.get("/leaderboard/catalog/cars", params={"track_name": "Le Mans", "car_class": "Hyper"}).json() == ["499P (2025)"]
 
 
 def test_the_team_class_board_also_accepts_the_old_name(client):

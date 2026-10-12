@@ -81,7 +81,9 @@ def test_catalog_reflects_real_uploads_with_no_manual_config(client):
     assert set(classes) == {"Hypercar", "GT3"}
 
     cars = client.get("/leaderboard/catalog/cars").json()
-    assert set(cars) == {"397_25_499P", "911_gt3_r"}
+    # V0.9.3: the MODEL identity (server/car_identity.py) — "397_25_499P" is car #397,
+    # season 2025, model 499P; a name outside that pattern stays as LMU sent it
+    assert set(cars) == {"499P (2025)", "911_gt3_r"}
 
 
 def test_catalog_classes_and_cars_scoped_by_track(client):
@@ -107,7 +109,7 @@ def test_catalog_deduplicates_across_multiple_laps_and_drivers(client):
 
     assert client.get("/leaderboard/catalog/tracks").json() == ["Le Mans"]
     assert client.get("/leaderboard/catalog/classes").json() == ["Hypercar"]
-    assert client.get("/leaderboard/catalog/cars").json() == ["397_25_499P"]
+    assert client.get("/leaderboard/catalog/cars").json() == ["499P (2025)"]
 
 
 def test_catalog_excludes_laps_without_class_or_model(client):

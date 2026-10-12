@@ -24,14 +24,15 @@ ROOT = Path(__file__).resolve().parent.parent
 UPLOADER = ROOT / "client" / "uploader" / "uploader.py"
 VERSION_ISS = ROOT / "packaging" / "version.iss"
 
-_VERSION_RE = re.compile(r'^CLIENT_VERSION\s*=\s*"(\d+\.\d+\.\d+)"\s*$', re.MULTILINE)
+# x.y.z, or x.y.z.w for a correction release (V0.9.3.1)
+_VERSION_RE = re.compile(r'^CLIENT_VERSION\s*=\s*"(\d+\.\d+\.\d+(?:\.\d+)?)"\s*$', re.MULTILINE)
 
 
 def read_client_version(source: Optional[Path] = None) -> str:
     source = source or UPLOADER  # resolved at call time, not bound at import
     match = _VERSION_RE.search(source.read_text(encoding="utf-8"))
     if not match:
-        raise SystemExit(f"Could not find a CLIENT_VERSION = \"x.y.z\" line in {source}")
+        raise SystemExit(f"Could not find a CLIENT_VERSION = \"x.y.z[.w]\" line in {source}")
     return match.group(1)
 
 

@@ -23,7 +23,11 @@ SAME_IN_BOTH_LANGUAGES = {
     # V0.9.2: "Client" and "Download" (download page) are the usual German words too
     "Admin", "Analyse", "Client", "Dashboard", "Delta", "Discord", "Download", "GARAGE16", "Garage16", "Garage16 Best", "Lap ID",
     "Lap ID:", "Layout", "Leaderboard", "Leaderboards →", "PBs", "Status", "System", "Team Best", "Teams",
+    # V0.9.3: the usual German statistics words
+    "Median", "Trend",
     "Teams →", "Version", "ok", "{0}: {1} s @ {2}",
+    # V0.9.4: the two dashboards keep their names; "Stint", "Tank", "Position" are German words too
+    "LapTime Analyzer", "Stint Analyzer", "Stint", "Stints", "Stint {0}", "Tank", "Tank (L)", "Position", "Name", "{0} min",
 }
 
 
@@ -99,7 +103,7 @@ def test_dictionary_file_is_strictly_one_entry_per_line_and_has_no_duplicates():
 
 def test_index_html_marks_the_static_menu_for_translation():
     html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
-    for label in ("Leaderboard", "Circuits", "Analysis", "Dashboard", "Teams", "Account"):
+    for label in ("Leaderboard", "Circuits", "LapTime Analyzer", "Stint Analyzer", "Dashboard", "Teams", "Account"):
         assert f'data-i18n="{label}"' in html, label
     assert 'data-i18n="not signed in"' in html
     assert 'id="langSwitchSlot"' in html, "the EN | DE switch needs its slot in the menu"

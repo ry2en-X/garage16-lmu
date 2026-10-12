@@ -24,7 +24,7 @@ logger = logging.getLogger("lmu_garage.server_check")
 
 def _version_tuple(v: str) -> tuple:
     try:
-        return tuple(int(p) for p in v.split(".")[:3])
+        return tuple(int(p) for p in v.split(".")[:4])  # x.y.z[.w] (V0.9.3.1)
     except (ValueError, AttributeError):
         return (0,)
 

@@ -12,6 +12,8 @@
   * tests/js/i18n_pages.test.mjs           — V0.9.1: the real router and pages rendered in German, in
                                              English and on a first visit (language popup); jsdom
   * tests/js/desktop_app.test.mjs          — V0.9.2: sign-in inside the desktop app's analysis window
+  * tests/js/v093_analysis.test.mjs        — V0.9.3: coaching, events, histograms, tyres, track-map
+                                             markers, the sessions page and the theoretical best
                                              (app_bridge.js) and the download page; jsdom
 
 Skipped — never faked — when Node or jsdom is missing; enable them once with
@@ -81,3 +83,21 @@ def test_real_pages_render_in_the_chosen_language(mode):
 def test_desktop_app_window_sign_in_and_download_page():
     result = _run("desktop_app.test.mjs")
     assert "DESKTOP-APP-OK" in result.stdout, result.stdout + result.stderr
+
+
+@needs_jsdom
+def test_v093_windows_sessions_page_and_theoretical_best():
+    result = _run("v093_analysis.test.mjs")
+    assert "V093-ANALYSIS-OK" in result.stdout, result.stdout + result.stderr
+
+
+@needs_jsdom
+def test_v094_stint_analyzer_statistics_and_dashboard():
+    result = _run("v094_stints.test.mjs")
+    assert "V094-STINTS-OK" in result.stdout, result.stdout + result.stderr
+
+
+@needs_jsdom
+def test_v094_laptime_analyzer_lines_corners_coach_and_extra_laps():
+    result = _run("v094_laptime.test.mjs")
+    assert "V094-LAPTIME-OK" in result.stdout, result.stdout + result.stderr

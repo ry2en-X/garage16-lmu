@@ -61,7 +61,8 @@ const page = async (hash) => { window.location.hash = hash; await sleep(140); re
 const WORDS = {
   en: {
     // V0.9.2: "Download" added to the menu (the two client editions, pages/download.js)
-    nav: ["Leaderboard", "Circuits", "Analysis", "Dashboard", "Teams", "Account", "Download"], status: "signed in as Mika",
+    // V0.9.4: two dashboards — "LapTime Analyzer" (#/analysis) and "Stint Analyzer" (#/stints)
+    nav: ["Leaderboard", "Circuits", "LapTime Analyzer", "Stint Analyzer", "Dashboard", "Teams", "Account", "Download"], status: "signed in as Mika",
     pages: {
       "#/": ["Your LMU Data. Your Records. Your Team.", "Recent Activity", "Explore Leaderboards", "What Garage16 Does"],
       "#/teams": ["Your teams", "3 member(s) — admin", "invite: ABCD", "Create a team", "Join a team"],
@@ -70,13 +71,13 @@ const WORDS = {
       "#/account": ["Account", "Display name", "Desktop Client Credentials"],
       "#/leaderboard": ["Leaderboard", "By class", "Le Mans · 3 laps"],
       "#/circuits": ["Circuits", "Find a track", "No laps yet — be the first!"],
-      "#/analysis": ["Lap analysis", "Quick start", "You vs. Garage16 Best", "You vs. Team Best", "You vs. My Best", "Choose Lap 1"],
+      "#/analysis": ["LapTime Analyzer", "Quick start", "You vs. Garage16 Best", "You vs. Team Best", "You vs. My Best", "Choose Lap 1"],
       "#/download": ["Download Garage16", "Client + analysis app", "Download Client", "The analysis in its own window — no browser needed", "Not available yet"],
       "#/nowhere": ["Page not found"],
     },
   },
   de: {
-    nav: ["Leaderboard", "Strecken", "Analyse", "Dashboard", "Teams", "Konto", "Download"], status: "angemeldet als Mika",
+    nav: ["Leaderboard", "Strecken", "LapTime Analyzer", "Stint Analyzer", "Dashboard", "Teams", "Konto", "Download"], status: "angemeldet als Mika",
     pages: {
       "#/": ["Deine LMU-Daten. Deine Rekorde. Dein Team.", "Letzte Aktivität", "Leaderboards ansehen", "Was Garage16 kann"],
       "#/teams": ["Deine Teams", "3 Mitglied(er) — Admin", "Einladung: ABCD", "Team erstellen", "Einem Team beitreten"],
@@ -85,7 +86,7 @@ const WORDS = {
       "#/account": ["Konto", "Anzeigename", "Zugangsdaten des Desktop-Clients"],
       "#/leaderboard": ["Leaderboard", "Nach Klasse", "Le Mans · 3 Runden"],
       "#/circuits": ["Strecken", "Strecke finden", "Noch keine Runden — sei der Erste!"],
-      "#/analysis": ["Rundenanalyse", "Schnellstart", "Du vs. Garage16 Best", "Du vs. Team Best", "Du vs. Meine Beste", "Runde 1 wählen"],
+      "#/analysis": ["LapTime Analyzer", "Schnellstart", "Du vs. Garage16 Best", "Du vs. Team Best", "Du vs. Meine Beste", "Runde 1 wählen"],
       "#/download": ["Garage16 herunterladen", "Client + Analysetool", "Client herunterladen", "Die Analyse im eigenen Fenster — ganz ohne Browser", "Noch nicht verfügbar"],
       "#/nowhere": ["Seite nicht gefunden"],
     },

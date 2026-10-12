@@ -331,7 +331,10 @@ def channel_values(series: LapSeries, key: str) -> Optional[np.ndarray]:
     if not all(column in series.raw for column in channel.needs):
         return None
     with np.errstate(divide="ignore", invalid="ignore"):
-        return np.asarray(channel.compute(series.raw, series.orientation), dtype=float)
+        values = channel.compute(series.raw, series.orientation)
+    # V0.9.3: a derived channel may decline a lap it cannot compute honestly (e.g. a wheel
+    # slip without a single free-rolling stretch to estimate the tyre radius from)
+    return None if values is None else np.asarray(values, dtype=float)
 
 
 def time_at(series: LapSeries, grid: np.ndarray) -> np.ndarray:
@@ -471,13 +474,55 @@ def delta_facts(a: "LapSeries", b: "LapSeries") -> Optional[dict]:
     return {"window": round(window, 1), "gain": pick(change, -1.0), "loss": pick(change, 1.0), "net": round(net, 3)}
 
 
+# Kurvenphasen (V0.9.4): what each lap did in each phase of a corner, measured on the raw
+# samples, and where in the corner the time was gained or lost.
+BRAKE_RUN_GAP_S = 0.15       # a braking run may dip below BRAKE_ON_PCT this long and still be one run
+PEDAL_ON_PCT = 5.0           # "on the throttle" / "still braking" (trail braking) threshold
+THROTTLE_HALF_PCT = 50.0
+TURN_IN_FRACTION = 0.25      # turn-in: steering reaches this share of the corner's peak steering
+MIN_PEAK_STEER_PCT = 3.0     # a corner with less peak steering has no measurable turn-in (a kink)
+EXIT_ACCEL_M = 100.0         # "acceleration after the apex" is the mean long G over this stretch
+APEX_ZONE_FRACTION = 0.2     # half width of the apex phase: this share of turn-in -> apex ...
+APEX_ZONE_MIN_M, APEX_ZONE_MAX_M = 10.0, 30.0   # ... within these limits
+PHASES = ("braking", "entry", "apex", "exit", "straight")
+CORNER_KEYS = ("speed", "throttle", "brake", "steering", "long_g",
+               "brake_pressure_fl", "brake_pressure_fr", "brake_pressure_rl", "brake_pressure_rr")
+
+
 def _corner_channels(series: "LapSeries") -> Optional[dict]:
-    """The arrays _corner_lap needs, converted once per lap (not once per corner)."""
+    """The arrays _corner_lap needs, converted once per lap (not once per corner).
+    Missing channels (older recordings) are None and the metrics that need them are None."""
     speed = channel_values(series, "speed")
     if speed is None:
         return None
+    pressures = [channel_values(series, f"brake_pressure_{w}") if f"brake_pressure_{w}" in CATALOG else None
+                 for w in WHEEL_POSITIONS]
+    pressures = [p for p in pressures if p is not None]
     return {"dist": series.dist, "t": series.raw["t"], "speed": speed,
-            "brake": channel_values(series, "brake"), "throttle": channel_values(series, "throttle")}
+            "brake": channel_values(series, "brake"), "throttle": channel_values(series, "throttle"),
+            "steering": channel_values(series, "steering") if "steering" in series.raw else None,
+            "long_g": channel_values(series, "long_g") if "accel_z" in series.raw else None,
+            "brake_pressure": np.nanmax(np.vstack(pressures), axis=0) if pressures else None}
+
+
+def _first(mask: np.ndarray) -> Optional[int]:
+    hits = np.flatnonzero(mask)
+    return int(hits[0]) if len(hits) else None
+
+
+def _brake_run(brake: np.ndarray, t: np.ndarray, start: int, stop: int) -> int:
+    """Last index of the braking run that begins at `start` (gaps < BRAKE_RUN_GAP_S bridged)."""
+    last = start
+    for i in range(start + 1, stop):
+        if brake[i] >= BRAKE_ON_PCT:
+            last = i
+        elif t[i] - t[last] > BRAKE_RUN_GAP_S:
+            break
+    return last
+
+
+def _r(value, digits=1):
+    return None if value is None or not np.isfinite(value) else round(float(value), digits)
 
 
 def _corner_lap(lap: dict, start: float, entry_at: float, end: float) -> Optional[dict]:
@@ -485,7 +530,11 @@ def _corner_lap(lap: dict, start: float, entry_at: float, end: float) -> Optiona
 
     `lap` comes from _corner_channels. `start`..`end` is the stretch the corner's time is
     measured over; `entry_at` is where its braking zone begins (the same as `start` except for
-    the first corner, whose stretch also holds the straight from the line)."""
+    the first corner, whose stretch also holds the straight from the line).
+
+    Positions are metres of lap distance, speeds km/h, pedals %, accelerations G, times s.
+    Every metric is None when the lap lacks what it needs — never guessed. turn_in is an
+    ESTIMATE (from the steering trace), and labelled so in the views."""
     dist, t, speed = lap["dist"], lap["t"], lap["speed"]
     # dist is monotonic (load_lap guarantees it): the corner's samples are one slice
     i0, i1 = np.searchsorted(dist, entry_at, "left"), np.searchsorted(dist, end, "right")
@@ -495,55 +544,147 @@ def _corner_lap(lap: dict, start: float, entry_at: float, end: float) -> Optiona
     if not np.isfinite(segment).any():
         return None
     k = int(np.nanargmin(segment))
-    apex = float(dist[i0 + k])
+    ia = i0 + k                                  # apex index
+    apex = float(dist[ia])
     out = {
         "entry": round(float(np.interp(entry_at, dist, speed)), 1),
         "min": round(float(segment[k]), 1),
         "apex": round(apex, 1),
         "time": round(float(np.interp(end, dist, t) - np.interp(start, dist, t)), 3),
         "brake": None, "throttle": None, "exit": None,
+        # V0.9.4
+        "brake_speed": None, "brake_end": None, "brake_len": None, "brake_max": None, "brake_pressure_max": None,
+        "decel_peak": None, "decel_mean": None, "turn_in": None, "trail_m": None, "trail_s": None,
+        "brake_at_turn_in": None, "throttle_on": None, "throttle_50": None, "coast_m": None, "coast_s": None,
+        "accel_exit": None,
     }
-    brake, throttle = lap["brake"], lap["throttle"]
+    brake, throttle, steering, long_g = lap["brake"], lap["throttle"], lap["steering"], lap["long_g"]
+    pressure = lap["brake_pressure"]
+
+    # --- braking phase
+    ib0 = ib1 = None
     if brake is not None:
-        on = np.flatnonzero(brake[i0:i0 + k + 1] >= BRAKE_ON_PCT)   # up to and including the apex
-        if len(on):
-            out["brake"] = round(float(dist[i0 + on[0]]), 1)
+        on = _first(brake[i0:ia + 1] >= BRAKE_ON_PCT)   # up to and including the apex
+        if on is not None:
+            ib0 = i0 + on
+            ib1 = _brake_run(brake, t, ib0, i1)
+            out["brake"] = round(float(dist[ib0]), 1)
+            out["brake_speed"] = round(float(speed[ib0]), 1)
+            out["brake_end"] = round(float(dist[ib1]), 1)
+            out["brake_len"] = round(float(dist[ib1] - dist[ib0]), 1)
+            out["brake_max"] = _r(np.nanmax(brake[ib0:ib1 + 1]), 0)
+            if pressure is not None:
+                out["brake_pressure_max"] = _r(np.nanmax(pressure[ib0:ib1 + 1]), 0)
+            if long_g is not None and ib1 > ib0:
+                decel = -long_g[ib0:ib1 + 1]
+                if np.isfinite(decel).any():
+                    out["decel_peak"] = _r(np.nanmax(decel), 2)
+                    out["decel_mean"] = _r(np.nanmean(decel), 2)
+
+    # --- turn-in (estimated) and trail braking
+    it = None
+    if steering is not None:
+        search_from = ib0 if ib0 is not None else i0
+        reach = min(i1, ia + 1 + max(1, int(np.searchsorted(dist, apex + 30.0, "right") - ia - 1)))
+        window = np.abs(steering[search_from:reach])
+        if window.size and np.isfinite(window).any():
+            peak = float(np.nanmax(window))
+            if peak >= MIN_PEAK_STEER_PCT:
+                found = _first(window >= TURN_IN_FRACTION * peak)
+                if found is not None and search_from + found <= ia:
+                    it = search_from + found
+                    out["turn_in"] = round(float(dist[it]), 1)
+                    if brake is not None:
+                        out["brake_at_turn_in"] = _r(brake[it], 0)
+                        if ib0 is not None:
+                            run = slice(ib0, ib1 + 1)
+                            both = (brake[run] >= PEDAL_ON_PCT) & (np.abs(steering[run]) >= TURN_IN_FRACTION * peak)
+                            idx = np.flatnonzero(both)
+                            if len(idx):
+                                d = dist[run]
+                                tt = t[run]
+                                ds = np.diff(d, append=d[-1])
+                                dt = np.diff(tt, append=tt[-1])
+                                out["trail_m"] = round(float(ds[idx].sum()), 1)
+                                out["trail_s"] = round(float(dt[idx].sum()), 2)
+
+    # --- throttle: first application, 50 %, full
+    if throttle is not None:
+        lift_from = ib1 if ib1 is not None else i0
+        lift = throttle[lift_from:ia + 1]
+        lowest = lift_from + int(np.nanargmin(lift)) if lift.size and np.isfinite(lift).any() else ia
+        if np.nanmin(throttle[i0:ia + 1]) < PEDAL_ON_PCT:      # the driver lifted at all
+            on = _first(throttle[lowest:i1] >= PEDAL_ON_PCT)
+            if on is not None:
+                ion = lowest + on
+                out["throttle_on"] = round(float(dist[ion]), 1)
+                half = _first(throttle[ion:i1] >= THROTTLE_HALF_PCT)
+                if half is not None:
+                    out["throttle_50"] = round(float(dist[ion + half]), 1)
+                if ib1 is not None and ion > ib1:
+                    seg = slice(ib1, ion + 1)
+                    idle = (throttle[seg] < PEDAL_ON_PCT) & ((brake[seg] if brake is not None else 0) < PEDAL_ON_PCT)
+                    d = dist[seg]
+                    tt = t[seg]
+                    out["coast_m"] = round(float(np.diff(d, append=d[-1])[idle].sum()), 1)
+                    out["coast_s"] = round(float(np.diff(tt, append=tt[-1])[idle].sum()), 2)
     exit_at = None
     if throttle is not None:
-        full = np.flatnonzero(throttle[i0 + k + 1:i1] >= THROTTLE_FULL_PCT)  # after the apex
+        full = np.flatnonzero(throttle[ia + 1:i1] >= THROTTLE_FULL_PCT)  # after the apex
         if len(full):
-            exit_at = float(dist[i0 + k + 1 + full[0]])
+            exit_at = float(dist[ia + 1 + full[0]])
             out["throttle"] = round(exit_at, 1)
     if exit_at is None:
         exit_at = min(apex + 100.0, end)
     out["exit"] = round(float(np.interp(exit_at, dist, speed)), 1)
+
+    # --- acceleration after the apex
+    if long_g is not None:
+        ie = int(np.searchsorted(dist, min(apex + EXIT_ACCEL_M, end), "right"))
+        seg = long_g[ia:max(ie, ia + 1)]
+        if seg.size and np.isfinite(seg).any():
+            out["accel_exit"] = _r(np.nanmean(seg), 2)
     return out
 
 
-def corner_analysis(a: "LapSeries", b: "LapSeries") -> List[dict]:
-    """Corners of the common stretch and, for each, how both laps drove it (V0.9.1).
+def corner_phases(corner: dict, lap_a: dict, lap_b: dict, time_a, time_b) -> List[dict]:
+    """Splits a corner's stretch into braking / entry / apex / exit / straight with boundaries
+    COMMON to both laps, and gives each phase's time difference (A − B, s).
 
-    Corners are found on the two laps' average speed (smoothed over CORNER_SMOOTH_M): a local
-    minimum with a drop of at least CORNER_MIN_DROP_KMH both before and after it. A corner runs
-    from its braking zone (the speed maximum before it) to the next corner's braking zone; the
-    first corner's stretch also holds the straight from the start of the common range, the last
-    one runs to its end. So the corners cover the lap without gaps and their times add up to the
-    delta over the whole lap (the lap-time difference for two complete laps).
-    All measurements (speeds, braking / throttle points, times) come from each lap's raw samples,
-    not from the smoothed curve.
-      -> [{"n", "start", "entry", "apex", "end", "delta", "a": {...}, "b": {...}}]; start..end is
-         the stretch the time is measured over, entry where the braking zone begins; delta = time A − time B
-         (negative = Lap 1 faster in that corner); speeds km/h, positions metres.
-    """
-    speed_a, speed_b = channel_values(a, "speed"), channel_values(b, "speed")
-    if speed_a is None or speed_b is None:
-        return []
-    lo, hi = common_range(a, b)
-    if hi - lo < 4 * CORNER_MIN_GAP_M:
-        return []
-    step = 2.0
-    grid = np.arange(lo, hi, step)
-    v = (np.interp(grid, a.dist, speed_a) + np.interp(grid, b.dist, speed_b)) / 2.0
+    Boundaries: start | turn-in (mean of both laps; fallback: halfway braking point -> apex, or
+    50 m before the apex) | apex − w | apex + w | exit (the later full-throttle point of the two,
+    else apex + 100 m) | end; w = APEX_ZONE_FRACTION of turn-in -> apex within
+    [APEX_ZONE_MIN_M, APEX_ZONE_MAX_M]. Because the boundaries are shared and every phase is
+    t_A − t_B over its own stretch, the phases add up EXACTLY to the corner's delta.
+    time_a / time_b: callables distance -> seconds since lap start (raw samples)."""
+    start, apex, end = corner["start"], corner["apex"], corner["end"]
+    vals = lambda key: [v for v in (lap_a.get(key), lap_b.get(key)) if v is not None]  # noqa: E731
+    turn = vals("turn_in")
+    if turn:
+        b1 = sum(turn) / len(turn)
+    elif vals("brake"):
+        b1 = (sum(vals("brake")) / len(vals("brake")) + apex) / 2.0
+    else:
+        b1 = apex - 50.0
+    b1 = min(max(b1, start), apex)
+    w = min(max(APEX_ZONE_FRACTION * (apex - b1), APEX_ZONE_MIN_M), APEX_ZONE_MAX_M)
+    b2 = min(max(apex - w, b1), apex)
+    b3 = min(apex + w, end)
+    full = vals("throttle")
+    b4 = max(full) if full else apex + 100.0
+    b4 = min(max(b4, b3), end)
+    bounds = [start, b1, b2, b3, b4, end]
+    diff = [time_a(x) - time_b(x) for x in bounds]
+    return [{"phase": name, "from": round(bounds[k], 1), "to": round(bounds[k + 1], 1),
+             "delta": round(diff[k + 1] - diff[k], 3)} for k, name in enumerate(PHASES)]
+
+
+def _find_corners(grid: np.ndarray, v: np.ndarray, step: float) -> List[Tuple[int, int]]:
+    """(apex index, braking-zone start index) of every corner on a speed trace sampled on `grid`.
+
+    A corner is a local minimum of the speed smoothed over CORNER_SMOOTH_M with a drop of at
+    least CORNER_MIN_DROP_KMH both before and after it (only one side counts for a corner
+    right after the start / before the finish, whose other side lies outside the lap)."""
     k = max(1, int(round(CORNER_SMOOTH_M / step / 2)))
     smooth = np.convolve(np.pad(v, (k, k), mode="edge"), np.ones(2 * k + 1) / (2 * k + 1), mode="valid")
     w = max(1, int(round(CORNER_MIN_GAP_M / step / 2)))
@@ -561,8 +702,6 @@ def corner_analysis(a: "LapSeries", b: "LapSeries") -> List[dict]:
             right = apices[j + 1] if not last else len(smooth) - 1
             drop_in = smooth[left:apex + 1].max() - smooth[apex]
             drop_out = smooth[apex:right + 1].max() - smooth[apex]
-            # A corner right after the start or right before the finish has only one side inside
-            # the lap (the lap begins on its exit / ends before its exit): that side decides.
             if first and last:
                 enough = max(drop_in, drop_out) >= CORNER_MIN_DROP_KMH
             elif first:
@@ -581,34 +720,200 @@ def corner_analysis(a: "LapSeries", b: "LapSeries") -> List[dict]:
         return []
     # The smoothing only FINDS corners: it shifts the minimum towards the flatter side of an
     # asymmetric corner (short braking, long acceleration). The apex itself is the minimum of
-    # the unsmoothed average speed near the smoothed one.
+    # the unsmoothed speed near the smoothed one.
     reach = 2 * k
     apices = [max(0, ap - reach) + int(np.argmin(v[max(0, ap - reach):ap + reach + 1])) for ap in apices]
     # A braking zone begins at the LAST point before the apex that is (within 0.5 km/h) as fast
     # as the stretch since the previous corner: on a flat-out straight that is where the lift
     # comes, not where the straight's top speed was first reached.
-    starts = []
+    out = []
     for j, apex in enumerate(apices):
         left = apices[j - 1] if j > 0 else 0
         before = smooth[left:apex + 1]
-        starts.append(left + int(np.flatnonzero(before >= before.max() - 0.5)[-1]))
+        out.append((apex, left + int(np.flatnonzero(before >= before.max() - 0.5)[-1])))
+    return out
+
+
+def corner_analysis(a: "LapSeries", b: "LapSeries") -> List[dict]:
+    """Corners of the common stretch and, for each, how both laps drove it (V0.9.1; phases and
+    the braking / throttle details since V0.9.4).
+
+    Corners are found on the two laps' average speed (smoothed over CORNER_SMOOTH_M): a local
+    minimum with a drop of at least CORNER_MIN_DROP_KMH both before and after it. A corner runs
+    from its braking zone (the speed maximum before it) to the next corner's braking zone; the
+    first corner's stretch also holds the straight from the start of the common range, the last
+    one runs to its end. So the corners cover the lap without gaps and their times add up to the
+    delta over the whole lap (the lap-time difference for two complete laps).
+    All measurements (speeds, braking / throttle points, times) come from each lap's raw samples,
+    not from the smoothed curve.
+      -> [{"n", "start", "entry", "apex", "end", "delta", "a": {...}, "b": {...}, "phases": [...]}];
+         start..end is the stretch the time is measured over, entry where the braking zone begins;
+         delta = time A − time B (negative = Lap 1 faster in that corner); speeds km/h, positions
+         metres; phases: see corner_phases (they add up to delta).
+    """
+    speed_a, speed_b = channel_values(a, "speed"), channel_values(b, "speed")
+    if speed_a is None or speed_b is None:
+        return []
+    lo, hi = common_range(a, b)
+    if hi - lo < 4 * CORNER_MIN_GAP_M:
+        return []
+    step = 2.0
+    grid = np.arange(lo, hi, step)
+    v = (np.interp(grid, a.dist, speed_a) + np.interp(grid, b.dist, speed_b)) / 2.0
+    found = _find_corners(grid, v, step)
+    if not found:
+        return []
     chan_a, chan_b = _corner_channels(a), _corner_channels(b)
+    time_a = lambda x: float(np.interp(x, a.dist, a.raw["t"]))  # noqa: E731
+    time_b = lambda x: float(np.interp(x, b.dist, b.raw["t"]))  # noqa: E731
     corners = []
-    for j, apex in enumerate(apices):
-        entry = float(grid[starts[j]])
+    for j, (apex, entry_index) in enumerate(found):
+        entry = float(grid[entry_index])
         start = float(lo) if j == 0 else entry
-        end = float(grid[starts[j + 1]]) if j + 1 < len(apices) else float(hi)
+        end = float(grid[found[j + 1][1]]) if j + 1 < len(found) else float(hi)
         ref_apex = float(grid[apex])
         lap_a = _corner_lap(chan_a, start, entry, end)
         lap_b = _corner_lap(chan_b, start, entry, end)
         if lap_a is None or lap_b is None:
             continue
-        corners.append({
+        corner = {
             "n": len(corners) + 1, "start": round(start, 1), "entry": round(entry, 1),
             "apex": round(ref_apex, 1), "end": round(end, 1),
             "delta": round(lap_a["time"] - lap_b["time"], 3), "a": lap_a, "b": lap_b,
-        })
+        }
+        corner["phases"] = corner_phases(corner, lap_a, lap_b, time_a, time_b)
+        corners.append(corner)
     return corners
+
+
+def lap_corners(dist: np.ndarray, t: np.ndarray, speed_kmh: np.ndarray, brake_pct: Optional[np.ndarray],
+                throttle_pct: Optional[np.ndarray]) -> List[list]:
+    """The corners of ONE lap, compact, for storing with the lap (server/lap_insights.py) and
+    comparing a corner across a driver's laps without opening their files (V0.9.4):
+    [[apex m, braking point m | None, min speed km/h, full-throttle point m | None, exit km/h], ...].
+    Same detection and the same measurements as corner_analysis, on this lap's own speed."""
+    if len(dist) < 10 or float(dist[-1] - dist[0]) < 4 * CORNER_MIN_GAP_M:
+        return []
+    step = 2.0
+    grid = np.arange(float(dist[0]), float(dist[-1]), step)
+    v = np.interp(grid, dist, speed_kmh)
+    found = _find_corners(grid, v, step)
+    lap = {"dist": dist, "t": t, "speed": speed_kmh, "brake": brake_pct, "throttle": throttle_pct,
+           "steering": None, "long_g": None, "brake_pressure": None}
+    out = []
+    for j, (apex, entry_index) in enumerate(found):
+        entry = float(grid[entry_index])
+        start = float(grid[0]) if j == 0 else entry
+        end = float(grid[found[j + 1][1]]) if j + 1 < len(found) else float(grid[-1])
+        m = _corner_lap(lap, start, entry, end)
+        if m is not None:
+            out.append([m["apex"], m["brake"], m["min"], m["throttle"], m["exit"]])
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Racing line: how far apart two laps drove (V0.9.4)
+# ---------------------------------------------------------------------------
+
+LINE_WINDOW_M = 50.0          # Lap 2's line is searched within this distance of the same lap metre
+LINE_MAX_OFFSET_M = 15.0      # further apart than this is not "another line" (pit lane, off, spin)
+LINE_CHUNK = 2000             # rows per vectorised block (bounds the memory of the search)
+TURN_SMOOTH_M = 20.0
+TURN_MIN_CURVATURE = 1.0 / 800.0   # radius above 800 m counts as straight
+
+
+def line_offset(xa: np.ndarray, ya: np.ndarray, xb: np.ndarray, yb: np.ndarray, step: float) -> np.ndarray:
+    """Signed lateral distance of Lap 2's line from Lap 1's, in metres, at every point of Lap 1
+    (both on the same distance grid and in the same plan-view frame, Y up).
+
+    For each point of A the nearest point of B's POLYLINE is taken (projection onto the two
+    segments around B's nearest vertex), searched only within LINE_WINDOW_M of the same lap
+    distance so a hairpin's other side is never matched. + = B lies LEFT of A's direction of
+    travel. NaN where A has no position, no direction, or B is further than LINE_MAX_OFFSET_M."""
+    xa, ya, xb, yb = (np.asarray(v, dtype=float) for v in (xa, ya, xb, yb))
+    n = len(xa)
+    out = np.full(n, np.nan)
+    if n < 3 or len(xb) != n:
+        return out
+    tx = np.gradient(xa)
+    ty = np.gradient(ya)
+    w = max(1, int(math.ceil(LINE_WINDOW_M / max(step, 1e-6))))
+    offsets = np.arange(-w, w + 1)
+    for c0 in range(0, n, LINE_CHUNK):
+        rows = np.arange(c0, min(n, c0 + LINE_CHUNK))
+        idx = np.clip(rows[:, None] + offsets[None, :], 0, n - 1)
+        dx = xb[idx] - xa[rows, None]
+        dy = yb[idx] - ya[rows, None]
+        d2 = np.where(np.isfinite(dx) & np.isfinite(dy), dx * dx + dy * dy, np.inf)
+        j = idx[np.arange(len(rows)), np.argmin(d2, axis=1)]
+        px, py = xa[rows], ya[rows]
+        best = np.full(len(rows), np.inf)
+        best_x = np.full(len(rows), np.nan)
+        best_y = np.full(len(rows), np.nan)
+        for j0, j1 in ((np.maximum(j - 1, 0), j), (j, np.minimum(j + 1, n - 1))):
+            sx, sy = xb[j1] - xb[j0], yb[j1] - yb[j0]
+            length2 = sx * sx + sy * sy
+            with np.errstate(invalid="ignore", divide="ignore"):
+                u = np.where(length2 > 0, ((px - xb[j0]) * sx + (py - yb[j0]) * sy) / length2, 0.0)
+            u = np.clip(np.nan_to_num(u), 0.0, 1.0)
+            qx, qy = xb[j0] + u * sx, yb[j0] + u * sy
+            d = np.hypot(qx - px, qy - py)
+            better = np.isfinite(d) & (d < best)
+            best = np.where(better, d, best)
+            best_x = np.where(better, qx, best_x)
+            best_y = np.where(better, qy, best_y)
+        cross = tx[rows] * (best_y - py) - ty[rows] * (best_x - px)
+        tangent = np.hypot(tx[rows], ty[rows]) > 1e-9
+        ok = np.isfinite(best) & (best <= LINE_MAX_OFFSET_M) & tangent & np.isfinite(px) & np.isfinite(py)
+        out[rows] = np.where(ok, np.sign(cross) * best, np.nan)
+    return out
+
+
+def turn_direction(x: np.ndarray, y: np.ndarray, step: float) -> np.ndarray:
+    """+1 left-hand, -1 right-hand, 0 straight — the local direction of the line (plan view,
+    Y up), from its curvature over distance after smoothing over TURN_SMOOTH_M."""
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    out = np.zeros(len(x), dtype=int)
+    ok = np.isfinite(x) & np.isfinite(y)
+    if ok.sum() < 5:
+        return out
+    k = max(3, int(round(TURN_SMOOTH_M / max(step, 1e-6))) | 1)
+    xs = _smooth(np.where(ok, x, np.interp(np.arange(len(x)), np.flatnonzero(ok), x[ok])), k)
+    ys = _smooth(np.where(ok, y, np.interp(np.arange(len(y)), np.flatnonzero(ok), y[ok])), k)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        dx, dy = np.gradient(xs, step), np.gradient(ys, step)
+        ddx, ddy = np.gradient(dx, step), np.gradient(dy, step)
+        kappa = (dx * ddy - dy * ddx) / np.power(dx * dx + dy * dy, 1.5)
+    out[(kappa > TURN_MIN_CURVATURE) & ok] = 1
+    out[(kappa < -TURN_MIN_CURVATURE) & ok] = -1
+    return out
+
+
+def corner_turns(corners: List[dict], x: np.ndarray, y: np.ndarray, grid: np.ndarray, step: float) -> List[int]:
+    """The direction of each corner (+1 left, -1 right, 0 unknown): the majority of the local
+    directions within 30 m of its apex."""
+    local = turn_direction(x, y, step)
+    out = []
+    for c in corners:
+        near = np.abs(grid - c["apex"]) <= 30.0
+        s = int(np.sign(local[near].sum())) if near.any() else 0
+        out.append(s)
+    return out
+
+
+def inside_sign(grid: np.ndarray, corners: List[dict], turns: List[int]) -> np.ndarray:
+    """For every grid point the direction of the NEAREST corner (by apex distance): +1 left, -1
+    right, 0 when there are no corners. "Inside" is the side of the corner you are heading into
+    or coming out of — on a straight between a left and a right corner the first half belongs to
+    the left one, the second half to the right one."""
+    # only corners whose direction is known (a slow section without a clear turn has none)
+    known = [(c["apex"], t) for c, t in zip(corners, turns) if t]
+    if not known:
+        return np.zeros(len(grid), dtype=int)
+    apices = np.array([apex for apex, _ in known], dtype=float)
+    nearest = np.argmin(np.abs(grid[:, None] - apices[None, :]), axis=1)
+    return np.array([t for _, t in known], dtype=int)[nearest]
 
 
 # ---------------------------------------------------------------------------
@@ -690,6 +995,7 @@ def json_series(values: np.ndarray, decimals: int = 3) -> List[Optional[float]]:
 DECIMALS_BY_UNIT = {
     "km/h": 1, "%": 2, "rpm": 0, "G": 3, "mm": 2, "N": 1, "°C": 1, "°": 2, "kPa": 1, "Nm": 1,
     "°/s": 2, "s": 3, "kW": 1, "bar": 2, "L": 2,
+    "mm/s": 1, "m": 2, "wheels": 0,  # V0.9.3
 }
 
 
@@ -700,6 +1006,163 @@ def channel_decimals(unit: str, discrete: bool) -> int:
 def orientation_report(series: LapSeries) -> dict:
     o = series.orientation
     return {
-        "steering": o.steering, "lat_g": o.lat_g, "long_g": o.long_g, "slip": o.slip, "yaw": o.yaw,
+        "steering": o.steering, "lat_g": o.lat_g, "long_g": o.long_g, "slip": o.slip, "yaw": o.yaw, "susp": o.susp,
         "decided_from_data": dict(o.decided_from_data),
     }
+
+
+# ---------------------------------------------------------------------------
+# Distributions (V0.9.3): histograms of a channel over the whole lap
+# ---------------------------------------------------------------------------
+
+DAMPER_KNEE_MM_S = 25.0     # usual split between low- and high-speed damping
+MAX_HIST_BINS = 80
+MIN_HIST_BINS = 6
+
+
+def sample_weights(t: np.ndarray) -> np.ndarray:
+    """Seconds each sample stands for, so a histogram shows SHARE OF TIME (a stretch the
+    game recorded more densely does not count more). Gaps are capped at 5 typical steps."""
+    if len(t) < 2:
+        return np.ones(len(t))
+    dt = np.diff(t)
+    positive = dt[dt > 0]
+    typical = float(np.median(positive)) if positive.size else 1.0
+    dt = np.clip(dt, 0.0, typical * 5.0)
+    return np.append(dt, typical)
+
+
+def _weighted_quantiles(values: np.ndarray, weights: np.ndarray, qs: Sequence[float]) -> List[float]:
+    order = np.argsort(values)
+    v, w = values[order], weights[order]
+    cum = np.cumsum(w)
+    if cum[-1] <= 0:
+        return [float("nan")] * len(qs)
+    cum /= cum[-1]
+    return [float(v[min(int(np.searchsorted(cum, q, side="left")), len(v) - 1)]) for q in qs]
+
+
+def histogram_edges(values_list: Sequence[Optional[np.ndarray]], *, discrete: bool, symmetric: bool,
+                    bins: int, lo: Optional[float] = None, hi: Optional[float] = None) -> Optional[np.ndarray]:
+    """Bin edges shared by both laps (so the two histograms are directly comparable)."""
+    finite = [v[np.isfinite(v)] for v in values_list if v is not None]
+    finite = [v for v in finite if v.size]
+    if not finite:
+        return None
+    joined = np.concatenate(finite)
+    if discrete:
+        first = math.floor(float(joined.min())) if lo is None else math.floor(lo)
+        last = math.ceil(float(joined.max())) if hi is None else math.ceil(hi)
+        if last - first > MAX_HIST_BINS:
+            last = first + MAX_HIST_BINS
+        return np.arange(first - 0.5, last + 1.0, 1.0)
+    bins = int(min(max(bins, MIN_HIST_BINS), MAX_HIST_BINS))
+    if lo is None or hi is None:
+        p_lo, p_hi = np.percentile(joined, [0.5, 99.5])
+        if symmetric:
+            reach = max(abs(float(p_lo)), abs(float(p_hi)))
+            step = 10 ** math.floor(math.log10(reach)) if reach > 0 else 1.0
+            reach = math.ceil(reach / step) * step if reach > 0 else 1.0
+            p_lo, p_hi = -reach, reach
+        lo = float(p_lo) if lo is None else lo
+        hi = float(p_hi) if hi is None else hi
+    if not (math.isfinite(lo) and math.isfinite(hi)) or hi <= lo:
+        hi = lo + 1.0
+    if symmetric and bins % 2:
+        bins += 1   # an even count puts a bin edge exactly at 0 (bump / rebound split)
+    return np.linspace(lo, hi, bins + 1)
+
+
+def distribution(series: "LapSeries", key: str, edges: np.ndarray, knee: float = DAMPER_KNEE_MM_S) -> Optional[dict]:
+    """Share of the lap's TIME per bin (percent), plus what lies outside the range and a few
+    robust figures. Damper channels also get bump/rebound and low/high-speed shares."""
+    values = channel_values(series, key)
+    if values is None:
+        return None
+    weights = sample_weights(series.raw["t"])
+    finite = np.isfinite(values)
+    if not finite.any():
+        return None
+    v, w = values[finite], weights[finite]
+    total = float(w.sum())
+    if total <= 0:
+        return None
+    counts, _ = np.histogram(v, bins=edges, weights=w)
+    p5, p50, p95 = _weighted_quantiles(v, w, (0.05, 0.5, 0.95))
+    out = {
+        "pct": json_series(100.0 * counts / total, 2),
+        "below": round(100.0 * float(w[v < edges[0]].sum()) / total, 2),
+        "above": round(100.0 * float(w[v > edges[-1]].sum()) / total, 2),
+        "stats": {
+            "mean": round(float(np.sum(v * w) / total), 3), "min": round(float(v.min()), 3),
+            "max": round(float(v.max()), 3), "p5": round(p5, 3), "p50": round(p50, 3), "p95": round(p95, 3),
+            "seconds": round(total, 2),
+        },
+    }
+    if key.startswith("damper_vel_"):
+        share = lambda mask: round(100.0 * float(w[mask].sum()) / total, 1)  # noqa: E731
+        out["damper"] = {
+            "bump": share(v > 0), "rebound": share(v < 0),
+            "low_bump": share((v > 0) & (v <= knee)), "high_bump": share(v > knee),
+            "low_rebound": share((v < 0) & (v >= -knee)), "high_rebound": share(v < -knee),
+            "knee": knee,
+        }
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Wheel events (V0.9.3): lock-ups and wheelspin, measured, with their place on the lap
+# ---------------------------------------------------------------------------
+
+LOCK_SLIP_PCT = -15.0        # a wheel turning 15 % slower than the ground under it ...
+LOCK_MIN_BRAKE = 0.10        # ... while braking ...
+SPIN_SLIP_PCT = 15.0         # ... or 15 % faster while on the throttle
+SPIN_MIN_THROTTLE = 0.30
+EVENT_MIN_SECONDS = 0.10
+EVENT_MERGE_SECONDS = 0.20
+MAX_WHEEL_EVENTS = 40
+
+WHEEL_EVENT_CHANNELS: Tuple[str, ...] = tuple(f"slip_ratio_{pos}" for pos in WHEEL_POSITIONS)
+
+
+def _event_runs(mask: np.ndarray, t: np.ndarray) -> List[Tuple[int, int]]:
+    if not mask.any():
+        return []
+    padded = np.concatenate(([False], mask, [False]))
+    edges = np.flatnonzero(padded[1:] != padded[:-1])
+    runs = list(zip(edges[::2].tolist(), edges[1::2].tolist()))
+    merged: List[List[int]] = []
+    for start, end in runs:
+        if merged and t[start] - t[merged[-1][1] - 1] <= EVENT_MERGE_SECONDS:
+            merged[-1][1] = end
+        else:
+            merged.append([start, end])
+    return [(a, b) for a, b in merged if t[b - 1] - t[a] >= EVENT_MIN_SECONDS]
+
+
+def wheel_events(series: "LapSeries") -> List[dict]:
+    """[{"type": "lockup"|"wheelspin", "wheel", "at", "until", "t", "seconds", "peak"}],
+    ordered along the lap. Needs the wheel-slip channels (clients 0.9.0+)."""
+    from .telemetry_channels import _slip_ratio
+
+    raw, t, dist = series.raw, series.raw["t"], series.dist
+    brake = np.nan_to_num(raw.get("brake", np.zeros(len(t))))
+    throttle = np.nan_to_num(raw.get("throttle", np.zeros(len(t))))
+    events: List[dict] = []
+    for pos in WHEEL_POSITIONS:
+        slip = _slip_ratio(raw, pos)
+        if slip is None:
+            continue
+        finite = np.isfinite(slip)
+        for kind, mask, pick in (
+            ("lockup", finite & (slip <= LOCK_SLIP_PCT) & (brake >= LOCK_MIN_BRAKE), np.nanmin),
+            ("wheelspin", finite & (slip >= SPIN_SLIP_PCT) & (throttle >= SPIN_MIN_THROTTLE), np.nanmax),
+        ):
+            for start, end in _event_runs(mask, t):
+                events.append({
+                    "type": kind, "wheel": pos, "at": round(float(dist[start]), 1), "until": round(float(dist[end - 1]), 1),
+                    "t": round(float(t[start]), 2), "seconds": round(float(t[end - 1] - t[start]), 2),
+                    "peak": round(float(pick(slip[start:end])), 1),
+                })
+    events.sort(key=lambda e: (e["at"], e["wheel"]))
+    return events[:MAX_WHEEL_EVENTS]

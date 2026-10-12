@@ -160,15 +160,51 @@ _WHEEL_SPECS: Tuple[Tuple[str, Callable], ...] = (
 
 WHEEL_KEYS: Tuple[str, ...] = tuple(key for key, _ in _WHEEL_SPECS)
 
+# V0.9.3: four values per sample from the player's VehicleScoringInfoV01 (not the
+# telemetry struct) — what the track-limits check (server/track_limits.py) needs to
+# decide on its own instead of trusting one flag at the end of the lap:
+#   path_lateral    lateral position relative to LMU's approximate centre path (m)
+#   track_edge      distance of the track edge from that path on the car's side (m)
+#   count_lap_flag  0 = count neither lap nor time, 1 = lap but not time, 2 = both
+#   num_penalties   penalties the car currently carries
+# Appended AFTER the telemetry columns, so every earlier column keeps its position.
+SCORING_CHANNELS: Tuple[Tuple[str, str], ...] = (
+    ("path_lateral", "path_lateral"),
+    ("track_edge", "track_edge"),
+    ("count_lap_flag", "count_lap_flag"),
+    ("num_penalties", "num_penalties"),
+)
+
+# V0.9.4: what the Stint Analyzer needs per sample, appended after everything above (so no
+# earlier column moves). "s" = the player's VehicleScoringInfoV01, "t" = TelemInfoV01.
+#   in_pits          1 while in the pit lane (pit-lane time, standing time, in-/out-laps)
+#   place            race position (position changes, overtakes)
+#   flag             primary flag shown to the car (rFactor 2: 0 green, 6 blue — to be
+#                    confirmed for LMU, docs/LMU_VERIFICATION_PROTOCOL.md (w))
+#   time_gap_ahead   LMU's time gap to the car ahead on track, s (mTimeGapCarAhead, LMU 1.3+)
+#   time_gap_behind  ... to the car behind (mTimeGapCarBehind) — the traffic signal
+STINT_CHANNELS: Tuple[Tuple[str, str, str], ...] = (
+    ("in_pits", "s", "in_pits"),
+    ("place", "s", "place"),
+    ("flag", "s", "flag"),
+    ("time_gap_ahead", "t", "time_gap_car_ahead"),
+    ("time_gap_behind", "t", "time_gap_car_behind"),
+)
+
 _SCALAR_GETTERS = tuple(attrgetter(path) for _, path in SCALAR_CHANNELS)
 _WHEEL_GETTERS = tuple(getter for _, getter in _WHEEL_SPECS)
+_SCORING_GETTERS = tuple(attrgetter(path) for _, path in SCORING_CHANNELS)
+_STINT_GETTERS = tuple((source, attrgetter(path)) for _, source, path in STINT_CHANNELS)
 
 # Final column order: scalars, orientation (9), then wheel-major
-# (all keys of FL, then all keys of FR, ...).
+# (all keys of FL, then all keys of FR, ...), then the scoring values (V0.9.3), then the
+# stint values (V0.9.4).
 EXTENDED_COLUMNS: Tuple[str, ...] = (
     tuple(name for name, _ in SCALAR_CHANNELS)
     + ORIENTATION_CHANNELS
     + tuple(f"{key}_{pos}" for pos in WHEEL_POSITIONS for key in WHEEL_KEYS)
+    + tuple(name for name, _ in SCORING_CHANNELS)
+    + tuple(name for name, _, _ in STINT_CHANNELS)
 )
 
 assert len(set(EXTENDED_COLUMNS)) == len(EXTENDED_COLUMNS), "duplicate extended column name"
@@ -182,10 +218,24 @@ def _clean(value) -> float:
     return number if math.isfinite(number) else math.nan
 
 
-def extract_extended(tele) -> Tuple[float, ...]:
-    """Reads every extended channel from one TelemInfoV01, in EXTENDED_COLUMNS
-    order. `tele` may be the real ctypes struct or any object with the same
-    attribute layout."""
+_NO_SCORING = (math.nan,) * len(SCORING_CHANNELS)
+
+
+def _stint_value(source: str, getter, tele, scoring) -> float:
+    obj = tele if source == "t" else scoring
+    if obj is None:
+        return math.nan
+    try:
+        return _clean(getter(obj))
+    except (AttributeError, TypeError, ValueError):  # a stand-in object without the field
+        return math.nan
+
+
+def extract_extended(tele, scoring=None) -> Tuple[float, ...]:
+    """Reads every extended channel from one TelemInfoV01 (and, since V0.9.3, the
+    player's VehicleScoringInfoV01), in EXTENDED_COLUMNS order. `tele`/`scoring` may
+    be the real ctypes structs or any objects with the same attribute layout; without
+    `scoring` its columns are NaN ("not recorded")."""
     values: List[float] = [_clean(getter(tele)) for getter in _SCALAR_GETTERS]
     for row in tele.ori:
         values.append(_clean(row.x))
@@ -194,6 +244,14 @@ def extract_extended(tele) -> Tuple[float, ...]:
     for wheel in tele.wheel:
         for getter in _WHEEL_GETTERS:
             values.append(_clean(getter(wheel)))
+    if scoring is None:
+        values.extend(_NO_SCORING)
+    else:
+        try:
+            values.extend([_clean(getter(scoring)) for getter in _SCORING_GETTERS])
+        except AttributeError:  # a stand-in object without these fields (tools, tests)
+            values.extend(_NO_SCORING)
+    values.extend([_stint_value(source, getter, tele, scoring) for source, getter in _STINT_GETTERS])
     return tuple(values)
 
 

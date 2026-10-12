@@ -22,6 +22,7 @@ import { t } from "../i18n.js";
 const HEIGHT = 380;
 const COLOR_MODE_CHANNELS = ["speed", "throttle", "brake", "gear", "rpm", "lat_g", "long_g"];
 const LEVELS = 28; // colour levels: neighbouring segments of one level are drawn in one stroke
+const EVENT_COLORS = { invalid: "#e5484d", review: "#f5a524", warning: "#f2d544", info: "#8b9199" };
 
 // Where lap A gains/loses time per metre: the local slope of the delta curve over a
 // small window, so the colour says "lost time HERE", not "is behind by now".
@@ -110,6 +111,13 @@ export function createTrackMap(state, opts = {}) {
 
   let mode = defaultMode;
   let colored = colorsForMode(data, mode);
+  // V0.9.3: events from the shared store (loaded once by the page); markers only for things
+  // with a place on the lap, and not the "info" kind (wheels off without consequence etc.)
+  const eventMarkers = () => {
+    const store = opts.events;
+    if (!store || !store.get()) return [];
+    return store.events().filter((e) => e.at !== null && e.severity !== "info");
+  };
   let layer = null; // offscreen canvas with the static track
   let layerKey = "";
   let view = null;
@@ -185,6 +193,28 @@ export function createTrackMap(state, opts = {}) {
     marker(ctx, mainXs, mainYs, 0, "S/F");
     const sectors = (data.sectors && data.sectors.a) || [];
     sectors.forEach((distance, k) => marker(ctx, mainXs, mainYs, indexForDistance(data.grid, distance), `S${k + 2}`));
+    // V0.9.3: where something happened — red: the lap does not count there, orange: under
+    // review, yellow: a measured lock-up / wheelspin. Drawn on the line of the lap it belongs to.
+    for (const e of eventMarkers()) {
+      const xs = e.side === "b" && xsB ? xsB : mainXs;
+      const ys = e.side === "b" && ysB ? ysB : mainYs;
+      const i = indexForDistance(data.grid, e.at);
+      if (xs[i] === null || xs[i] === undefined || ys[i] === null) continue;
+      const px = view.toX(xs[i]);
+      const py = view.toY(ys[i]);
+      const size = e.severity === "warning" ? 4 : 6;
+      ctx.fillStyle = EVENT_COLORS[e.severity] || EVENT_COLORS.info;
+      ctx.strokeStyle = cssVar("--asphalt", "#14171A");
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(px, py - size);
+      ctx.lineTo(px + size, py);
+      ctx.lineTo(px, py + size);
+      ctx.lineTo(px - size, py);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
     return true;
 
     function strokePath(c, xs, ys) {
@@ -313,6 +343,10 @@ export function createTrackMap(state, opts = {}) {
   const unsubscribe = state.subscribe((what) => {
     if (what === "cursor") schedule();
   });
+  const unsubscribeEvents = opts.events ? opts.events.subscribe(() => {
+    layerKey = ""; // the markers live in the static layer
+    schedule();
+  }) : () => {};
   const stopResize = onResize(element, () => {
     layerKey = "";
     schedule();
@@ -325,6 +359,7 @@ export function createTrackMap(state, opts = {}) {
     redraw: draw,
     destroy() {
       unsubscribe();
+      unsubscribeEvents();
       stopResize();
     },
     _canvas: canvas,

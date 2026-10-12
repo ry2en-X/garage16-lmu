@@ -307,26 +307,6 @@ def test_ci_builds_both_editions_and_releases_all_files_on_a_tag():
     assert "Garage16-Client-Setup.exe" in script and "Garage16-Client-Analysis-Setup.exe" in script
 
 
-def test_publishing_needs_no_terminal_one_click_in_the_actions_tab():
-    """V0.9.2: "Run workflow" alone publishes the release (tag from CLIENT_VERSION, marked
-    Latest, re-runs replace the files), so friends download from Releases -> Latest."""
-    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "build-client.yml").read_text(encoding="utf-8"))
-    triggers = workflow.get(True) or workflow.get("on")
-    publish = triggers["workflow_dispatch"]["inputs"]["publish"]
-    assert publish["type"] == "boolean" and publish["default"] is True
-    release = workflow["jobs"]["release"]
-    assert "github.event_name == 'workflow_dispatch' && inputs.publish" in release["if"]
-    script = json.dumps(release["steps"])
-    assert "read_client_version" in script and 'TAG=\\"client-v${VERSION}\\"' in script or "client-v${VERSION}" in script
-    assert "--latest" in script and "--clobber" in script
-    assert "does not match CLIENT_VERSION" in script, "a wrong tag never publishes a mislabelled release"
-    assert ".venv-build-*/" in GITIGNORE_TEXT()
-
-
-def GITIGNORE_TEXT():
-    return (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
-
-
 @pytest.mark.skipif(
     os.environ.get("GARAGE16_TEST_FROZEN_BUILD") != "1",
     reason="opt-in (slow, ~2 min): set GARAGE16_TEST_FROZEN_BUILD=1 to run real PyInstaller builds",

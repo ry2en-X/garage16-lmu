@@ -35,6 +35,12 @@ and four checks that use the anchored steering:
   * tire slip angle   positive in right-hand corners  (checked against lateral G)
   * yaw rate          positive in right-hand corners  (checked against steering)
 
+and (V0.9.3) one that uses the pedals, which need no convention at all:
+
+  * suspension        "compression = +" is anchored on braking: under braking the car
+                      dives, so the FRONT deflection grows relative to the REAR one.
+                      Used for damper velocities (bump = +, rebound = −).
+
 `calibrate_orientation()` returns which way each one had to be flipped; the API
 reports it (`orientation`) so a surprising value is visible rather than hidden.
 When a lap does not move enough to decide (|corr| < MIN_CORRELATION) the
@@ -63,6 +69,7 @@ DEFAULT_LAT_G_SIGN = -1.0   # +x is LEFT, so right-hand corners give negative ac
 DEFAULT_LONG_G_SIGN = -1.0  # +z is REARWARD, so forward acceleration is negative accel_z -> flip
 DEFAULT_SLIP_SIGN = 1.0
 DEFAULT_YAW_SIGN = -1.0
+DEFAULT_SUSP_SIGN = 1.0     # rFactor 2: mSuspensionDeflection grows with compression
 
 
 @dataclass(frozen=True)
@@ -72,6 +79,7 @@ class Orientation:
     long_g: float = DEFAULT_LONG_G_SIGN
     slip: float = DEFAULT_SLIP_SIGN
     yaw: float = DEFAULT_YAW_SIGN
+    susp: float = DEFAULT_SUSP_SIGN
     # True per entry when the sign came from the data rather than the default.
     decided_from_data: Dict[str, bool] = field(default_factory=dict)
 
@@ -169,8 +177,19 @@ def calibrate_orientation(raw: Dict[str, np.ndarray]) -> Orientation:
     else:
         decided["slip"] = False
 
+    # --- suspension (V0.9.3): front minus rear deflection grows under braking (dive)
+    susp_sign = DEFAULT_SUSP_SIGN
+    defl = [raw.get(f"susp_deflection_{p}") for p in WHEEL_POSITIONS]
+    if all(d is not None for d in defl) and "speed" in raw and "t" in raw and len(raw["t"]) > 5 and np.all(np.isfinite(raw["t"])):
+        pitch = (defl[0] + defl[1]) / 2.0 - (defl[2] + defl[3]) / 2.0
+        with np.errstate(divide="ignore", invalid="ignore"):
+            decel = -np.gradient(_smooth(raw["speed"], 5), raw["t"])
+        susp_sign, decided["susp"] = _decide(_smooth(pitch), _smooth(decel), DEFAULT_SUSP_SIGN, moving)
+    else:
+        decided["susp"] = False
+
     return Orientation(
-        steering=steer_sign, lat_g=lat_sign, long_g=long_sign, slip=slip_sign, yaw=yaw_sign,
+        steering=steer_sign, lat_g=lat_sign, long_g=long_sign, slip=slip_sign, yaw=yaw_sign, susp=susp_sign,
         decided_from_data=decided,
     )
 
@@ -198,6 +217,83 @@ def _to_kpa(values: np.ndarray) -> np.ndarray:
     if finite.size and float(np.median(finite)) < 50.0:
         return values * 100.0
     return values
+
+
+def _rate(values: np.ndarray, t: np.ndarray, min_dt: float = 1e-3) -> np.ndarray:
+    """d(values)/dt by central differences, robust to repeated timestamps (a frame the
+    game did not advance): the time step is floored at `min_dt` instead of dividing by 0."""
+    n = len(values)
+    if n < 3:
+        return np.zeros(n)
+    out = np.empty(n)
+    dt_c = np.maximum(t[2:] - t[:-2], 2 * min_dt)
+    out[1:-1] = (values[2:] - values[:-2]) / dt_c
+    out[0] = (values[1] - values[0]) / max(t[1] - t[0], min_dt)
+    out[-1] = (values[-1] - values[-2]) / max(t[-1] - t[-2], min_dt)
+    return out
+
+
+DAMPER_SMOOTH_SAMPLES = 3  # ~50 ms at 60 Hz: removes frame jitter, keeps kerb strikes
+
+
+def _damper_velocity(raw: Dict[str, np.ndarray], o: "Orientation", pos: str) -> np.ndarray:
+    """Damper (shaft) velocity in mm/s, bump/compression = +. Derived from the suspension
+    deflection LMU reports for the wheel; the time derivative is the standard definition
+    (velocity = change of travel over time)."""
+    rate = _rate(raw[f"susp_deflection_{pos}"], raw["t"]) * 1000.0
+    return o.susp * _smooth(rate, DAMPER_SMOOTH_SAMPLES)
+
+
+# Tyre tread zones. LMU (rFactor 2) reports mTemperature[3] as left / centre / right
+# ACROSS THE TREAD, seen in the car's frame ("not inside/outside" — rF2 header). For the
+# left wheels the left zone is the OUTER one, for the right wheels it is the INNER one.
+_TREAD_ZONE = {
+    "fl": {"inner": "r", "middle": "c", "outer": "l"},
+    "rl": {"inner": "r", "middle": "c", "outer": "l"},
+    "fr": {"inner": "l", "middle": "c", "outer": "r"},
+    "rr": {"inner": "l", "middle": "c", "outer": "r"},
+}
+
+SLIP_RADIUS_MIN_SPEED = 25.0   # m/s: the rolling radius is estimated at speed ...
+SLIP_MIN_SPEED = 5.0           # m/s: below this a slip ratio means nothing
+
+
+def _slip_ratio(raw: Dict[str, np.ndarray], pos: str) -> Optional[np.ndarray]:
+    """Longitudinal wheel slip in %, spinning = +, locking = −:
+        slip = (ω·r − v) / v
+    with ω the wheel's rotation speed, v its longitudinal ground speed and r its rolling
+    radius. LMU does not report r, so it is estimated per lap as the median of v/|ω|
+    while the car rolls freely (no brake, not much throttle, at speed). Uses magnitudes
+    only, so it needs no sign convention. A lap that never rolls freely gives None."""
+    omega = raw.get(f"rotation_{pos}")
+    ground = raw.get(f"long_ground_vel_{pos}")
+    if omega is None or ground is None:
+        return None
+    w, v = np.abs(omega), np.abs(ground)
+    rolling = (v > SLIP_RADIUS_MIN_SPEED) & (w > 1.0) & np.isfinite(w) & np.isfinite(v)
+    brake, throttle = raw.get("brake"), raw.get("throttle")
+    if brake is not None:
+        rolling &= np.nan_to_num(brake) < 0.02
+    if throttle is not None:
+        light = rolling & (np.nan_to_num(throttle) < 0.6)
+        if light.sum() >= 30:
+            rolling = light
+    if rolling.sum() < 30:
+        return None
+    radius = float(np.median(v[rolling] / w[rolling]))
+    if not (0.15 <= radius <= 0.6):     # not a plausible racing-tyre radius: refuse
+        return None
+    with np.errstate(divide="ignore", invalid="ignore"):
+        slip = (w * radius - v) / np.maximum(v, 1e-3) * 100.0
+    slip[v < SLIP_MIN_SPEED] = np.nan
+    return np.clip(slip, -100.0, 200.0)
+
+
+def _count_surfaces(raw: Dict[str, np.ndarray], surfaces: Tuple[float, ...]) -> np.ndarray:
+    stack = np.vstack([raw[f"surface_type_{p}"] for p in WHEEL_POSITIONS])
+    counts = np.isin(stack, surfaces).sum(axis=0).astype(float)
+    counts[~np.isfinite(stack).all(axis=0)] = np.nan
+    return counts
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +426,74 @@ for _pos in WHEEL_POSITIONS:
     _scaled(f"brake_pressure_{_pos}", f"Brake pressure {WHEEL_LABELS[_pos]}", "%", "Brakes",
             f"brake_pressure_{_pos}", 100.0, fixed_range=(0, 100))
 
+# --- Dampers (V0.9.3) --------------------------------------------------------
+_ALL_DEFLECTIONS = tuple(f"susp_deflection_{p}" for p in WHEEL_POSITIONS)
+for _pos in WHEEL_POSITIONS:
+    _add(Channel(
+        f"damper_vel_{_pos}", f"Damper velocity {WHEEL_LABELS[_pos]} (bump = +)", "mm/s", "Dampers",
+        _ALL_DEFLECTIONS + ("t",), lambda raw, o, p=_pos: _damper_velocity(raw, o, p),
+    ))
+
+# --- Chassis attitude from the suspension (V0.9.3) -----------------------------
+_add(Channel("heave_front", "Heave front (mean travel)", "mm", "Suspension", ("susp_deflection_fl", "susp_deflection_fr"),
+             lambda raw, _o: (raw["susp_deflection_fl"] + raw["susp_deflection_fr"]) * 500.0))
+_add(Channel("heave_rear", "Heave rear (mean travel)", "mm", "Suspension", ("susp_deflection_rl", "susp_deflection_rr"),
+             lambda raw, _o: (raw["susp_deflection_rl"] + raw["susp_deflection_rr"]) * 500.0))
+_add(Channel("roll_front", "Roll front (travel left − right)", "mm", "Suspension", ("susp_deflection_fl", "susp_deflection_fr"),
+             lambda raw, _o: (raw["susp_deflection_fl"] - raw["susp_deflection_fr"]) * 1000.0))
+_add(Channel("roll_rear", "Roll rear (travel left − right)", "mm", "Suspension", ("susp_deflection_rl", "susp_deflection_rr"),
+             lambda raw, _o: (raw["susp_deflection_rl"] - raw["susp_deflection_rr"]) * 1000.0))
+_add(Channel("pitch_travel", "Pitch (travel front − rear)", "mm", "Suspension", _ALL_DEFLECTIONS,
+             lambda raw, _o: ((raw["susp_deflection_fl"] + raw["susp_deflection_fr"])
+                              - (raw["susp_deflection_rl"] + raw["susp_deflection_rr"])) * 500.0))
+_add(Channel("rake", "Rake (ride height rear − front)", "mm", "Suspension", ("front_ride_height", "rear_ride_height"),
+             lambda raw, _o: (raw["rear_ride_height"] - raw["front_ride_height"]) * 1000.0))
+
+# --- Tyre temperatures by tread zone, carcass, inner layer (V0.9.3) ------------
+for _pos in WHEEL_POSITIONS:
+    for _zone in ("inner", "middle", "outer"):
+        _col = f"temp_{_TREAD_ZONE[_pos][_zone]}_{_pos}"
+        _add(Channel(
+            f"tire_temp_{_zone}_{_pos}", f"Tyre {_zone} {WHEEL_LABELS[_pos]}", "°C", "Tyre temperatures", (_col,),
+            lambda raw, _o, c=_col: _to_celsius(raw[c]),
+        ))
+for _pos in WHEEL_POSITIONS:
+    _add(Channel(
+        f"tire_carcass_{_pos}", f"Tyre carcass {WHEEL_LABELS[_pos]}", "°C", "Tyre temperatures", (f"carcass_temp_{_pos}",),
+        lambda raw, _o, p=_pos: _to_celsius(raw[f"carcass_temp_{p}"]),
+    ))
+for _pos in WHEEL_POSITIONS:
+    _cols = tuple(f"inner_temp_{z}_{_pos}" for z in ("l", "c", "r"))
+    _add(Channel(
+        f"tire_inner_layer_{_pos}", f"Tyre inner layer {WHEEL_LABELS[_pos]}", "°C", "Tyre temperatures", _cols,
+        lambda raw, _o, cs=_cols: _to_celsius((raw[cs[0]] + raw[cs[1]] + raw[cs[2]]) / 3.0),
+    ))
+
+# --- Wheel slip (V0.9.3) -------------------------------------------------------
+for _pos in WHEEL_POSITIONS:
+    _add(Channel(
+        f"slip_ratio_{_pos}", f"Wheel slip {WHEEL_LABELS[_pos]} (spin = +, lock = −)", "%", "Tyres",
+        (f"rotation_{_pos}", f"long_ground_vel_{_pos}", "brake", "throttle"),
+        lambda raw, _o, p=_pos: _slip_ratio(raw, p),
+    ))
+
+# --- Track limits (V0.9.3) -----------------------------------------------------
+_SURFACES = tuple(f"surface_type_{p}" for p in WHEEL_POSITIONS)
+_add(Channel("wheels_off", "Wheels off track (grass, dirt, gravel)", "wheels", "Track limits", _SURFACES,
+             lambda raw, _o: _count_surfaces(raw, (2.0, 3.0, 4.0)), discrete=True, fixed_range=(0, 4)))
+_add(Channel("wheels_on_kerb", "Wheels on a kerb", "wheels", "Track limits", _SURFACES,
+             lambda raw, _o: _count_surfaces(raw, (5.0,)), discrete=True, fixed_range=(0, 4)))
+_add(Channel("edge_margin", "Distance to the track edge (approx., beyond = −)", "m", "Track limits",
+             ("path_lateral", "track_edge"), lambda raw, _o: np.abs(raw["track_edge"]) - np.abs(raw["path_lateral"])))
+_add(Channel("track_edge", "Track edge distance from LMU's path (approx.)", "m", "Track limits", ("track_edge",),
+             lambda raw, _o: np.abs(raw["track_edge"])))
+_scaled("track_limits_points", "Track-limits points (game)", "", "Track limits", "track_limits_steps", discrete=True)
+_scaled("lap_invalidated", "Lap invalidated (game)", "0/1", "Track limits", "lap_invalidated", discrete=True, fixed_range=(0, 1))
+
+# --- Combined G (V0.9.3, sign-free) ---------------------------------------------
+_add(Channel("combined_g", "Combined G", "G", "Motion & G", ("accel_x", "accel_z"),
+             lambda raw, _o: np.sqrt(raw["accel_x"] ** 2 + raw["accel_z"] ** 2) / G))
+
 # --- Aero --------------------------------------------------------------------
 _scaled("downforce_front", "Downforce front", "N", "Aero", "front_downforce")
 _scaled("downforce_rear", "Downforce rear", "N", "Aero", "rear_downforce")
@@ -346,6 +510,15 @@ _scaled("battery", "Battery charge", "%", "Powertrain & energy", "battery_charge
 _scaled("virtual_energy", "Virtual energy", "%", "Powertrain & energy", "virtual_energy", 100.0, fixed_range=(0, 100))
 _scaled("electric_motor_torque", "Electric motor torque", "Nm", "Powertrain & energy", "electric_motor_torque")
 _scaled("steering_torque", "Steering shaft torque", "Nm", "Powertrain & energy", "steering_shaft_torque")
+
+
+# The order groups are listed in (pickers, value table). Groups not named here follow
+# in the order they were added.
+_PREFERRED_GROUPS = (
+    "Speed & inputs", "Motion & G", "Track limits", "Driver aids", "Suspension", "Dampers",
+    "Tyres", "Tyre temperatures", "Brakes", "Aero", "Powertrain & energy",
+)
+GROUP_ORDER.sort(key=lambda g: _PREFERRED_GROUPS.index(g) if g in _PREFERRED_GROUPS else len(_PREFERRED_GROUPS))
 
 
 def channel_info(channel: Channel) -> dict:

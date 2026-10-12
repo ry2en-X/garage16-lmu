@@ -179,6 +179,14 @@ class Settings:
         default_factory=lambda: os.environ.get("LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL") or None
     )
 
+    # V0.9.3.1: track-limits heuristics that may invalidate a lap on their own (comma
+    # separated codes, e.g. "four_wheels_off"). Empty by default: every heuristic only sends
+    # the lap to review until real LMU recordings confirm it (server/track_limits.py RULES,
+    # docs/LMU_VERIFICATION_PROTOCOL.md). LMU's own verdict is never affected by this.
+    track_limits_invalidating: str = field(
+        default_factory=lambda: os.environ.get("LMU_GARAGE_TRACK_LIMITS_INVALIDATING", "").strip()
+    )
+
     db_pool_size: int = int(os.environ.get("LMU_GARAGE_DB_POOL_SIZE", 5))
     db_max_overflow: int = int(os.environ.get("LMU_GARAGE_DB_MAX_OVERFLOW", 10))
 

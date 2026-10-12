@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from typing import Callable, Hashable, Optional, Tuple
 
 # Bump when what the cache stores would come out different for the same inputs.
-ANALYSIS_CACHE_VERSION = 3  # 2 (V0.9.1 review): per-channel precision, spikes, corners; 3: corners cover the whole lap, delta_facts
+ANALYSIS_CACHE_VERSION = 5  # 2 (V0.9.1 review): per-channel precision, spikes, corners; 3: corners cover the whole lap, delta_facts; 4 (V0.9.3): suspension sign, new channels, lock-ups; 5 (V0.9.4): corner phases + metrics, line offset, extra laps
 
 DEFAULT_MAX_ENTRIES = 128
 DEFAULT_MAX_BYTES = 48 * 1024 * 1024

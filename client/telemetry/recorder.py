@@ -146,6 +146,23 @@ class LapRecorder:
             "car_model": lap.car_model or None,
             "uploaded": False,
         }
+        # V0.9.3 — only what the lap actually has, so an older server (and the uploader's
+        # compatibility mode) sees exactly the V0.9.2 metadata when these are empty
+        extra = {
+            "vehicle_model": getattr(lap, "vehicle_model", "") or None,
+            "tail_samples": getattr(lap, "tail_samples", 0) or None,
+            "track_grip_level": getattr(lap, "track_grip_level", None),
+            "fixed_setup": getattr(lap, "fixed_setup", None),
+            "track_limits_steps_per_point": getattr(lap, "track_limits_steps_per_point", None),
+            "track_limits_steps_per_penalty": getattr(lap, "track_limits_steps_per_penalty", None),
+            "game_lap_state": getattr(lap, "game_lap_state", None) or None,
+            "grid_vehicles": getattr(lap, "grid_vehicles", None) or None,
+            # V0.9.3.1 — the client's reasons and the late window after the line
+            "lap_report": getattr(lap, "lap_report", None) or None,
+            # V0.9.4 — the car and the session at the end of the lap (Stint Analyzer)
+            "lap_context": getattr(lap, "lap_context", None) or None,
+        }
+        metadata.update({key: value for key, value in extra.items() if value is not None})
         _atomic_write_text(meta_path, json.dumps(metadata, indent=2))
 
         return meta_path

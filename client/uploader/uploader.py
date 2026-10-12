@@ -46,7 +46,7 @@ from client.telemetry.recorder import LapRecorder
 
 logger = logging.getLogger("lmu_garage.uploader")
 
-CLIENT_VERSION = "0.9.2"
+CLIENT_VERSION = "0.9.4"
 DEFAULT_BACKEND_URL = "https://api.example-lmu-garage.invalid"  # placeholder, replace with real backend
 UPLOAD_ENDPOINT = "/telemetry/upload"
 MAX_RETRIES = 5
@@ -78,6 +78,36 @@ _SERVER_FIELDS = {
     "ambient_temp", "track_temp", "sample_count", "telemetry_file",
     "car_class", "car_model",
 }
+
+# V0.9.3: accepted by servers from 0.9.3 on. A 0.9.2 server rejects unknown fields
+# ("Extra inputs are not permitted"), so the uploader sends these, and if the server
+# turns them down it repeats the SAME upload once without them and remembers that for
+# this run (see upload_one). Nothing is lost either way: the telemetry file — which is
+# what the server checks — is identical.
+_V093_FIELDS = {
+    "vehicle_model", "tail_samples", "track_grip_level", "fixed_setup",
+    "track_limits_steps_per_point", "track_limits_steps_per_penalty",
+    "game_lap_state", "grid_vehicles",
+}
+# V0.9.3.1: accepted by servers from 0.9.3.1 on — the client's reason codes and the late
+# window after the finish line (client/telemetry/lap_verdict.py). A 0.9.3 server refuses
+# it like a 0.9.2 server refuses the 0.9.3 fields, so the uploader steps down ONE level at a
+# time: everything -> without the 0.9.3.1 fields -> the 0.9.2 metadata (V0.9.4: one level more
+# on top, see _V094_FIELDS).
+_V0931_FIELDS = {"lap_report"}
+_EXTRA_FIELDS_REFUSED = "Extra inputs are not permitted"
+
+# V0.9.4: the car and the session at the end of the lap (pit stops, compound, damage, tank,
+# position, time left) for the Stint Analyzer. Refused by a 0.9.3.1 server -> one level lower.
+_V094_FIELDS = {"lap_context"}
+
+# metadata levels, newest first (index = Uploader.metadata_level)
+_LEVELS = (
+    _SERVER_FIELDS | _V093_FIELDS | _V0931_FIELDS | _V094_FIELDS,
+    _SERVER_FIELDS | _V093_FIELDS | _V0931_FIELDS,
+    _SERVER_FIELDS | _V093_FIELDS,
+    _SERVER_FIELDS,
+)
 
 
 # Chunk size for hashing and for streaming the multipart body (V0.9.1). A lap
@@ -247,11 +277,24 @@ class Uploader:
         # V0.9.2: the server's id of the lap uploaded last (the client window offers
         # "Analyse last lap" for it). None until a lap was uploaded in this run.
         self.last_uploaded_lap_id: Optional[int] = None
+        # How much metadata the server takes (index into _LEVELS): 0 = all (0.9.4 server),
+        # 1 = without lap_context (0.9.3.1), 2 = without the 0.9.3.1 fields (0.9.3), 3 = 0.9.2.
+        # Lowered for this run when a server refuses unknown fields.
+        self.metadata_level = 0
+
+    @property
+    def legacy_metadata(self) -> bool:
+        """V0.9.3 name: True once the server only takes the 0.9.2 metadata."""
+        return self.metadata_level >= len(_LEVELS) - 1
+
+    @legacy_metadata.setter
+    def legacy_metadata(self, value: bool) -> None:
+        self.metadata_level = len(_LEVELS) - 1 if value else 0
 
     def _sign(self, payload_bytes: bytes) -> str:
         return hmac.new(self.client_secret, payload_bytes, hashlib.sha256).hexdigest()
 
-    def _build_payload(self, meta_path: Path) -> dict:
+    def _build_payload(self, meta_path: Path, legacy: Optional[bool] = None, level: Optional[int] = None) -> dict:
         raw_metadata = json.loads(meta_path.read_text(encoding="utf-8"))
         parquet_path = meta_path.parent / raw_metadata["telemetry_file"]
 
@@ -260,7 +303,10 @@ class Uploader:
         # chunks (V0.9.1): the file is never held in memory just to be hashed.
         telemetry_hash = sha256_file(parquet_path)
 
-        wire_metadata = {k: v for k, v in raw_metadata.items() if k in _SERVER_FIELDS}
+        if level is None:
+            level = self.metadata_level if legacy is None else (len(_LEVELS) - 1 if legacy else 0)
+        allowed = _LEVELS[min(max(level, 0), len(_LEVELS) - 1)]
+        wire_metadata = {k: v for k, v in raw_metadata.items() if k in allowed}
 
         envelope = {
             "metadata": wire_metadata,
@@ -283,6 +329,8 @@ class Uploader:
             "envelope": json.dumps(payload["envelope"]),
             "signature": payload["signature"],
         }
+        level = self.metadata_level
+        sent_extended = set(payload["envelope"]["metadata"]) - _SERVER_FIELDS
         headers = {}
         if self.auth_token:
             headers["Authorization"] = f"Bearer {self.auth_token}"
@@ -340,6 +388,20 @@ class Uploader:
                         min_version, meta_path.name,
                     )
                     raise UpdateRequired(min_version, download_url)
+
+                if resp.status_code == 400 and sent_extended and _EXTRA_FIELDS_REFUSED in resp.text:
+                    # talking to an older server: the same lap, one metadata level lower
+                    # (0.9.4 -> 0.9.3.1 -> 0.9.3 -> 0.9.2), remembered for this run
+                    while level < len(_LEVELS) - 1:
+                        level += 1
+                        payload = self._build_payload(meta_path, level=level)
+                        if set(payload["envelope"]["metadata"]) != set(json.loads(fields["envelope"])["metadata"]):
+                            break
+                    logger.info("Server refused newer metadata — uploading %s with level %d.", meta_path.name, level)
+                    self.metadata_level = max(self.metadata_level, level)
+                    fields = {"envelope": json.dumps(payload["envelope"]), "signature": payload["signature"]}
+                    sent_extended = set(payload["envelope"]["metadata"]) - _SERVER_FIELDS
+                    continue
 
                 if not _is_transient_status(resp.status_code):
                     # Permanent failure: this exact request will fail the

@@ -58,7 +58,7 @@ from ..versioning import data_level_for_client_version, is_client_outdated
 from ..schemas import LapMetadata, LapReportOut, LapReportRequest, LapSummary, UploadResponse
 from ..security import verify_hmac
 from ..storage import telemetry_storage_dir
-from ..validation import ValidationResult, validate_telemetry_file
+from ..lap_check import check_lap, identity_fields, learn_from_upload, link_neighbours, stored_validation
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
 logger = logging.getLogger("lmu_garage.telemetry")
@@ -252,39 +252,16 @@ def upload_lap(
         tmp_path.unlink(missing_ok=True)
         raise
 
-    # --- 7. Validate, insert, evaluate records (one transaction) ---
+    # --- 7. Check, insert, evaluate records (one transaction) ---
     try:
-        # Catch validator exceptions as is_valid=False, not 500.
-        # A corrupt parquet or unexpected dtype shouldn't crash the upload.
-        #
-        # V0.6.0 (P1-3): run in the threadpool, not inline on the event
-        # loop. pd.read_parquet + numpy checks on up to max_upload_bytes
-        # of data is CPU-bound; running it inline blocks every other
-        # request this worker is handling for the duration. This doesn't
-        # shorten the DB transaction itself (that needs a bigger endpoint
-        # restructure — see README's "known limitations"), but it stops
-        # validation from starving concurrent requests on the same worker.
-        # V0.9.1: validated straight from the file on disk (only the columns
-        # the checks need are read) — the old read_bytes() held the whole
-        # upload in memory a second time just for this.
-        try:
-            validation = validate_telemetry_file(dest_path, metadata)
-        except Exception as exc:
-            logger.warning("Telemetry validation crashed for %s: %s", actual_hash, exc)
-            validation = ValidationResult(is_valid=False, reasons=[f"validation error: {exc}"])
-
-        # P0-3: AND server plausibility with client validity. The server
-        # checks physical plausibility; the client knows race-context
-        # (pit lane, count_lap_flag, track limits). Both sides can reject.
-        is_valid = validation.is_valid and metadata.is_valid
-        # invalid_reason records WHY, for the driver's own /telemetry/laps
-        # view and for admin moderation — previously validation.reasons
-        # was computed and then discarded (audit finding: "the driver sees
-        # only 'invalid'").
-        invalid_reason = None if is_valid else (validation.reasons or (
-            ["client flagged this lap as invalid (pit lane / track limits / etc.)"]
-            if not metadata.is_valid else None
-        ))
+        # V0.9.3: one read of the file for every check (server/lap_check.py):
+        # plausibility (server/validation.py), track limits from the telemetry itself
+        # (server/track_limits.py), the stored per-lap figures (server/lap_insights.py).
+        # A crash in any of them is caught there — never a 500.
+        # P0-3 stays: the client's own verdict (pit lane, its game reading) is one of
+        # the inputs, so both sides can still reject a lap.
+        check = check_lap(db, dest_path, metadata, client_valid=metadata.is_valid)
+        is_valid = check.is_valid
 
         lap = Lap(
             driver_id=driver.id,
@@ -292,14 +269,22 @@ def upload_lap(
             car_name=metadata.car_name,
             car_class=canonical_class(metadata.car_class),
             car_class_raw=metadata.car_class,
-            car_model=metadata.car_model,
+            # V0.9.3: car_model is the MODEL identity; the raw values stay alongside
+            **identity_fields(db, metadata),
             session_type=metadata.session_type,
             lap_number=metadata.lap_number,
             lap_time=metadata.lap_time,
             sector_times=metadata.sector_times,
             is_valid=is_valid,
             client_claimed_valid=metadata.is_valid,
-            invalid_reason=invalid_reason,
+            invalid_reason=check.invalid_reason(),
+            validation=stored_validation(check.verdict),
+            # V0.9.3.1: what the verdict depends on beyond the file (re-judging later)
+            check_inputs=check.inputs or None,
+            # V0.9.4: the car and the session at the end of the lap (Stint Analyzer)
+            lap_context=metadata.lap_context.model_dump(exclude_none=True) if metadata.lap_context else None,
+            review_status=check.review_status,
+            lap_stats=check.stats or None,
             started_at=metadata.started_at,
             recorded_at=metadata.recorded_at,
             ambient_temp=metadata.ambient_temp,
@@ -324,9 +309,20 @@ def upload_lap(
             )
             return UploadResponse(status="ok", lap_id=existing.id, duplicate=True)
 
+        # V0.9.3.1: track-limits reports LMU sent after the finish line belong to the lap
+        # before — link this lap with its neighbours (server/lap_check.py)
+        link_neighbours(db, lap)
+
+        # V0.9.3: what the upload says about the cars of the session (car_identity.py)
+        learned = learn_from_upload(db, metadata)
+        if learned.get("learned") or learned.get("conflicts"):
+            logger.info("Car identity: %s", learned)
+
         # P0-4a: Advisory lock serializes record evaluation per (track, car)
         # on PostgreSQL; no-op on SQLite (BEGIN IMMEDIATE handles it).
-        acquire_record_lock(db, metadata.track_name, metadata.car_name)
+        # V0.9.3: keyed by the car MODEL — records compare models (records.py), so two
+        # liveries of one model racing for the same record must take the same lock.
+        acquire_record_lock(db, metadata.track_name, lap.car_model or metadata.car_name)
         evaluate_and_record(db, lap)
         db.commit()
     except Exception:
@@ -373,6 +369,9 @@ def list_my_laps(
             track_temp=lap.track_temp,
             uploaded_at=lap.uploaded_at.isoformat(),
             data_level=data_level_for_client_version(lap.client_version),
+            car_model=lap.car_model,
+            validation_status=(lap.validation or {}).get("status") if isinstance(lap.validation, dict) else None,
+            review_status=lap.review_status,
         )
         for lap in laps
     ]

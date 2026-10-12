@@ -15,6 +15,15 @@ import { t } from "../i18n.js";
 export const DEFAULT_COLORS = Object.freeze({ a: "#e0472b", b: "#4fb3e8", delta: "#ecedee" }); // lower case, like every sanitised colour
 export const LAP_COLORS = { a: DEFAULT_COLORS.a, b: DEFAULT_COLORS.b, delta: DEFAULT_COLORS.delta };
 
+// V0.9.4: up to two more laps drawn over Lap 1 / Lap 2 ("c", "d" — Lap 3 / Lap 4). Fixed colours and
+// line styles, so four laps stay apart on a chart even in black and white: Lap 1 and 2 solid,
+// Lap 3 dashed, Lap 4 dotted.
+export const EXTRA_COLORS = Object.freeze({ c: "#4ca771", d: "#d8a83e" });
+export const LAP_DASH = Object.freeze({ a: [], b: [], c: [7, 4], d: [2, 3] });
+export const EXTRA_SIDES = ["c", "d"];
+export const lapColor = (side) => LAP_COLORS[side] || EXTRA_COLORS[side] || "#8b9199";
+export const lapName = (side) => ({ a: t("Lap 1"), b: t("Lap 2"), c: t("Lap 3"), d: t("Lap 4") })[side] || side;
+
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 export const isHexColor = (value) => typeof value === "string" && HEX_COLOR.test(value);
 

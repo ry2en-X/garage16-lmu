@@ -60,13 +60,8 @@ $portable = if ($Edition -eq "analysis") { "Garage16-Analysis-Portable.zip" } el
 New-Item -ItemType Directory -Force -Path dist-installer | Out-Null
 Compress-Archive -Path dist\Garage16 -DestinationPath "dist-installer\$portable" -Force
 
-# Inno Setup installs machine-wide (Program Files) or, via winget/user setup, per user.
-$iscc = @(
-    (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"),
-    (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe"),
-    (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe")
-) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
-if ($iscc) {
+$iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+if (Test-Path $iscc) {
     & $iscc "/DEdition=$Edition" packaging\garage16.iss
     $setup = if ($Edition -eq "analysis") { "Garage16-Client-Analysis-Setup.exe" } else { "Garage16-Client-Setup.exe" }
     Write-Host "Installer: dist-installer\$setup"

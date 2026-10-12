@@ -4,7 +4,7 @@ import { JSDOM } from "jsdom";
 import assert from "node:assert/strict";
 
 const dom = new JSDOM(`<!doctype html><html lang="en"><body>
-  <nav><a id="a1" data-i18n="Leaderboard">Leaderboard</a><a id="a2" data-i18n="Analysis">Analysis</a>
+  <nav><a id="a1" data-i18n="Leaderboard">Leaderboard</a><a id="a2" data-i18n="Circuits">Circuits</a>
   <button id="b1" aria-label="Toggle menu" data-i18n-aria-label="Toggle menu">☰</button>
   <span id="s1" data-i18n="not signed in">not signed in</span><span id="s2" data-i18n="No such text in the dictionary">No such text in the dictionary</span></nav>
   <div id="slot"></div></body></html>`, { url: "http://localhost/", pretendToBeVisual: true });
@@ -72,13 +72,13 @@ for (const [en, de] of Object.entries(DE)) {
 // ---------------------------------------------------------------- static markup
 i18n.applyStaticTranslations();
 assert.equal(document.getElementById("a1").textContent, "Leaderboard");
-assert.equal(document.getElementById("a2").textContent, "Analyse");
+assert.equal(document.getElementById("a2").textContent, "Strecken");
 assert.equal(document.getElementById("b1").getAttribute("aria-label"), "Menü umschalten");
 assert.equal(document.getElementById("s1").textContent, "nicht angemeldet");
 assert.equal(document.getElementById("s2").textContent, "No such text in the dictionary", "unknown static text stays English");
 setLanguage("en");
 i18n.applyStaticTranslations();
-assert.equal(document.getElementById("a2").textContent, "Analysis");
+assert.equal(document.getElementById("a2").textContent, "Circuits");
 assert.equal(document.getElementById("s1").textContent, "not signed in");
 assert.equal(document.documentElement.lang, "en");
 

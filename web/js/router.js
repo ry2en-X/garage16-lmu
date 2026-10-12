@@ -16,6 +16,7 @@ import { renderLanding } from "./pages/landing.js";
 import { renderAnalysis } from "./pages/analysis.js";
 import { renderCircuits } from "./pages/circuits.js";
 import { renderDownload } from "./pages/download.js";
+import { renderStints } from "./pages/stints.js";
 import { startDesktopAppBridge } from "./app_bridge.js";
 
 import { applyStaticTranslations, createLanguageSwitch, ensureLanguageChosen, t } from "./i18n.js";
@@ -24,6 +25,9 @@ const routes = {
   leaderboard: renderLeaderboard,
   dashboard: renderDashboard,
   analysis: renderAnalysis,
+  // V0.9.4: the Stint Analyzer; #/sessions is the V0.9.3 address of the same page
+  stints: renderStints,
+  sessions: renderStints,
   circuits: renderCircuits,
   download: renderDownload,
   teams: renderTeams,
@@ -61,7 +65,7 @@ function matchDriverDetail(path) {
 }
 
 function updateNavActive(path) {
-  const effective = matchTeamDetail(path) ? "teams" : path;
+  const effective = matchTeamDetail(path) ? "teams" : path === "sessions" ? "stints" : path;
   navLinks.querySelectorAll("a").forEach((a) => {
     a.classList.toggle("active", a.dataset.route === effective);
   });

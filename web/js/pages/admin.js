@@ -9,6 +9,8 @@ import { adminStore } from "../admin_store.js";
 import { el, formatLapTime, formatDate } from "../format.js";
 
 import { t, tp } from "../i18n.js";
+import { allFindings, findingText, ruleTitle, tierText } from "../findings.js";
+import { renderRulesTab } from "./admin_rules.js";
 export async function renderAdmin(container) {
   let token = adminStore.getToken();
 
@@ -33,7 +35,7 @@ export async function renderAdmin(container) {
     return;
   }
 
-  container.appendChild(el("p", { class: "subtitle" }, t("Reports, driver moderation, and system status.")));
+  container.appendChild(el("p", { class: "subtitle" }, t("Reports, track-limits review, driver moderation, car models, race rules and system status.")));
 
   const signOutBtn = el("button", { class: "btn btn--ghost", style: "float:right;" }, t("Forget admin token"));
   signOutBtn.addEventListener("click", () => {
@@ -43,8 +45,11 @@ export async function renderAdmin(container) {
   });
   container.appendChild(signOutBtn);
 
-  const tabs = ["Reports", "Drivers", "System"];
-  const tabLabels = { Reports: t("Reports"), Drivers: t("Drivers"), System: t("System") };
+  // V0.9.3: "Review" (laps the track-limits check left to a human) and "Cars" (what the
+  // server learned about car models)
+  // V0.9.4: "Race rules" — rule sets for the Stint Analyzer's strategy calculator
+  const tabs = ["Reports", "Review", "Drivers", "Cars", "Rules", "System"];
+  const tabLabels = { Reports: t("Reports"), Review: t("Track-limits review"), Drivers: t("Drivers"), Cars: t("Car models"), Rules: t("Race rules"), System: t("System") };
   let active = "Reports";
   const tabBar = el("div", { class: "inline-form" }, tabs.map((name) => el("button", { class: "btn btn--ghost", "data-tab": name }, tabLabels[name])));
   const body = el("div", { class: "section" });
@@ -56,7 +61,10 @@ export async function renderAdmin(container) {
     tabBar.querySelectorAll("button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
     body.innerHTML = "";
     if (name === "Reports") body.appendChild(await renderReportsTab(token));
+    else if (name === "Review") body.appendChild(await renderReviewTab(token));
     else if (name === "Drivers") body.appendChild(await renderDriversTab(token));
+    else if (name === "Cars") body.appendChild(await renderCarsTab(token));
+    else if (name === "Rules") body.appendChild(await renderRulesTab(token));
     else body.appendChild(await renderSystemTab());
   }
 
@@ -241,4 +249,150 @@ async function renderSystemTab() {
     card.appendChild(el("div", { class: "notice notice--error" }, err.message));
   }
   return card;
+}
+
+
+// ---------------------------------------------------------------- V0.9.3: track-limits review
+
+function findingLine(f) {
+  const where = f.at !== undefined && f.at !== null ? ` @ ${Math.round(f.at)} m` : "";
+  const tier = tierText(f.tier);
+  return `${findingText(f)}${where} — ${tier ? `${tier}, ` : ""}${f.source}`;
+}
+
+// V0.9.3.1: which rule may invalidate, which only asks for a review (loaded on opening)
+function rulesBlock(token) {
+  const body = el("div", {}, el("div", { class: "notice" }, t("Loading …")));
+  const details = el("details", { class: "card", "data-rules": "" }, [el("summary", {}, t("Track-limits rules on this server")), body]);
+  let loaded = false;
+  details.addEventListener("toggle", async () => {
+    if (!details.open || loaded) return;
+    loaded = true;
+    try {
+      const data = await api.adminTrackLimitsRules(token);
+      const effect = { invalid: t("invalidates"), review: t("review"), info: t("shown only") };
+      body.innerHTML = "";
+      body.appendChild(el("table", { class: "timing-table" }, [
+        el("thead", {}, el("tr", {}, [el("th", {}, t("Rule")), el("th", {}, t("Kind")), el("th", {}, t("Effect")), el("th", {}, t("Meaning confirmed"))])),
+        el("tbody", {}, data.rules.map((r) => el("tr", { "data-code": r.code, title: r.note }, [
+          el("td", {}, ruleTitle(r.code)), el("td", {}, tierText(r.tier)),
+          el("td", {}, effect[r.effect] || r.effect), el("td", {}, r.confirmed ? t("yes") : t("not yet")),
+        ]))),
+      ]));
+      body.appendChild(el("div", { class: "subtitle" }, data.invalidating_heuristics.length
+        ? t("Measurements allowed to invalidate on this server: {0}", [data.invalidating_heuristics.join(", ")])
+        : t("No measurement invalidates on its own (LMU_GARAGE_TRACK_LIMITS_INVALIDATING is empty).")));
+    } catch (err) {
+      body.innerHTML = "";
+      body.appendChild(el("div", { class: "notice notice--error" }, err.message));
+    }
+  });
+  return details;
+}
+
+async function renderReviewTab(token) {
+  const wrap = el("div");
+  wrap.appendChild(el("p", { class: "subtitle", style: "margin-top:16px;" }, t("Laps the automatic track-limits check could not decide on its own. They count until you decide. Every finding says what was seen, where on the lap and from which signal.")));
+  wrap.appendChild(rulesBlock(token));
+  const list = el("div");
+  wrap.appendChild(list);
+
+  async function refresh() {
+    list.innerHTML = "";
+    let laps;
+    try {
+      laps = await api.adminReviewQueue(token, "pending");
+    } catch (err) {
+      list.appendChild(el("div", { class: "notice notice--error" }, err.message));
+      return;
+    }
+    if (!laps.length) {
+      list.appendChild(el("div", { class: "empty-state" }, t("Nothing to review.")));
+      return;
+    }
+    laps.forEach((lap) => {
+      const findings = allFindings(lap.validation).filter((f) => f.severity !== "info");
+      const out = el("div");
+      const decide = async (decision) => {
+        const note = window.prompt(decision === "invalidate" ? t("Reason for invalidating this lap:") : t("Note (optional):"), "");
+        if (note === null) return;
+        try {
+          await api.adminReviewLap(token, lap.id, decision, note || undefined);
+          await refresh();
+        } catch (err) {
+          out.appendChild(el("div", { class: "notice notice--error" }, err.message));
+        }
+      };
+      list.appendChild(el("div", { class: "card", "data-review-lap": String(lap.id) }, [
+        el("div", { class: "card-row" }, [
+          el("div", {}, [
+            el("strong", {}, `${lap.track_name} — ${lap.car_model || lap.car_name}`),
+            el("div", { class: "subtitle", style: "margin:2px 0 0;" }, t("Driver: {0} — {1} — {2}", [lap.driver_name, formatLapTime(lap.lap_time), lap.is_valid ? t("currently valid") : t("already invalid")])),
+          ]),
+          el("span", { class: "tag" }, formatDate(lap.uploaded_at)),
+        ]),
+        el("ul", { class: "review__findings" }, findings.map((f) => el("li", { "data-code": f.code }, findingLine(f)))),
+        el("div", { class: "inline-form", style: "margin-top:8px;" }, [
+          el("a", { class: "btn btn--ghost", href: `#/analysis?a=${lap.id}` }, t("Analyse")),
+          el("button", { class: "btn", onclick: () => decide("invalidate") }, t("Invalidate lap")),
+          el("button", { class: "btn btn--ghost", onclick: () => decide("clear") }, t("Lap counts")),
+        ]),
+        out,
+      ]));
+    });
+  }
+
+  await refresh();
+  return wrap;
+}
+
+// ---------------------------------------------------------------- V0.9.3: car models
+
+async function renderCarsTab(token) {
+  const wrap = el("div");
+  wrap.appendChild(el("p", { class: "subtitle", style: "margin-top:16px;" }, t("Every livery, car number and season of a model counts as the same car. The server learns which LMU file names belong to which model from the game itself (every car of a session, reported by the 0.9.3 client). Nothing to enter by hand.")));
+  let data;
+  try {
+    data = await api.adminCarIdentity(token);
+  } catch (err) {
+    wrap.appendChild(el("div", { class: "notice notice--error" }, err.message));
+    return wrap;
+  }
+  const sourceText = { vehicle_model: t("LMU model name"), alias: t("learned alias"), veh_file: t("file name only"), null: t("unknown (very old client)") };
+  wrap.appendChild(el("div", { class: "card" }, Object.entries(data.laps_by_source || {}).map(([source, count]) => el("div", { class: "card-row" }, [
+    el("span", {}, sourceText[source] || source), el("span", {}, tp("{0} lap", "{0} laps", count)),
+  ]))));
+  // V0.9.3.1: identities real data must decide on — nothing is changed automatically
+  const suspectText = {
+    cut_name: t("LMU cut the model name (30-byte limit); the full name is not known yet"),
+    several_models: t("laps from LMU files of different models — two variants with the same name?"),
+    several_classes: t("laps in different classes"),
+  };
+  if ((data.suspects || []).length) {
+    wrap.appendChild(el("div", { class: "card", "data-suspects": "" }, [
+      el("h3", {}, t("To check with real data")),
+      el("ul", { class: "review__findings" }, data.suspects.map((item) => el("li", { "data-identity": item.identity }, [
+        el("strong", {}, item.identity), ` — ${item.reasons.map((r) => suspectText[r] || r).join("; ")} `,
+        el("span", { class: "subtitle" }, `(${tp("{0} lap", "{0} laps", item.laps)}; ${item.veh_models.join(", ") || "—"}; ${item.classes.join(", ") || "—"})`),
+      ]))),
+      el("div", { class: "subtitle" }, t("Check with the car list of a full grid (py -m scripts.car_identity_probe on the PC) before relying on these groups.")),
+    ]));
+  }
+  if (!data.aliases.length) {
+    wrap.appendChild(el("div", { class: "empty-state" }, t("Nothing learned yet — it starts with the first lap uploaded by a 0.9.3 client.")));
+    return wrap;
+  }
+  const aliasState = (a) => {
+    if (a.conflict) return t("conflict with {0} — not used", [a.conflict_with]);
+    if (a.used === false) return t("seen {0}× in grid lists only — used from 2×", [a.seen]);
+    return t("seen {0}×", [a.seen]);
+  };
+  const rows = data.aliases.map((a) => el("tr", { class: a.conflict ? "alias--conflict" : "" }, [
+    el("td", {}, a.key), el("td", {}, a.model), el("td", {}, aliasState(a)),
+  ]));
+  wrap.appendChild(el("div", { class: "card corners__wrap" }, el("table", { class: "timing-table" }, [
+    el("thead", {}, el("tr", {}, [el("th", {}, t("LMU file name group")), el("th", {}, t("Model")), el("th", {}, t("Status"))])),
+    el("tbody", {}, rows),
+  ])));
+  return wrap;
 }

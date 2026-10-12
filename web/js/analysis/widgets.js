@@ -22,7 +22,8 @@ import { createPhysicsView } from "./physics.js";
 import { createTrackMap } from "./trackmap.js";
 import { deltaFacts, sectorTable } from "./insights.js";
 import {
-  basicTagText, buildCursorRows, distanceAt, formatChannelValue, formatDelta, formatMetres, LAP_COLORS, PHYSICS_CHANNELS,
+  basicTagText, buildCursorRows, distanceAt, EXTRA_SIDES, formatChannelValue, formatDelta, formatMetres, LAP_COLORS, LAP_DASH, lapColor,
+  lapName, PHYSICS_CHANNELS,
 } from "./model.js";
 import { T } from "./strings.js";
 
@@ -35,10 +36,10 @@ export const notice = (message, error = false) => el("div", { class: `notice${er
 // ---------------------------------------------------------------- summary
 
 function lapCard(side, lap, recording) {
-  const color = LAP_COLORS[side];
+  const color = lapColor(side);
   const basic = basicTagText(recording);
   return el("div", { class: "card analysis-lap", style: `border-top:3px solid ${color};` }, [
-    el("div", { class: "analysis-lap__tag", style: `color:${color};` }, side === "a" ? t("LAP 1") : t("LAP 2")),
+    el("div", { class: "analysis-lap__tag", style: `color:${color};` }, ({ a: t("LAP 1"), b: t("LAP 2"), c: t("LAP 3"), d: t("LAP 4") })[side]),
     basic ? el("div", { class: "tag tag--basic", title: t("Recorded by a client older than 0.9.0 — fewer channels") }, basic) : null,
     el("div", { class: "analysis-lap__who" }, [el("a", { href: `#/driver/${lap.driver_id}` }, lap.driver_name)]),
     el("div", { class: "subtitle", style: "margin:0 0 8px;" }, `${lap.car_model || lap.car_name} · ${t("lap #{0}", [lap.lap_number])}${lap.is_valid ? "" : ` · ${t("invalid")}`}`),
@@ -98,6 +99,8 @@ export function renderSummary(widget, ctx) {
     lapCard("a", data.laps.a, data.recording && data.recording.a),
     hasB ? lapCard("b", data.laps.b, data.recording && data.recording.b) : null,
     hasB ? differenceCard(data) : null,
+    // V0.9.4: Lap 3 / Lap 4
+    ...EXTRA_SIDES.filter((side) => data.laps[side]).map((side) => lapCard(side, data.laps[side], data.recording && data.recording[side])),
   ]);
   return { element, destroy: noop };
 }
@@ -110,20 +113,57 @@ function factChip(label, signed, at, tag, onPin) {
   return chip;
 }
 
+// V0.9.4: Lap 3 / Lap 4 against the reference lap, drawn over the delta (dashed / dotted)
+const extraDeltaSeries = (data) => EXTRA_SIDES.filter((s) => data.extra_delta && data.extra_delta[s]).map((s) => ({
+  values: data.extra_delta[s], color: lapColor(s), dash: LAP_DASH[s], name: t("{0} − reference", [lapName(s)]), side: s,
+}));
+
+// V0.9.4: "Time" view — the elapsed time of every lap along the track instead of the difference
+function timeSeries(data) {
+  return ["a", "b", ...EXTRA_SIDES].filter((s) => data.time && data.time[s]).map((s) => ({ values: data.time[s], color: lapColor(s), dash: LAP_DASH[s], name: lapName(s), side: s }));
+}
+
 export function renderDelta(widget, ctx) {
   const { data, state } = ctx;
   if (!data.delta) return { element: notice(T.deltaNeedsSecond), destroy: noop };
   const base = ctx.baseData || data;
-  const chart = createChart(state, {
-    key: "delta", title: t("Delta  (Lap 1 − Lap 2)"), unit: "s", kind: "delta", height: CHART_HEIGHT[widget.size] || 130, showXAxis: true,
-    series: [{ values: data.delta, color: LAP_COLORS.delta, name: "delta" }],
-    rangeValues: [base.delta],
-    sectors: data.sectors.a,
-    format: (v) => (v === null || v === undefined ? "—" : `${formatDelta(v)} s`),
-  });
+  const modeSelect = el("select", { class: "delta-widget__mode", "aria-label": t("Show") }, [
+    el("option", { value: "delta" }, t("Time difference")),
+    el("option", { value: "time" }, t("Elapsed time")),
+  ]);
+  const chartSlot = el("div");
+  let chart = null;
+  let mode = "delta";
+  const build = () => {
+    if (chart) chart.destroy();
+    chartSlot.innerHTML = "";
+    const current = state.data;
+    if (mode === "time") {
+      chart = createChart(state, {
+        key: "time", title: t("Elapsed time along the lap"), unit: "s", kind: "line", height: CHART_HEIGHT[widget.size] || 130, showXAxis: true,
+        series: timeSeries(current), rangeValues: timeSeries(base).map((s) => s.values), sectors: current.sectors.a,
+        format: (v) => (v === null || v === undefined ? "—" : `${v.toFixed(2)} s`),
+      });
+    } else {
+      const extra = extraDeltaSeries(current);
+      const reference = current.extra_sides && current.extra_sides.length ? t(" · Lap 3/4 against Lap 2") : "";
+      chart = createChart(state, {
+        key: "delta", title: `${t("Delta  (Lap 1 − Lap 2)")}${reference}`, unit: "s", kind: "delta", height: CHART_HEIGHT[widget.size] || 130, showXAxis: true,
+        series: [{ values: current.delta, color: LAP_COLORS.delta, name: "delta" }, ...extra],
+        rangeValues: [base.delta],
+        sectors: current.sectors.a,
+        format: (v) => (v === null || v === undefined ? "—" : `${formatDelta(v)} s`),
+      });
+    }
+    chartSlot.appendChild(chart.element);
+  };
+  modeSelect.addEventListener("change", () => { mode = modeSelect.value; build(); });
+  build();
   // finer / coarser data of the same laps (zoom refinement): new values, same chart
   const offData = state.subscribe((what) => {
-    if (what === "data" && state.data.delta) chart.setData(state.data, [state.data.delta]);
+    if (what !== "data" || !state.data.delta) return;
+    if (mode === "time") chart.setData(state.data, timeSeries(state.data).map((s) => s.values));
+    else chart.setData(state.data, [state.data.delta, ...extraDeltaSeries(state.data).map((s) => s.values)]);
   });
   const facts = deltaFacts(ctx.baseData || data);   // biggest gain/loss of the WHOLE lap, even while zoomed in
   const chips = [];
@@ -137,11 +177,12 @@ export function renderDelta(widget, ctx) {
     chips.push(el("span", { class: `delta-fact delta-fact--net ${tone(net)}`, "data-fact": "net" }, `${T.netLabel}: ${formatDelta(net)} s`));
   }
   const element = el("div", { class: "delta-widget" }, [
-    chart.element,
+    el("div", { class: "delta-widget__bar" }, modeSelect),
+    chartSlot,
     facts ? el("div", { class: "delta-facts" }, chips) : null,
     facts ? el("div", { class: "subtitle delta-facts__caption", style: "margin:4px 0 0;" }, T.deltaCaption) : null,
   ]);
-  return { element, destroy: () => { offData(); chart.destroy(); } };
+  return { element, destroy: () => { offData(); if (chart) chart.destroy(); } };
 }
 
 // ---------------------------------------------------------------- corners (V0.9.1)
@@ -183,6 +224,7 @@ export function renderCorners(widget, ctx) {
       el("td", {}, speedPair(c.a.exit, c.b.exit)),
     ]);
     const open = () => {
+      if (ctx.selection) ctx.selection.set(c.n);   // V0.9.4: the corner window and the line map follow
       // the braking zone, the apex and the way out — then the finer data arrives on its own
       const first = Math.min(...[c.a.brake, c.b.brake, c.entry ?? c.start].filter((v) => v !== null && v !== undefined));
       const last = Math.max(...[c.a.throttle, c.b.throttle, c.apex + 150].filter((v) => v !== null && v !== undefined));
@@ -225,11 +267,15 @@ export function renderChart(widget, ctx) {
   }
   const colors = widget.colors || {};
   const series = [{ values: entry.a, spikes: entry.a_spikes || null, color: colors.a || LAP_COLORS.a, name: t("Lap 1"), side: "a" }];
-  if (hasB) series.push({ values: entry.b, spikes: entry.b_spikes || null, color: colors.b || LAP_COLORS.b, name: t("Lap 2"), side: "b" });
+  if (hasB && !entry.pair) series.push({ values: entry.b, spikes: entry.b_spikes || null, color: colors.b || LAP_COLORS.b, name: t("Lap 2"), side: "b" });
+  // V0.9.4: Lap 3 / Lap 4 drawn over the pair, dashed / dotted
+  const extras = entry.pair ? [] : EXTRA_SIDES.filter((s) => entry[s]);
+  for (const s of extras) series.push({ values: entry[s], color: lapColor(s), dash: LAP_DASH[s], name: lapName(s), side: s });
+  if (entry.pair) series[0].name = t("Lap 2 vs Lap 1");
   const baseEntry = (ctx.baseData && ctx.baseData.channels[widget.channel]) || entry;
   const chart = createChart(state, {
     key: widget.channel, title: entry.label, unit: entry.unit, kind: "line", series,
-    rangeValues: hasB ? [baseEntry.a, baseEntry.b] : [baseEntry.a],
+    rangeValues: [baseEntry.a, ...(hasB && !entry.pair ? [baseEntry.b] : []), ...extras.map((s) => baseEntry[s])],
     range: entry.fixed_range || undefined, discrete: entry.discrete,
     height: Math.max((CHART_HEIGHT[widget.size] || 110) - (entry.discrete ? 30 : 0), 60), showXAxis: true,
     sectors: data.sectors.a,
@@ -238,7 +284,11 @@ export function renderChart(widget, ctx) {
   const offData = state.subscribe((what) => {
     if (what !== "data") return;
     const next = state.data.channels[widget.channel];
-    if (next) chart.setData(state.data, hasB ? [next.a, next.b] : [next.a], hasB ? [next.a_spikes, next.b_spikes] : [next.a_spikes]);
+    if (!next) return;
+    const pairOnly = !!entry.pair;
+    const values = [next.a, ...(hasB && !pairOnly ? [next.b] : []), ...extras.map((s) => next[s] || null)];
+    const spikes = [next.a_spikes, ...(hasB && !pairOnly ? [next.b_spikes] : []), ...extras.map(() => null)];
+    chart.setData(state.data, values, spikes);
   });
   return { element: chart.element, destroy: () => { offData(); chart.destroy(); } };
 }
@@ -250,6 +300,7 @@ export function renderTrackmap(widget, ctx) {
     mode: widget.mode,
     ensureChannels: ctx.ensureChannels,
     onModeChange: ctx.onTrackmapMode,
+    events: ctx.events, // V0.9.3: track-limits findings and lock-ups as markers
   });
   return { element: el("div", { class: "card" }, [el("h2", {}, t("Track")), map.element]), destroy: () => map.destroy() };
 }

@@ -373,17 +373,19 @@ def test_file_validation_reads_only_the_checked_columns(tmp_path, monkeypatch):
 
 def test_upload_endpoint_validates_from_the_file_not_from_memory(client, tmp_path, monkeypatch):
     """Guards against a regression to read_bytes() in the upload endpoint."""
+    import server.lap_check as lap_check
     import server.routers.telemetry as telemetry_router
     from client.telemetry.recorder import LapRecorder
 
+    # V0.9.3: the upload reads the file once for every check (server/lap_check.py)
     seen = []
-    real = telemetry_router.validate_telemetry_file
+    real = lap_check.validate_and_read
 
-    def spy(path, metadata, **kwargs):
+    def spy(path, metadata, *args, **kwargs):
         seen.append(Path(path))
-        return real(path, metadata, **kwargs)
+        return real(path, metadata, *args, **kwargs)
 
-    monkeypatch.setattr(telemetry_router, "validate_telemetry_file", spy)
+    monkeypatch.setattr(lap_check, "validate_and_read", spy)
     assert not hasattr(telemetry_router, "validate_telemetry"), "the bytes-based validator must not be wired in again"
 
     account = client.post("/accounts/register", params={"display_name": "FileCheck"}).json()

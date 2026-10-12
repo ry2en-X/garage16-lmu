@@ -392,6 +392,24 @@ export const api = {
     return request(`/admin/drivers/${driverId}/lock`, { method: "POST", adminToken, body: { reason } });
   },
 
+  // V0.9.3 — track-limits review queue and what the server learned about car models
+  adminReviewQueue(adminToken, status = "pending") {
+    return request("/admin/review", { adminToken, params: { status } });
+  },
+
+  adminReviewLap(adminToken, lapId, decision, note) {
+    return request(`/admin/laps/${lapId}/review`, { method: "POST", adminToken, body: { decision, note } });
+  },
+
+  adminCarIdentity(adminToken) {
+    return request("/admin/car-identity", { adminToken });
+  },
+
+  // V0.9.3.1 — the track-limits rules with their tier and effect on this server
+  adminTrackLimitsRules(adminToken) {
+    return request("/admin/track-limits/rules", { adminToken });
+  },
+
   adminUnlockDriver(adminToken, driverId) {
     return request(`/admin/drivers/${driverId}/unlock`, { method: "POST", adminToken });
   },
@@ -418,11 +436,31 @@ export const api = {
   // array of catalog keys; `step` is the grid spacing in metres.
   // V0.9.1: `maxPoints` bounds the points per series (server-side downsampling);
   // `start`/`end` (metres) ask for just one stretch of track.
-  analysisCompare({ lapA, lapB, channels, step, maxPoints, start, end }) {
+  // V0.9.4: `extra` = up to two more lap ids drawn over Lap 1 / Lap 2 (sides "c", "d").
+  analysisCompare({ lapA, lapB, channels, step, maxPoints, start, end, extra }) {
     return request("/telemetry/analysis/compare", {
       auth: true,
-      params: { lap_a: lapA, lap_b: lapB, channels: channels ? channels.join(",") : undefined, step, max_points: maxPoints, start, end },
+      params: {
+        lap_a: lapA, lap_b: lapB, channels: channels ? channels.join(",") : undefined, step, max_points: maxPoints, start, end,
+        extra: extra && extra.length ? extra.join(",") : undefined,
+      },
     });
+  },
+
+  // V0.9.4 — the driven lines of a stretch in high resolution (zoomed track map)
+  analysisLine({ lapA, lapB, extra, start, end, step }) {
+    return request("/telemetry/analysis/line", {
+      auth: true,
+      params: { lap_a: lapA, lap_b: lapB, extra: extra && extra.length ? extra.join(",") : undefined, start, end, step },
+    });
+  },
+
+  analysisCornerHistory(lapId, limit = 10) {
+    return request("/telemetry/analysis/corner-history", { auth: true, params: { lap_id: lapId, limit } });
+  },
+
+  analysisLapSectors(lapId) {
+    return request("/telemetry/analysis/lap-sectors", { auth: true, params: { lap_id: lapId } });
   },
 
   // The lap to compare lapId with: kind = "wr" (Garage16 Best) | "team_best" | "my_best".
@@ -448,6 +486,61 @@ export const api = {
 
   analysisCircuits(q) {
     return request("/telemetry/analysis/circuits", { params: { q } });
+  },
+
+  // ---- V0.9.3 — histograms, lap events, theoretical best, sessions
+  analysisDistribution({ lapA, lapB, channels, bins, lo, hi, knee }) {
+    return request("/telemetry/analysis/distribution", {
+      auth: true,
+      params: { lap_a: lapA, lap_b: lapB, channels: (channels || []).join(","), bins, lo, hi, knee },
+    });
+  },
+
+  analysisEvents({ lapA, lapB }) {
+    return request("/telemetry/analysis/events", { auth: true, params: { lap_a: lapA, lap_b: lapB } });
+  },
+
+  analysisTheoreticalBest({ trackName, carModel, driverId }) {
+    return request("/telemetry/analysis/theoretical-best", {
+      auth: true, params: { track_name: trackName, car_model: carModel, driver_id: driverId },
+    });
+  },
+
+  analysisSessions({ trackName, carModel, limit } = {}) {
+    return request("/telemetry/analysis/sessions", { auth: true, params: { track_name: trackName, car_model: carModel, limit } });
+  },
+
+  // ---- V0.9.4 — Stint Analyzer (server/routers/stints.py)
+  stintSessions({ driverId, trackName, carModel, limit } = {}) {
+    return request("/telemetry/analysis/stints/sessions", {
+      auth: true, params: { driver_id: driverId, track_name: trackName, car_model: carModel, limit },
+    });
+  },
+
+  stintSession(lapId) {
+    return request("/telemetry/analysis/stints/session", { auth: true, params: { lap_id: lapId } });
+  },
+
+  stintDrivers({ trackName, carModel }) {
+    return request("/telemetry/analysis/stints/drivers", { auth: true, params: { track_name: trackName, car_model: carModel } });
+  },
+
+  stintRuleSets(trackName) {
+    return request("/telemetry/analysis/stints/rule-sets", { auth: true, params: { track_name: trackName } });
+  },
+
+  adminRuleSets(adminToken) {
+    return request("/admin/rule-sets", { adminToken });
+  },
+
+  adminSaveRuleSet(adminToken, ruleSet, id) {
+    return id
+      ? request(`/admin/rule-sets/${id}`, { method: "PUT", adminToken, body: ruleSet })
+      : request("/admin/rule-sets", { method: "POST", adminToken, body: ruleSet });
+  },
+
+  adminDeleteRuleSet(adminToken, id) {
+    return request(`/admin/rule-sets/${id}`, { method: "DELETE", adminToken });
   },
 
   analysisOutline(trackName) {

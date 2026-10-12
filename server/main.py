@@ -23,11 +23,11 @@ from sqlalchemy import text
 
 from .config import settings
 from .database import Base, SessionLocal, engine
-from .routers import accounts, admin, analysis, drivers, leaderboard, teams, telemetry
+from .routers import accounts, admin, analysis, drivers, leaderboard, stints, teams, telemetry
 from .routers.teams import invitations_router
 from .versioning import is_client_outdated
 
-VERSION = "0.9.2"
+VERSION = "0.9.4"
 
 
 def _configure_logging() -> None:
@@ -176,6 +176,7 @@ async def require_https(request: Request, call_next):
 
 app.include_router(telemetry.router)
 app.include_router(analysis.router)
+app.include_router(stints.router)
 app.include_router(leaderboard.router)
 app.include_router(accounts.router)
 app.include_router(teams.router)

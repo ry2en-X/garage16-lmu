@@ -43,6 +43,10 @@ baked_edition = Path(tempfile.mkdtemp()) / "garage16_edition.txt"
 baked_edition.write_text(edition + "\n", encoding="utf-8")
 datas.append((str(baked_edition), "."))  # read by client/edition.py
 
+# V0.9.4: the Garage16 icon (an angular "16") — for the windows the app opens (Tk, client/icon.py)
+datas.append((str(project_root / "client" / "assets" / "garage16.ico"), "client/assets"))
+datas.append((str(project_root / "client" / "assets" / "garage16.png"), "client/assets"))
+
 hiddenimports = (
     collect_submodules("client")          # everything imported lazily (e.g. setup_dialog)
     + collect_submodules("pyarrow.vendored")
@@ -79,6 +83,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="Garage16",
+    icon=str(project_root / "packaging" / "garage16.ico"),   # V0.9.4: Explorer, taskbar, Alt+Tab
     console=False,   # windowed: no terminal window, ever (V0.8.6 §2)
     disable_windowed_traceback=False,
 )

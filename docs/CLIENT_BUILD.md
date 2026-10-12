@@ -37,26 +37,10 @@ danach reicht es, die Datei zu verteilen.
    einer anderen Adresse als **`https://garage16.de`** laufen soll. Ohne die
    Variable wird `https://garage16.de` ins Paket eingebacken: Freunde tippen
    die Adresse nie ein.
-3. Actions → **build-client** → *Run workflow* → grüner Knopf *Run workflow*
-   (Haken „Publish“ bleibt gesetzt). Kein Terminal nötig.
-4. Nach etwa 10 Minuten steht unter **Releases** das Release
-   **„Garage16 client 0.9.2“** (Tag `client-v0.9.2`, die Version kommt aus
-   `CLIENT_VERSION`) mit allen vier Dateien, markiert als *Latest*. Erneut
-   starten ersetzt die Dateien desselben Releases; eine neue Version entsteht,
-   sobald `CLIENT_VERSION` erhöht wurde.
-5. Freunde laden unter **Releases → Latest** eine Setup-Datei herunter und
-   doppelklicken — fertig. Diese Links zeigen immer auf die neueste Version und
-   passen deshalb auch in die `.env` (Download-Seite der Website):
-   ```
-   LMU_GARAGE_CLIENT_DOWNLOAD_URL=https://github.com/<konto>/<repo>/releases/latest/download/Garage16-Client-Setup.exe
-   LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL=https://github.com/<konto>/<repo>/releases/latest/download/Garage16-Client-Analysis-Setup.exe
-   ```
-   **Wichtig:** Bei einem **privaten** Repository sehen nur Personen mit Zugriff
-   die Release-Dateien. Für Freunde: entweder das Repository öffentlich stellen
-   (Settings → General → Danger Zone → *Change visibility*; es enthält keine
-   Geheimnisse — `.env` wird nie hochgeladen), die Freunde als Mitarbeiter
-   einladen (brauchen ein GitHub-Konto), oder die zwei Setup-Dateien aus dem
-   Release auf den Webspace legen und dessen Links in die `.env` eintragen.
+3. Actions → **build-client** → *Run workflow* (oder einen Tag wie
+   `client-v0.8.6` pushen).
+4. Nach ein paar Minuten: unter dem Lauf die Artefakte
+   `Garage16-Client-Setup.exe` und `Garage16-Portable.zip` herunterladen.
 
 ## Variante B — auf einem Windows-PC selbst bauen
 

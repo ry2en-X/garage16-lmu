@@ -156,7 +156,7 @@ def test_a_recorded_sample_keeps_its_extended_values_as_float32():
     assert isinstance(sample.ext, array) and sample.ext.typecode == "f"
     assert len(sample.ext) == len(EXTENDED_COLUMNS)
     assert sample.ext.itemsize * len(sample.ext) == 4 * len(EXTENDED_COLUMNS), "720 bytes, not ~5.6 KB of Python floats"
-    expected = np.asarray(extract_extended(frame.telemetry), dtype=np.float64).astype(np.float32)
+    expected = np.asarray(extract_extended(frame.telemetry, frame.scoring), dtype=np.float64).astype(np.float32)
     got = np.frombuffer(sample.ext.tobytes(), dtype=np.float32)
     assert np.array_equal(got, expected, equal_nan=True), "the same float32 values the file would have held"
 

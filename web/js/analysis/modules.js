@@ -9,6 +9,11 @@
 import { t } from "../i18n.js";
 import { defaultLayout } from "./layout.js";
 import { renderChart, renderCorners, renderCursorTable, renderDelta, renderPhysics, renderSummary, renderTrackmap } from "./widgets.js";
+import { renderCoaching } from "./coaching.js";
+import { renderDamper, renderHistogram } from "./distribution.js";
+import { renderEvents } from "./events.js";
+import { renderTyres } from "./tyres.js";
+import { renderCornerDetail, renderLine, renderSectors } from "./corner_detail.js";
 
 const standard = defaultLayout().widgets;
 const positionOf = (type) => {
@@ -25,6 +30,16 @@ export const MODULES = [
   { id: "trackmap", title: t("Track map"), description: t("The track, coloured by delta or a channel, with the shared cursor."), type: "trackmap", supportedChannels: ["speed", "throttle", "brake", "gear", "rpm", "lat_g", "long_g"], renderer: renderTrackmap, mobileSupport: true },
   { id: "cursor_table", title: t("Values at the cursor"), description: t("All loaded channels of both laps at the cursor position."), type: "cursor_table", supportedChannels: [], renderer: renderCursorTable, mobileSupport: true },
   { id: "physics", title: t("Suspension, tyres & G-G"), description: t("Suspension travel, wheel load, slip, temperatures and the G-G diagram at the cursor."), type: "physics", supportedChannels: [], renderer: renderPhysics, mobileSupport: true },
+  // V0.9.3
+  { id: "coaching", title: t("Where to find time"), description: t("The corners where Lap 1 loses most, with hints built from measured braking points, speeds and lock-ups."), type: "coaching", supportedChannels: [], renderer: renderCoaching, mobileSupport: true },
+  { id: "events", title: t("Track limits & events"), description: t("The server's track-limits verdict with every finding, plus lock-ups and wheelspin — click one to jump there."), type: "events", supportedChannels: [], renderer: renderEvents, mobileSupport: true },
+  { id: "tyres", title: t("Tyres & brakes"), description: t("Tread temperature inner / middle / outer, pressure, wear and brake temperature per wheel — lap averages and at the cursor."), type: "tyres", supportedChannels: [], renderer: renderTyres, mobileSupport: true },
+  { id: "damper", title: t("Damper histograms"), description: t("Damper velocity distribution per wheel: bump / rebound, low- and high-speed."), type: "damper", supportedChannels: [], renderer: renderDamper, mobileSupport: true },
+  { id: "histogram", title: t("Histogram"), description: t("How the lap's time is distributed over one channel (time per gear, tyre temperature, ride height …)."), type: "histogram", supportedChannels: "*", renderer: renderHistogram, mobileSupport: true },
+  // V0.9.4
+  { id: "line", title: t("Racing lines"), description: t("The driven lines of both laps on a zoomable map: braking, turn-in, apex and full-throttle points, the line distance at the cursor."), type: "line", supportedChannels: [], renderer: renderLine, mobileSupport: true },
+  { id: "corner_detail", title: t("Corner in detail"), description: t("One corner: the time per phase (braking, turn-in, apex, exit), every measured value of both laps and the same corner on your earlier laps."), type: "corner_detail", supportedChannels: [], renderer: renderCornerDetail, mobileSupport: true },
+  { id: "sectors", title: t("Sectors of the session"), description: t("Sector times of every lap of the session, the fastest driven sectors and this lap's potential."), type: "sectors", supportedChannels: [], renderer: renderSectors, mobileSupport: true },
 ].map((m) => ({ ...m, defaultSize: sizeOf(m.type, "large"), defaultPosition: positionOf(m.type) }));
 
 export const moduleForType = (type) => MODULES.find((m) => m.type === type) || null;

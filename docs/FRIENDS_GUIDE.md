@@ -12,9 +12,7 @@ du sehen kannst, und was du dann tust.
 Du bekommst von deinem Admin (dem, der Garage16 betreibt) drei Dinge:
 
 - die Setup-Datei (oder einen Download-Link dazu — auf **garage16.de → Download**
-  stehen beide nebeneinander, ab 0.9.2; oder auf GitHub unter **Releases → Latest**).
-  Du wählst **eine** davon, lädst sie herunter und doppelklickst — ein Terminal
-  brauchst du nie:
+  stehen beide nebeneinander, ab 0.9.2). Du wählst **eine** davon:
   - **Client** — `Garage16-Client-Setup.exe`: zeichnet deine Runden auf und lädt sie
     hoch. Die Analyse öffnet sich in deinem Browser.
   - **Client + Analysetool** — `Garage16-Client-Analysis-Setup.exe`: dasselbe, und die
@@ -191,7 +189,30 @@ Server kommen, bleiben dabei unverändert (Servermeldungen sind englisch).
 
 ## Runden analysieren und vergleichen (ab V0.9)
 
-**Aus dem Garage16-Fenster heraus** (ab 0.9.2): **Open analysis** öffnet die Analyse,
+**Zwei Dashboards (ab V0.9.4):**
+- **LapTime Analyzer** — eine Runde gegen eine andere: Diagramme, Zeitunterschied, Kurven.
+  Neu: das Fenster **Ideallinien** zeigt deine Linie und die der Vergleichsrunde auf einer
+  Karte, die du bis in eine einzelne Kurve hineinzoomen kannst (Mausrad, „+“/„−“ oder zwei
+  Finger). Dreiecke/Rauten/Punkte markieren pro Runde Bremspunkt ▲, Einlenkpunkt ◆ (aus der
+  Lenkung geschätzt), Scheitelpunkt ● und Vollgas ▼. Unter der Karte steht, wie weit Runde 2
+  am Cursor innen oder außen fährt. Klick auf **K1**, **K2** … zoomt in die Kurve; das Fenster
+  **Kurve im Detail** zeigt dann, in welcher Phase (Bremsen, Einlenken, Scheitel, Ausgang)
+  die Zeit liegt, alle Messwerte beider Runden und dieselbe Kurve in deinen früheren Runden.
+  Mit **+ Runde 3/4 darüberlegen** kommen bis zu zwei weitere Runden dazu (gestrichelt/gepunktet).
+- **Stint Analyzer** — ganze Sessions: Pace und Konstanz, Stints und Reifensätze,
+  Reifenabbau, Kraftstoff und Energie (wie viele Runden reichen noch, welcher Verbrauch nötig
+  ist), Boxenstopps, Verkehr, eine Prognose für den laufenden Stint und ein
+  **Strategierechner**. Oben wählst du, welche Runden als „sauber“ zählen (z. B. Runden im
+  Verkehr weglassen oder mitzählen). Was berechnet und nicht gemessen ist, steht als
+  **Schätzung** dabei. Boxengasse, Reifenmischung und Abstände zu anderen Autos zeichnet erst
+  der Client **0.9.4** auf.
+
+**Runde in LMU gültig, in Garage16 ungültig?** Mit Client 0.9.4 behoben, wenn LMU die
+Rundenzeit nur etwas zu spät gemeldet hat. Warum eine Runde nicht zählt, steht im Stint
+Analyzer unter der Runde. Update auf Client 0.9.4: neues Setup drüber installieren.
+
+**Aus dem Garage16-Fenster heraus** (ab 0.9.2): **LapTime Analyzer** und **Stint Analyzer**
+öffnen das jeweilige Dashboard (bis 0.9.3.1 hieß der Knopf **Open analysis**),
 **Analyse last lap** öffnet direkt die Runde, die gerade hochgeladen wurde.
 - Mit dem **Client** öffnet sich dafür dein Browser (melde dich dort einmal auf
   garage16.de an).
@@ -275,6 +296,49 @@ Im Web:
 - **Circuits** ist die Streckenbibliothek: jede Strecke mit Umriss, Länge,
   schnellster Runde, deiner besten Runde dort und einem Knopf, der deine beste
   Runde mit der schnellsten vergleicht.
+
+**Neu in 0.9.3.1:**
+- **Track-Limits fairer:** Eine Runde wird nur noch gestrichen, wenn **LMU selbst** sie ungültig
+  macht (oder die Zeit nicht wertet), wenn du durch die Boxengasse fährst oder LMU keine
+  brauchbare Zeit liefert. Was Garage16 nur **misst** — Track-Limit-Schritte von LMU, alle vier
+  Räder neben der Strecke, jenseits des Streckenrands — streicht keine Runde mehr: Sie zählt und
+  steht **„in Prüfung“**, bis ein Admin entschieden hat. Runden, die 0.9.3 dafür gestrichen hat,
+  kann der Admin wieder zählen lassen.
+- **Runde erscheint ein paar Sekunden später:** Der Client wartet nach der Ziellinie 6 Sekunden,
+  bevor er die Runde speichert — so viel Zeit lässt sich LMU, um einen Verstoß in der letzten
+  Kurve zu werten. Fährst du direkt in die Box oder beendest LMU, wird die Runde trotzdem gespeichert.
+- **Theoretische Bestzeit** gibt es nur noch pro Fahrzeugmodell und getrennt nach trocken/nass;
+  die Seite sagt, welche Runden nicht enthalten sind.
+
+**Neu in 0.9.3:**
+- **Ein Auto ist sein Modell.** Lackierung, Team, Startnummer und Saison spielen keine Rolle
+  mehr: Der Porsche mit der #6 und der mit der #3 sind dasselbe Auto im Leaderboard, in deinen
+  Bestzeiten und beim Vergleichen. Verschiedene Ausführungen eines Autos (z. B. eine Evo)
+  bleiben getrennt, sofern LMU sie unterschiedlich benennt. Direkt nach dem Update kann ein
+  älteres Auto noch als „Modell (Saison)“ erscheinen, z. B. „499P (2025)“ — sobald jemand mit
+  dem neuen Client fährt, ordnet der Server es von selbst dem richtigen Modell zu.
+- **Track-Limits prüft jetzt der Server** (die Regeln wurden mit 0.9.3.1 geändert, siehe oben)
+  — aus deiner Telemetrie, nicht mehr nur aus einem Signal am Rundenende. Eine Runde zählt nicht, wenn LMU sie ungültig macht, LMU die Zeit nicht
+  wertet, LMU Track-Limit-Punkte vergibt, alle vier Räder gleichzeitig auf Gras/Kies/Erde sind
+  oder du durch die Boxengasse fährst. Im Dashboard siehst du den Grund, wenn du mit der Maus
+  über „ungültig“ fährst; in der Analyse zeigt das Fenster **Track-Limits & Ereignisse** jeden
+  Befund mit der Stelle auf der Strecke (Klick springt dorthin, auf der Streckenkarte sind die
+  Stellen markiert). Ist etwas nicht eindeutig (z. B. „jenseits des Streckenrands“), steht die
+  Runde **„in Prüfung“** — sie zählt, bis ein Admin entschieden hat.
+- **Wo Zeit liegt:** Ein neues Fenster nennt die Kurven, in denen du am meisten verlierst, mit
+  konkreten Hinweisen aus gemessenen Werten — z. B. „5 m später bremsen“, „3 km/h mehr
+  Minimalgeschwindigkeit“, „10 m früher Vollgas“ oder „FL blockiert in der Bremszone“.
+- **Mehr Daten in der Analyse** (über **Ansicht anpassen** hinzufügen): Dämpfer-Histogramme
+  (Druck-/Zugstufe, Low-/High-Speed), Reifen & Bremsen (Laufflächentemperatur innen/Mitte/außen,
+  Druck, Verschleiß pro Runde, Bremstemperatur — als Rundenmittel und am Cursor), Histogramm
+  eines beliebigen Kanals (z. B. Zeit pro Gang), und neue Kanäle wie Dämpfergeschwindigkeit,
+  Radschlupf, Rake, Wanken/Nicken aus dem Federweg, Räder neben der Strecke und Abstand zum
+  Streckenrand.
+- **Meine Sessions** (im Menü): deine Stints mit Bestzeit, Median, Streuung, Rundenzeit-Trend
+  (wirst du langsamer, z. B. durch die Reifen?), Kraftstoff, Energie und Reifenverschleiß pro
+  Runde — und auf Knopfdruck deine **theoretische Bestzeit**: die Summe deiner schnellsten
+  Abschnitte (alle 50 m) aus deinen gültigen Runden. Ein Klick auf eine Runde, aus der beste
+  Abschnitte stammen, vergleicht sie direkt mit deiner Bestzeit.
 
 Runden, die mit einem **älteren Client** (vor 0.9.0) aufgezeichnet wurden, tragen das
 Etikett **„Basisdaten"** (in Rundenlisten, im Leaderboard-Auswahlfenster und oben auf

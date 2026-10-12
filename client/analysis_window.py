@@ -106,10 +106,16 @@ def storage_dir():
     return resolve_data_dir().parent / "analysis_window"
 
 
-def run(config: ClientConfig, lap_id: Optional[int] = None) -> int:
+def run(config: ClientConfig, lap_id: Optional[int] = None, view: str = "laptime") -> int:
     """Shows the window and returns when it is closed. Falls back to the browser when the
-    window cannot be shown; returns 0 either way (the driver gets to the analysis)."""
-    url = analysis_url(config.api_url, lap_id)
+    window cannot be shown; returns 0 either way (the driver gets to the analysis).
+    view: "laptime" or "stints" (V0.9.4 — which dashboard the window opens on)."""
+    url = analysis_url(config.api_url, lap_id, view)
+    # V0.9.4: on Windows the window takes Garage16.exe's icon (the angular "16"); the app id
+    # puts it under the same taskbar button as the client
+    from client.icon import set_windows_app_id
+
+    set_windows_app_id()
     try:
         import webview  # pywebview — bundled with the "Client + analysis app" edition only
     except ImportError:

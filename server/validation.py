@@ -126,6 +126,29 @@ def validate_telemetry_file(
     return validate_dataframe(df, metadata)
 
 
+def validate_and_read(path: Union[str, Path], metadata: LapMetadata, extra_columns=()) -> tuple:
+    """V0.9.3: ONE read of the uploaded file for everything the upload computes — the
+    plausibility check below, the track-limits check (server/track_limits.py) and the
+    per-lap figures (server/lap_insights.py). Only the needed columns are decoded (about
+    60 of ~190; the three per-wheel list columns of the core format are expanded).
+
+    Returns (ValidationResult, {column: float array}). A file that cannot be parsed gives
+    an invalid result and an empty dict, exactly like validate_telemetry_file."""
+    from .telemetry_analysis import AnalysisError, read_raw
+
+    wanted = list(dict.fromkeys([*sorted(REQUIRED_COLUMNS), *extra_columns]))
+    try:
+        parquet = pq.ParquetFile(path)
+        columns = read_raw(Path(path), wanted, parquet)
+    except (AnalysisError, Exception) as exc:  # noqa: BLE001 — any parse failure means "not usable"
+        return ValidationResult(is_valid=False, reasons=[f"telemetry file could not be parsed: {exc}"]), {}
+    if parquet.metadata is not None and parquet.metadata.num_rows == 0:
+        df = pd.DataFrame({name: [] for name in REQUIRED_COLUMNS})
+    else:
+        df = pd.DataFrame({name: columns[name] for name in REQUIRED_COLUMNS if name in columns})
+    return validate_dataframe(df, metadata), columns
+
+
 def validate_dataframe(df: pd.DataFrame, metadata: LapMetadata) -> ValidationResult:
     """The actual plausibility checks, against an already-parsed
     DataFrame. Split out from validate_telemetry() so this — the part

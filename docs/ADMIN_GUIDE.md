@@ -216,6 +216,366 @@ Domain zeigen — sie steckt im Link, den die E-Mail enthält.
   900 pro Stunde und Fahrer/IP, vorher 300) musst du für einen Freundeskreis nicht
   anfassen.
 
+**Neu in V0.9.4 — zwei Dashboards: LapTime Analyzer und Stint Analyzer**
+
+Die Analyse besteht jetzt aus **zwei getrennten Dashboards** (im Browser und im
+Analyse-Fenster der App):
+
+- **LapTime Analyzer** (`#/analysis`, vorher „Analyse“) — eine Runde gegen eine andere:
+  neues Fenster **Ideallinien** (beide gefahrenen Linien gleichwertig auf einer zoombaren Karte,
+  Zwei-Finger-Zoom, Fahrzeugbreite, Maßstab, Brems-/Einlenk-/Scheitel-/Vollgaspunkte je Runde,
+  „Runde 2 1,4 m weiter innen“ am Cursor, beim Hineinzoomen Linien in 0,5-m-Auflösung),
+  **Kurve im Detail** (Zeit je Phase Bremsen/Einlenken/Scheitel/Ausgang/Gerade — die Phasen
+  ergeben genau den Zeitunterschied der Kurve —, jeder Messwert beider Runden, dieselbe Kurve in
+  deinen früheren Runden), **Sektoren der Session**, Coach nach Phasen gegliedert, Runde 3/4
+  zusätzlich darüberlegen (gestrichelt/gepunktet), Delta oder verstrichene Zeit, Kanal
+  „Linie von Runde 2 gegenüber Runde 1“.
+- **Stint Analyzer** (`#/stints`, die alte Adresse `#/sessions` führt dorthin) — ganze
+  Sessions: Pace und Konstanz mit Filtern (In-/Out-Lap, Verkehr, blaue Flagge, Ausreißer …),
+  Stints und Reifensätze, Reifenabbau, Kraftstoff/Energie mit Zielverbrauch und Reserve,
+  Fahrzeugzustand, Verkehr, Boxenstopps mit geschätztem Zeitverlust, Prognose (erst ab 5
+  sauberen Runden), **Strategierechner**, Stint-Vergleich, Vergleich mit Teamkollegen.
+  Schätzungen sind als **Schätzung** markiert, Messwerte als **gemessen**.
+- Im Desktop-Client heißen die Knöpfe jetzt **LapTime Analyzer**, **Stint Analyzer** und
+  **Analyse last lap**.
+- Admin-Bereich, neuer Reiter **Rennregeln**: Regelwerke für den Strategierechner
+  (Renndauer, Mindeststopps, maximale Stintlänge, Reifenwechsel-Pflicht, Tanken,
+  Boxengassen-Zeiten). Leer lassen, was ein Rennen nicht vorschreibt.
+
+- **Rundenzeit, die LMU zu spät meldet:** LMU schreibt die Zeit der gerade beendeten Runde
+  manchmal erst einige Frames, nachdem der Client die Runde abgeschlossen hat. Bis V0.9.3.1 ging
+  die Runde dann mit der **Zeit der vorherigen Runde** (oder ohne Zeit) an den Server, und die
+  Prüfung „telemetry duration does not match claimed lap_time“ hat eine Runde gestrichen, die
+  LMU als gültig gewertet hat. Client 0.9.4 erkennt das (die Zeit passt nicht zur gemessenen
+  Rundendauer oder ist exakt die der Vorrunde) und übernimmt LMUs Zeit, sobald LMU sie im
+  6-s-Nachlauf meldet. Geschickt wird immer LMUs eigene Zeit, nie eine selbst gemessene.
+- **Warum eine Runde nicht zählt**, steht jetzt auch im Stint Analyzer unter jeder ungültigen
+  Runde (Tabelle „Alle Runden“), im LapTime Analyzer weiterhin im Fenster „Track-Limits &
+  Ereignisse“.
+- **Icon:** Client, Analysefenster, Installer und Website zeigen das Garage16-Icon (eine
+  kantige „16“) — in der Windows-Taskleiste, im Explorer und als Browser-Tab-Symbol.
+
+**Gültige LMU-Runden, die Garage16 als ungültig zeigt (V0.9.2 / V0.9.3):** Auf der NAS
+nachsehen, mit welchem Grund der Server sie gestrichen hat (liest nur, ändert nichts):
+```
+cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_2/Garage16 - LMU"   # der laufende Ordner
+sudo docker compose exec -T db sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT id, track_name, lap_number, round(lap_time::numeric, 3) AS zeit, client_claimed_valid AS client_ok, invalid_reason FROM laps WHERE NOT is_valid ORDER BY id DESC LIMIT 30;"'
+```
+- `client_ok = f` und als Grund „the desktop client … rejected“: der Client hat die Runde
+  verworfen (Boxengasse, keine Zeit, LMU-Flag).
+- „telemetry duration (… s) does not match claimed lap_time (… s)“ oder „sector_times sum …“:
+  sehr wahrscheinlich die zu spät gemeldete LMU-Rundenzeit (oben) — die Zeit dieser Runde ist
+  dann auch falsch gespeichert (die der Vorrunde).
+- Ab V0.9.4 zeigt `scripts.revalidate_laps` (Schritt 5) im Probelauf, welche Runden nach
+  den aktuellen Regeln zählen würden („invalid -> valid (restorable)“); `--apply --restore`
+  lässt sie wieder zählen (sie stehen danach zur Kontrolle in der Track-Limit-Prüfung). Eine
+  Runde mit falscher (veralteter) Zeit bleibt besser gestrichen — ihre echte Zeit ist nicht
+  gespeichert.
+
+Es gibt eine **Datenbank-Migration** (`0015`, nach `0014`): Sie legt die Spalte
+`laps.lap_context` (Boxenstopp-Zähler, Reifenmischung, Schaden, Tankgröße, Position, Restzeit
+am Rundenende — vom Client 0.9.4 gemeldet) und die Tabelle `race_rule_sets` an. **Rein
+ergänzend — kein vorhandener Wert ändert sich, keine Rundengültigkeit ändert sich.**
+Keine neue Abhängigkeit. Die Anleitung gilt für ein Update von V0.9.3.1 (für V0.9.3/V0.9.2
+setze `ALT` entsprechend; die Migrationen `0013`/`0014` laufen dann zuerst mit).
+
+1. **Backup** (aus dem laufenden Ordner, auf die USB-Platte):
+   ```
+   ALT="/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_3_1/Garage16 - LMU"
+   cd "$ALT"
+   sudo ./scripts/backup.sh /volumeUSB2/usbshare/garage16-backups
+   ```
+2. **Neuen Ordner anlegen**, ZIP per File Station hineinladen und dort entpacken, `.env`
+   übernehmen:
+   ```
+   mkdir -p /volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_4
+   # … Garage16_Lmu_V0_9_4.zip per File Station in diesen Ordner laden und dort entpacken …
+   cp "$ALT/.env" "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_4/Garage16 - LMU/.env"
+   ```
+3. **Alten Stack stoppen** (ohne `-v` — die Volumes mit Datenbank und Telemetrie bleiben):
+   ```
+   cd "$ALT"
+   sudo docker compose --profile tunnel down
+   ```
+4. **Neuen Stack bauen und starten** (Migration `0015` läuft von selbst):
+   ```
+   cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_4/Garage16 - LMU"
+   sudo docker compose --profile tunnel up -d --build
+   sudo docker compose logs server | grep -i -E "alembic|0015|error"
+   curl -s https://garage16.de/health
+   ```
+   `/health` muss `"version":"0.9.4"` und `"db_ok":true` zeigen. Im Browser **Strg+F5**.
+5. **Neue Rundenwerte für vorhandene Runden berechnen** (optional, empfohlen). Gespeicherte
+   Runden bekommen damit die neuen Kennzahlen aus ihrer Telemetrie-Datei: Kurven für den
+   Vergleich mit früheren Runden, Kraftstoff je Sektor, gemessenes Nachtanken und
+   Reifenwechsel (damit der Stint Analyzer auch alte Sessions in Stints teilen kann).
+   Erst der Probelauf (ändert nichts) — er sollte keine Gültigkeitsänderungen zeigen, weil die
+   Track-Limit-Regeln gleich geblieben sind:
+   ```
+   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.revalidate_laps'
+   ```
+   Dann speichern (ändert keine Gültigkeit):
+   ```
+   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.revalidate_laps --apply'
+   ```
+   Was alte Runden nie hatten (Boxengasse, Abstände zu anderen Autos, Reifenmischung,
+   Schaden), bleibt leer — das zeichnet erst der Client 0.9.4 auf; die Seite sagt das dazu.
+6. **Rennregeln anlegen** (optional): Admin-Bereich → **Rennregeln** → **Neues Regelwerk**.
+7. **Client 0.9.4 verteilen** (`docs/CLIENT_BUILD.md`). Er arbeitet auch mit einem Server
+   0.9.3.1, 0.9.3 oder 0.9.2 (er lässt dann Stufe für Stufe die Felder weg, die der Server nicht
+   kennt). Ältere Clients bleiben nutzbar; ihren Runden fehlen nur die neuen Stint-Daten.
+8. **Mit echtem LMU bestätigen** — offener Punkt (w) im Prüfprotokoll
+   (`docs/LMU_VERIFICATION_PROTOCOL.md`): wann der Boxenstopp-Zähler steigt, welche
+   Mischungsnummer zu welcher Mischung gehört, was die Zeitabstände zeigen. Auf dem PC im
+   Projektordner, während du einen Boxenstopp fährst:
+   ```
+   py -m scripts.track_limits_probe --csv stint.csv
+   ```
+
+Was sich im Betrieb ändert:
+- **Zurück auf V0.9.3.1:** zuerst mit dem NEUEN Stack die Migration zurückdrehen (löscht die
+  Spalte `laps.lap_context` und die Rennregeln), dann wechseln:
+  ```
+  cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_4/Garage16 - LMU"
+  sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" alembic downgrade 0014'
+  sudo docker compose --profile tunnel down
+  cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_3_1/Garage16 - LMU"
+  sudo docker compose --profile tunnel up -d
+  ```
+- Der Stint Analyzer liest nur aus der Datenbank (keine Telemetrie-Datei) und ist auch bei
+  langen Sessions schnell. Die hochaufgelösten Linien beim Hineinzoomen lesen eine Datei pro
+  Runde und zählen wie jede Analyse gegen `LMU_GARAGE_RATELIMIT_ANALYSIS_MAX`.
+- Der Analyse-Cache rechnet einmal neu (Version 5) — die ersten Aufrufe nach dem Update sind
+  minimal langsamer.
+
+**Neu in V0.9.3.1 — Korrekturrelease: Track-Limits in Stufen, Runden nachträglich korrigierbar**
+
+V0.9.3.1 korrigiert die Track-Limit-Prüfung von V0.9.3, bevor sie Ranglisten verfälscht.
+Der Kern: Ein steigender Track-Limit-Zähler von LMU ist nur ein Bruchteil eines
+Verwarnungspunkts (LMU wertet Verstöße nach Zeitgewinn, 2–5 s nach dem Wiedereinfädeln), und
+vier Räder im Kies ohne Zeitgewinn sind für LMU kein Verstoß. V0.9.3 hat solche Runden trotzdem
+gestrichen. Jetzt gilt:
+
+- **LMU-Urteil** (LMU macht die Runde selbst ungültig / wertet die Zeit nicht) und
+  **feste Garage16-Regeln** (Boxengasse, keine Rundenzeit, unplausible Sektorzeiten) machen
+  eine Runde ungültig.
+- **Messungen** (Track-Limit-Schritte, alle vier Räder neben der Strecke, jenseits des
+  Streckenrands, kürzer als üblich, Strafe, Meldungen kurz nach der Ziellinie) streichen keine
+  Runde mehr — die Runde zählt und landet unter **Track-Limit-Prüfung**. Erst wenn echte
+  LMU-Aufzeichnungen eine Messung bestätigen, kannst du sie per `.env` scharf schalten
+  (`LMU_GARAGE_TRACK_LIMITS_INVALIDATING`, siehe `.env.example`; Standard: leer).
+- **Client 0.9.3.1 entscheidet nach denselben Regeln** und schickt seine Gründe mit. Er hält
+  eine fertige Runde nach der Ziellinie 6 Sekunden zurück und notiert, was LMU in dieser Zeit
+  noch meldet (verspätete Track-Limit-Schritte, eine zurückgezogene Rundenzeit). Unklare
+  Fälle („gehört das noch zur alten oder schon zur neuen Runde?“) landen bei beiden Runden in
+  der Prüfung.
+- **Gespeicherte Runden lassen sich neu bewerten**, ohne neuen Upload — auch Runden, die
+  V0.9.3 wegen der zu strengen Regel gestrichen hat.
+
+Es gibt eine **Datenbank-Migration** (`0014`, nach `0013`): Sie legt `laps.check_inputs` an
+(woran eine Runde gemessen wurde) und füllt sie für vorhandene Runden aus dem, was noch da ist.
+**Keine Rundengültigkeit ändert sich durch die Migration.** Die Anleitung gilt für ein Update
+von V0.9.2 **oder** V0.9.3 — setze unten `ALT` auf den Ordner, der gerade läuft.
+
+1. **Backup** (aus dem laufenden Ordner, auf die USB-Platte):
+   ```
+   ALT="/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_2/Garage16 - LMU"   # oder …_V0_9_3/…
+   cd "$ALT"
+   sudo ./scripts/backup.sh /volumeUSB2/usbshare/garage16-backups
+   ```
+2. **Neuen Ordner anlegen**, ZIP per File Station hineinladen und dort entpacken, `.env`
+   übernehmen:
+   ```
+   mkdir -p /volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_3_1
+   # … ZIP per File Station in diesen Ordner laden und dort entpacken …
+   cp "$ALT/.env" "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_3_1/Garage16 - LMU/.env"
+   ```
+3. **Alten Stack stoppen** (ohne `-v`):
+   ```
+   cd "$ALT"
+   sudo docker compose --profile tunnel down
+   ```
+4. **Neuen Stack bauen und starten** (Migrationen `0013` — falls du von V0.9.2 kommst — und
+   `0014` laufen von selbst):
+   ```
+   cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_3_1/Garage16 - LMU"
+   sudo docker compose --profile tunnel up -d --build
+   sudo docker compose logs server | grep -i -E "alembic|0013|0014|error"
+   curl -s https://garage16.de/health
+   ```
+   `/health` muss `"version":"0.9.3.1"` und `"db_ok":true` zeigen. Im Browser **Strg+F5**.
+5. **Runden neu bewerten — erst der Probelauf** (ändert nichts):
+   ```
+   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.revalidate_laps'
+   ```
+   Der Bericht ordnet jede betroffene Runde einem Übergang zu: **valid -> invalid** (die
+   Regeln würden eine zählende Runde streichen), **invalid -> valid (restorable)** (eine
+   automatisch gestrichene Runde, die nach den neuen Regeln zählt — typisch: von V0.9.3 nur
+   wegen Track-Limit-Schritten gestrichen), **kept** (von einem Admin oder einer Meldung
+   gestrichen — wird nie angefasst), **valid -> review** (neu in der Prüfliste) und **admin
+   decided** (von dir in der Prüfung entschieden — bleibt, wie du entschieden hast).
+6. **Speichern** (Gültigkeit bleibt unverändert, neu auffällige Runden kommen in die Prüfung):
+   ```
+   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.revalidate_laps --apply'
+   ```
+   Wenn die Liste „restorable“ stimmt, diese Runden wieder zählen lassen — sie stehen danach
+   zur Kontrolle in der Track-Limit-Prüfung:
+   ```
+   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.revalidate_laps --apply --restore'
+   ```
+   `--update-validity` (Streichungen anwenden) nur, wenn du die Liste „valid -> invalid“
+   gelesen hast. Beides lässt sich kombinieren und jederzeit wiederholen.
+7. **Fahrzeuge prüfen** (Probelauf, dann ggf. anwenden): LMU kürzt Modellnamen nach 29
+   Zeichen (z. B. „Lamborghini Huracan LMGT3 Evo“ statt „…Evo2“). Bekannte Fälle setzt der
+   Server jetzt auf den vollen Namen, unbekannte bekommen ein „…“ am Ende. Für bereits
+   gespeicherte Runden:
+   ```
+   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.car_identity_report'
+   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.car_identity_report --apply'
+   ```
+   Der Abschnitt „To check by hand“ (und im Admin-Bereich **Fahrzeugmodelle → Mit echten Daten
+   zu prüfen**) listet Modelle, bei denen echte Daten entscheiden müssen: gekürzte Namen,
+   Runden aus LMU-Dateien verschiedener Modelle unter einem Namen, Runden in verschiedenen
+   Klassen. Automatisch geändert wird daran nichts.
+8. **Client 0.9.3.1 verteilen** (`docs/CLIENT_BUILD.md`). Er arbeitet auch mit einem Server
+   0.9.3 oder 0.9.2 (er lässt dann Stufe für Stufe die Felder weg, die der Server nicht kennt).
+   Clients 0.9.3 bleiben nutzbar: Lehnt ein 0.9.3-Client eine Runde nur wegen
+   Track-Limit-Schritten ab, macht der Server daraus eine Prüfung statt einer Streichung.
+9. **Mit echtem LMU bestätigen** — die offenen Punkte stehen im Prüfprotokoll
+   (`docs/LMU_VERIFICATION_PROTOCOL.md`, Abschnitt V0.9.3.1, Punkte (r)–(v)). Auf dem PC im
+   Projektordner, während du fährst:
+   ```
+   py -m scripts.track_limits_probe --csv tracklimits.csv
+   py -m scripts.car_identity_probe --csv autos.csv
+   ```
+   Schick mir beide CSV-Dateien und deine Notizen (welche Runde, welche Kurve, was LMU
+   angezeigt hat). Erst danach entscheiden wir, ob eine Messung Runden streichen darf.
+
+Was sich im Betrieb ändert:
+- **Zurück auf V0.9.3:** zuerst mit dem NEUEN Stack die Migration zurückdrehen, dann wechseln
+  (der V0.9.3-Server kennt `0014` nicht und startet sonst nicht):
+  ```
+  cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_3_1/Garage16 - LMU"
+  sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" alembic downgrade 0013'
+  sudo docker compose --profile tunnel down
+  cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_3/Garage16 - LMU"
+  sudo docker compose --profile tunnel up -d
+  ```
+  Zurück auf V0.9.2 genauso, nur mit `alembic downgrade 0012` und dem V0.9.2-Ordner. Oder das
+  Backup aus Schritt 1 zurückspielen (`docs/ROLLBACK.md`).
+- **Admin → Track-Limit-Prüfung:** jeder Befund zeigt seine Art (LMU-Urteil, Garage16-Regel,
+  Messung) und, aufklappbar, die Regeltabelle dieses Servers mit Wirkung und ob die Bedeutung
+  schon mit echten Daten bestätigt ist. Die Prüfliste wird länger als bei V0.9.3 — das ist
+  gewollt: Was vorher still gestrichen wurde, siehst du jetzt.
+- **Theoretische Bestzeit:** nur noch pro Fahrzeugmodell und getrennt nach Streckenzustand
+  (trocken / teilweise nass / nass / unbekannt). Ausgeschlossene Runden werden gezählt und
+  genannt, nie still weggelassen.
+
+**Neu in V0.9.3 — worauf du beim Update achten musst:**
+
+Diesmal gibt es eine **Datenbank-Migration** (`0013`): sie ordnet jede Runde ihrem
+Fahrzeug**modell** zu und legt Felder für das Track-Limit-Urteil und die Rundenkennzahlen an.
+Sie läuft beim Start automatisch, ändert keine Rundenzeit und keine Gültigkeit, und sie ist
+umkehrbar (der rohe LMU-Wert bleibt in jeder Runde gespeichert). Trotzdem gilt: **vorher
+sichern.** Die Befehle per SSH auf der NAS (Port 2234), Pfade wie bei dir:
+
+1. **Backup** (aus dem laufenden V0.9.2-Ordner, auf die USB-Platte):
+   ```
+   cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_2/Garage16 - LMU"
+   sudo ./scripts/backup.sh /volumeUSB2/usbshare/garage16-backups
+   ```
+   Am Ende muss ein neuer Ordner `garage16_<Datum>_<Zeit>` mit Datenbank-Dump und
+   Telemetrie dort liegen.
+2. **Neuen Ordner anlegen**, das ZIP per File Station hineinladen und dort entpacken
+   (Rechtsklick → Extrahieren → „Hierher extrahieren“), dann die `.env` aus dem alten Ordner
+   übernehmen:
+   ```
+   mkdir -p /volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_3
+   # … ZIP per File Station in diesen Ordner laden und dort entpacken …
+   cp "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_2/Garage16 - LMU/.env" \
+      "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_3/Garage16 - LMU/.env"
+   ```
+3. **Alten Stack stoppen** (ohne `-v` — die Daten liegen in den benannten Volumes und
+   bleiben):
+   ```
+   cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_2/Garage16 - LMU"
+   sudo docker compose --profile tunnel down
+   ```
+4. **Neuen Stack bauen und starten** (die Migration läuft dabei von selbst):
+   ```
+   cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_3/Garage16 - LMU"
+   sudo docker compose --profile tunnel up -d --build
+   sudo docker compose logs server | grep -i -E "alembic|0013|error"
+   curl -s https://garage16.de/health
+   ```
+   `/health` muss `"version":"0.9.3"` und `"db_ok":true` zeigen. Im Browser einmal **Strg+F5**.
+5. **Fahrzeuge prüfen** (nur lesen, ändert nichts):
+   ```
+   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.car_identity_report'
+   ```
+   Du siehst pro LMU-Dateiname, welchem Modell er jetzt zugeordnet ist. Direkt nach dem
+   Update stehen ältere Runden als „Modell (Saison)“ da, z. B. „499P (2025)“ — sobald der
+   erste Client 0.9.3 eine Runde hochlädt, meldet er alle Autos seiner Session mit LMUs
+   eigenem Modellnamen, und der Server ordnet die alten Runden automatisch um.
+6. **Alte Runden nachprüfen lassen** (Track-Limits + Kennzahlen für die theoretische
+   Bestzeit). Erst der Probelauf — er ändert nichts und zeigt, welche Runden die neuen
+   Regeln beanstanden würden:
+   ```
+   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.revalidate_laps'
+   ```
+   Dann speichern (Gültigkeit bleibt unverändert; beanstandete Runden landen im Admin-Bereich
+   unter **Track-Limit-Prüfung**):
+   ```
+   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.revalidate_laps --apply'
+   ```
+   Nur wenn du die Liste gelesen hast und die Runden wirklich nicht zählen sollen, zusätzlich
+   `--update-validity` anhängen.
+7. **Client 0.9.3 verteilen** wie gewohnt (`docs/CLIENT_BUILD.md`). Er ist mit dem neuen Server
+   UND mit einem alten Server kompatibel (lehnt ein 0.9.2-Server die neuen Felder ab,
+   lädt der Client dieselbe Runde ohne sie hoch). Ältere Clients bleiben ebenfalls nutzbar —
+   ihre Runden werden aber nur mit den Signalen geprüft, die sie aufzeichnen.
+8. **Mit echtem LMU bestätigen** (einmal, auf dem PC im Projektordner
+   `C:\Users\Moritz\Documents\Programmieren\Garage16_Lmu_V0_9_3\Garage16 - Lmu`), während LMU
+   in einer Session mit vollem KI-Feld läuft:
+   ```
+   py -m scripts.car_identity_probe --csv autos.csv
+   ```
+   Die Liste zeigt jedes Auto so, wie LMU es meldet, und welches Modell Garage16 daraus macht.
+   Schick mir `autos.csv` — daran sehe ich, ob LMU z. B. Evo- oder Le-Mans-Varianten im
+   Modellnamen unterscheidet. Die Punkte (m)–(q) in `docs/LMU_VERIFICATION_PROTOCOL.md`
+   beschreiben die Probefahrten für Track-Limits, Untergrund, Streckenrand, Modelle und Dämpfer.
+
+Was sich im Betrieb ändert:
+- **Zurück auf V0.9.2** geht auf zwei Wegen: das Backup aus Schritt 1 zurückspielen
+  (`docs/ROLLBACK.md`), oder nur die Migration zurückdrehen. Wichtig ist die Reihenfolge — der
+  V0.9.2-Server kennt die Migration 0013 nicht und startet nicht, solange die Datenbank auf 0013
+  steht:
+  ```
+  cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_3/Garage16 - LMU"
+  sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" alembic downgrade 0012'
+  sudo docker compose --profile tunnel down
+  cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_2/Garage16 - LMU"
+  sudo docker compose --profile tunnel up -d
+  ```
+  Der Downgrade stellt die alten Fahrzeugnamen exakt wieder her; Track-Limit-Urteile und
+  Kennzahlen entfallen (sie lassen sich nach einem erneuten Update jederzeit neu berechnen).
+- **Admin-Bereich:** zwei neue Reiter. **Track-Limit-Prüfung** listet Runden, die die
+  automatische Prüfung nicht allein entscheiden konnte (z. B. „jenseits des Streckenrands“ —
+  LMU nennt diesen Wert selbst ungefähr). Sie zählen, bis du „Runde zählt“ oder „Runde
+  ungültig“ wählst. **Fahrzeugmodelle** zeigt, was der Server über Modelle gelernt hat,
+  inklusive Konflikten (wird nie zum Zusammenlegen benutzt).
+- **Was eine Runde ungültig macht** (Stand V0.9.3 — **seit V0.9.3.1 geändert, siehe oben**:
+  Track-Limit-Schritte und „alle vier Räder“ führen nur noch zur Prüfung): LMU hat die Runde
+  ungültig gemacht, LMU wertet die Zeit nicht (`count_lap_flag` ≠ 2), LMU hat
+  Track-Limit-Punkte vergeben, alle vier Räder auf Gras/Kies/Erde, oder der Client hat sie
+  abgelehnt (Boxengasse). Ein Signal, das unplausibel
+  aussieht, wird für diese Runde ignoriert statt sie zu streichen.
+- **Speicher:** pro Runde kommen rund 1–4 KB Kennzahlen in der Datenbank dazu. Der Upload liest
+  für alle Prüfungen die Telemetrie-Datei weiterhin nur einmal (gemessen an einer synthetischen
+  4-Minuten-Runde: ~23 ms statt ~7 ms pro Upload). Nichts einzustellen.
+- **Neue Seite „Meine Sessions"** und neue Analyse-Fenster: alles aus vorhandenen Daten,
+  keine Einstellung nötig. Das Analyse-Rate-Limit (900/Stunde) reicht weiter.
+
 **Neu in V0.9.2 — worauf du beim Update achten musst:**
 - **Keine Datenbank-Migration.** Server neu bauen wie immer, im Browser einmal **Strg+F5**.
 - **Zwei Client-Downloads:** „Client“ (`Garage16-Client-Setup.exe`, Analyse im Browser)

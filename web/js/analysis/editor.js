@@ -21,6 +21,12 @@ export function createEditorPanel({ layout, catalog, onChange, onReset, onDone, 
     if (shownSingles.has(type)) continue;
     add.appendChild(el("option", { value: `type:${type}` }, moduleForType(type).title));
   }
+  // V0.9.3: a histogram window starts on the first channel that has none yet (change it in
+  // the window's own channel menu)
+  const shownHistograms = new Set(layout.widgets.filter((w) => w.type === "histogram").map((w) => w.channel));
+  const pairKeys = new Set(catalog.channels.filter((c) => c.pair).map((c) => c.key));   // V0.9.4: no histogram
+  const histogramChannel = ["gear", "speed", ...catalog.channels.map((c) => c.key)].find((k) => valid.has(k) && !shownHistograms.has(k) && !pairKeys.has(k));
+  if (histogramChannel) add.appendChild(el("option", { value: `histogram:${histogramChannel}` }, moduleForType("histogram").title));
   const groups = new Map();
   for (const channel of catalog.channels) {
     if (shownCharts.has(channel.key)) continue;
@@ -34,7 +40,7 @@ export function createEditorPanel({ layout, catalog, onChange, onReset, onDone, 
   add.addEventListener("change", () => {
     const [kind, value] = add.value.split(":");
     if (!kind) return;
-    onChange(kind === "chart" ? addWidget(layout, { type: "chart", channel: value }, valid) : addWidget(layout, { type: value }, valid));
+    onChange(kind === "chart" || kind === "histogram" ? addWidget(layout, { type: kind, channel: value }, valid) : addWidget(layout, { type: value }, valid));
   });
 
   // --- colours

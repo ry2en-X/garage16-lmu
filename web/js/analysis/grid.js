@@ -19,17 +19,20 @@ import { T } from "./strings.js";
 
 function windowTitle(widget, catalog) {
   const module = moduleForType(widget.type);
-  if (widget.type === "chart") {
+  if (widget.type === "chart" || widget.type === "histogram") {
     const entry = catalog.channels.find((c) => c.key === widget.channel);
-    return entry ? entry.label : widget.channel;
+    const label = entry ? entry.label : widget.channel;
+    return widget.type === "histogram" ? `${module ? module.title : ""} — ${label}` : label;
   }
   return module ? module.title : widget.type;
 }
 
 function channelSelect(widget, layout, catalog, onChange) {
-  const taken = new Set(layout.widgets.filter((w) => w.type === "chart" && w.id !== widget.id).map((w) => w.channel));
+  const taken = new Set(layout.widgets.filter((w) => w.type === widget.type && w.id !== widget.id).map((w) => w.channel));
   const groups = new Map();
   for (const channel of catalog.channels) {
+    // V0.9.4: a channel of the lap PAIR (line offset) has no histogram
+    if (widget.type === "histogram" && channel.pair) continue;
     if (!groups.has(channel.group)) groups.set(channel.group, []);
     groups.get(channel.group).push(channel);
   }
@@ -101,6 +104,10 @@ export function renderGrid(host, layout, ctx, { catalog, editing, onLayoutChange
     sizeSelect.value = widget.size;
     sizeSelect.addEventListener("change", () => onLayoutChange(setSize(layout, widget.id, sizeSelect.value)));
     controls.push(sizeSelect);
+    if (widget.type === "histogram") {
+      const valid = new Set(catalog.channels.map((c) => c.key));
+      controls.push(channelSelect(widget, layout, catalog, (channel) => onLayoutChange(setChannel(layout, widget.id, channel, valid))));
+    }
     if (widget.type === "chart") {
       const valid = new Set(catalog.channels.map((c) => c.key));
       controls.push(channelSelect(widget, layout, catalog, (channel) => onLayoutChange(setChannel(layout, widget.id, channel, valid))));

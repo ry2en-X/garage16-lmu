@@ -76,6 +76,9 @@ class Lap(Base):
         # A retried upload of the same lap (same driver, same telemetry bytes)
         # should not create a second row — this is what makes upload_lap idempotent.
         UniqueConstraint("driver_id", "telemetry_hash", name="uq_driver_telemetry_hash"),
+        # V0.9.3.1: a lap's neighbours (the lap before/after it of the same driver) — see
+        # server/lap_check.py link_neighbours
+        Index("ix_laps_driver_track_lapno", "driver_id", "track_name", "lap_number"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -99,7 +102,16 @@ class Lap(Base):
     # "Hypercar", see server/catalog.py); the string LMU actually sent is kept
     # here so a mapping mistake can always be corrected from the source.
     car_class_raw = Column(String, nullable=True)
+    # V0.9.3: car_model is the car's MODEL identity (server/car_identity.py) — every
+    # livery, team and car number of one model shares it. What LMU actually sent is
+    # kept next to it, so the identity can always be re-derived:
+    #   car_model_raw       VehicleScoringInfoV01.veh_filename (what car_model held up to 0.9.2)
+    #   car_vehicle_model   TelemInfoV01.mVehicleModel, LMU's "brand & model" name (0.9.3+ clients)
+    #   car_identity_source how car_model was decided: vehicle_model | alias | veh_file
     car_model = Column(String, nullable=True, index=True)
+    car_model_raw = Column(String, nullable=True)
+    car_vehicle_model = Column(String, nullable=True)
+    car_identity_source = Column(String, nullable=True, index=True)
     session_type = Column(Integer, nullable=False)
     lap_number = Column(Integer, nullable=False)
     lap_time = Column(Float, nullable=False, index=True)
@@ -121,6 +133,27 @@ class Lap(Base):
     ambient_temp = Column(Float, nullable=True)
     track_temp = Column(Float, nullable=True)
     sample_count = Column(Integer, nullable=True)
+
+    # V0.9.3 — the server's own track-limits verdict (server/track_limits.py), with every
+    # finding (what, where on the lap, from which signal). {"version", "status",
+    # "findings": [...], "signals": [...]}. NULL for laps checked before V0.9.3.
+    validation = Column(JSON, nullable=True)
+    # V0.9.3 — admin review of laps the check could not decide on its own:
+    # NULL (nothing to review) | "pending" | "cleared" | "invalidated"
+    review_status = Column(String, nullable=True, index=True)
+    # V0.9.3 — compact per-lap figures computed once at upload (server/lap_insights.py):
+    # fuel/energy/tyre use, input shares, peaks, and the time profile behind the
+    # theoretical best lap. Lists and statistics read this instead of the lap files.
+    lap_stats = Column(JSON, nullable=True)
+    # V0.9.3.1 — everything the verdict depends on that is NOT in the telemetry file: the
+    # client's yes/no and reasons, its game summary, the tail samples, the late window after
+    # the line, LMU's step/point ratios (server/lap_check.py). Lets
+    # scripts/revalidate_laps.py judge a stored lap again with the current rules.
+    check_inputs = Column(JSON, nullable=True)
+    # V0.9.4 — the car and the session at the end of the lap (pit stops so far, tyre compound,
+    # damage, tank size, position, time left; schemas.LapContext). For the Stint Analyzer
+    # (server/stints.py). NULL for laps recorded by older clients.
+    lap_context = Column(JSON, nullable=True)
 
     telemetry_hash = Column(String, nullable=False, index=True)
     telemetry_path = Column(String, nullable=False)
@@ -360,3 +393,42 @@ class LapReport(Base):
 
     lap = relationship("Lap")
     reported_by = relationship("Driver")
+
+
+class CarAlias(Base):
+    """V0.9.3 — a veh_filename group (one model, one season; see
+    server/car_identity.py fallback_identity) and the model LMU reports for it.
+
+    Learned automatically from uploads: the lap's own car and every car the client saw
+    in the session. `conflict` is set when the game reported two different models for
+    the same key — such a key is then never used to group laps."""
+
+    __tablename__ = "car_aliases"
+
+    id = Column(Integer, primary_key=True)
+    alias_key = Column(String, nullable=False, unique=True, index=True)
+    canonical = Column(String, nullable=False)
+    source = Column(String, nullable=False)          # "lap" | "grid"
+    conflict = Column(Boolean, nullable=False, default=False)
+    conflict_with = Column(String, nullable=True)
+    seen_count = Column(Integer, nullable=False, default=1)
+    rules_version = Column(Integer, nullable=False, default=1)
+    first_seen = Column(DateTime, default=_utcnow)
+    last_seen = Column(DateTime, default=_utcnow)
+
+
+class RaceRuleSet(Base):
+    """V0.9.4 — a race's rules for the Stint Analyzer's strategy calculator (minimum pit
+    stops, maximum stint length, mandatory tyre change, refuelling, pit lane figures), kept by
+    an admin. `rules` is validated by schemas.RaceRules; nothing is assumed beyond it."""
+
+    __tablename__ = "race_rule_sets"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False, unique=True)
+    description = Column(String, nullable=True)
+    track_name = Column(String, nullable=True, index=True)
+    car_class = Column(String, nullable=True)
+    rules = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=_utcnow)
+    updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)

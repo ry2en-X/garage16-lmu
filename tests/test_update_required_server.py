@@ -31,7 +31,10 @@ def test_is_client_outdated(client, minimum, outdated):
 
 def test_parse_version_never_raises():
     assert parse_version(None) == (0,)  # type: ignore[arg-type]
-    assert parse_version("1.2.3.4") == (1, 2, 3)
+    # V0.9.3.1: a fourth part (correction release) counts — 0.9.3.1 is newer than 0.9.3
+    assert parse_version("1.2.3.4") == (1, 2, 3, 4)
+    assert parse_version("0.9.3") < parse_version("0.9.3.1") < parse_version("0.9.4")
+    assert parse_version("1.2.3.4.5") == (1, 2, 3, 4)
 
 
 def test_health_without_client_version_has_no_verdict(client):

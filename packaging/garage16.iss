@@ -46,6 +46,8 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\Garage16.exe
+; V0.9.4: the Garage16 icon (an angular "16") for the installer itself
+SetupIconFile=garage16.ico
 ; If Garage16 is running while an update is installed, close it first
 ; rather than failing on locked files (and restart it afterwards).
 CloseApplications=yes

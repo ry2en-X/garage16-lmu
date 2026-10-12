@@ -49,7 +49,7 @@ LMU_GARAGE_DB_URL="$DB_URL" LMU_GARAGE_ENV=development python3 -m alembic upgrad
 
 echo
 echo "--- 4. Full pytest suite against this PostgreSQL database ---"
-LMU_GARAGE_DB_URL="$DB_URL" python3 -m pytest tests/ -q
+LMU_GARAGE_DB_URL="$DB_URL" ${PYTHON:-python3} -m pytest tests/ -q
 
 echo
 echo "=== All checks passed against real PostgreSQL. ==="

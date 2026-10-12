@@ -16,9 +16,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from client.lmu.structs import TelemInfoV01
+from client.lmu.structs import TelemInfoV01, VehicleScoringInfoV01
 from client.telemetry.async_saver import AsyncLapSaver
 from client.telemetry.channels import (
+    SCORING_CHANNELS,
+    STINT_CHANNELS,
     EXTENDED_COLUMNS,
     ORIENTATION_CHANNELS,
     SCALAR_CHANNELS,
@@ -126,7 +128,17 @@ def test_column_names_are_unique_and_cover_every_wheel_key():
 
 def test_extracted_values_match_their_column_names():
     tele, expected = _filled_struct()
-    values = extract_extended(tele)
+    # V0.9.3: the four scoring values come from the player's VehicleScoringInfoV01
+    scoring = VehicleScoringInfoV01()
+    for offset, (name, attr) in enumerate(SCORING_CHANNELS):
+        setattr(scoring, attr, 250 + offset)
+        expected[name] = 250 + offset
+    # V0.9.4: the stint values — from the scoring struct ("s") or the telemetry struct ("t")
+    for offset, (name, source, attr) in enumerate(STINT_CHANNELS):
+        value = 1 if attr == "in_pits" else 200 + offset
+        setattr(scoring if source == "s" else tele, attr, value)
+        expected[name] = value
+    values = extract_extended(tele, scoring)
     assert len(values) == len(EXTENDED_COLUMNS)
     got = dict(zip(EXTENDED_COLUMNS, values))
     assert set(got) == set(expected)
@@ -274,3 +286,20 @@ def test_async_saver_survives_a_lap_that_fails_to_save(tmp_path):
     assert saver.flush(timeout=20.0)
     assert saved == [(1, True), (2, False), (3, True)]
     saver.close()
+
+
+def test_scoring_columns_are_nan_without_a_scoring_struct():
+    """V0.9.3: tools/old code paths that pass only the telemetry struct still get a full
+    row; the scoring values are "not recorded" (NaN), never a made-up 0."""
+    tele, _ = _filled_struct()
+    got = dict(zip(EXTENDED_COLUMNS, extract_extended(tele)))
+    for name, _attr in SCORING_CHANNELS:
+        assert math.isnan(got[name])
+    for name, source, _attr in STINT_CHANNELS:
+        if source == "s":
+            assert math.isnan(got[name])
+    # and they come after every telemetry column, so earlier positions never moved (V0.9.4:
+    # the stint values are appended after them)
+    tail = len(STINT_CHANNELS)
+    assert list(EXTENDED_COLUMNS[-len(SCORING_CHANNELS) - tail:-tail]) == [name for name, _ in SCORING_CHANNELS]
+    assert list(EXTENDED_COLUMNS[-tail:]) == [name for name, _, _ in STINT_CHANNELS]

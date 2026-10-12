@@ -127,6 +127,9 @@ services:
       LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL: ${LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL:-}
       # V0.7.2 — off by default in production; see .env.example.
       LMU_GARAGE_ENABLE_API_DOCS: ${LMU_GARAGE_ENABLE_API_DOCS:-false}
+      # V0.9.3.1 — track-limits measurements that may invalidate a lap on their own
+      # (comma separated, e.g. four_wheels_off). Empty = review only; see .env.example.
+      LMU_GARAGE_TRACK_LIMITS_INVALIDATING: ${LMU_GARAGE_TRACK_LIMITS_INVALIDATING:-}
       # Uncomment these three (and set the matching four plain values just
       # above to non-empty PLACEHOLDERS, not blank — Compose's ${VAR:?...}
       # requires non-empty at parse time and can't see a secret file that

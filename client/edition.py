@@ -124,10 +124,20 @@ def set_preferred_view(view: str) -> None:
     write_setting(SETTING_KEY, view)
 
 
-def analysis_url(api_url: str, lap_id: Optional[int] = None) -> str:
+# V0.9.4: two dashboards — the LapTime Analyzer (one lap against another) and the Stint
+# Analyzer (whole sessions: stints, tyres, fuel, pit stops, strategy)
+VIEW_LAPTIME = "laptime"
+VIEW_STINTS = "stints"
+ANALYSIS_VIEWS = (VIEW_LAPTIME, VIEW_STINTS)
+
+
+def analysis_url(api_url: str, lap_id: Optional[int] = None, view: str = VIEW_LAPTIME) -> str:
     """The web analysis on the driver's own server (the web app is served from the same
-    address as the API — docker/Caddyfile), optionally with one lap open as Lap 1."""
+    address as the API — docker/Caddyfile), optionally with one lap open: as Lap 1 in the
+    LapTime Analyzer, or — view "stints" — the session of that lap in the Stint Analyzer."""
     base = api_url.rstrip("/")
+    if view == VIEW_STINTS:
+        return f"{base}/#/stints?lap={int(lap_id)}" if lap_id is not None else f"{base}/#/stints"
     if lap_id is not None:
         return f"{base}/#/analysis?a={int(lap_id)}"
     return f"{base}/#/analysis"
@@ -138,7 +148,7 @@ def same_origin(url_a: str, url_b: str) -> bool:
     return bool(a.scheme and a.netloc) and (a.scheme, a.netloc.lower()) == (b.scheme, b.netloc.lower())
 
 
-def analysis_window_command(lap_id: Optional[int] = None) -> List[str]:
+def analysis_window_command(lap_id: Optional[int] = None, view: str = VIEW_LAPTIME) -> List[str]:
     """How to start the window as its own process. The packaged app re-runs its own
     executable; a source checkout runs the module."""
     if getattr(sys, "frozen", False):
@@ -147,6 +157,8 @@ def analysis_window_command(lap_id: Optional[int] = None) -> List[str]:
         command = [sys.executable, "-m", "client.main", "--analysis-window"]
     if lap_id is not None:
         command += ["--lap", str(int(lap_id))]
+    if view == VIEW_STINTS:
+        command += ["--view", VIEW_STINTS]
     return command
 
 

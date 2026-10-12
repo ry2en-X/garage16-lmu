@@ -256,7 +256,7 @@ def test_the_response_uses_per_channel_precision(client):
     assert all(isinstance(x, int) for x in body["channels"]["rpm"]["a"] if x is not None)
     assert decimals(body["channels"]["lat_g"]["a"]) <= 3
     assert decimals(body["delta"]) <= 3 and decimals(body["time"]["a"]) <= 3
-    assert body["analysis_version"] == ANALYSIS_CACHE_VERSION == 3
+    assert body["analysis_version"] == ANALYSIS_CACHE_VERSION == 5  # V0.9.4: corner phases, line offset
     assert isinstance(body["corners"], list)
     assert set(body["delta_facts"]) == {"window", "gain", "loss", "net"}
 

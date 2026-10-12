@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 # Generous but real ceiling — long enough to never reject a genuine lap
 # (including slow out-laps under yellow), tight enough to catch garbage
@@ -159,6 +159,147 @@ class RotateSecretResponse(BaseModel):
     )
 
 
+class GameLapState(BaseModel):
+    """V0.9.3 — what the client read from the game for one lap (its summary only; the
+    server recomputes everything from the telemetry file and decides)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    count_lap_flag: Optional[int] = Field(default=None, ge=0, le=2)
+    invalidated: Optional[StrictBool] = None
+    track_limits_steps: Optional[int] = Field(default=None, ge=0, le=1000)
+    penalties_added: Optional[int] = Field(default=None, ge=0, le=1000)
+
+
+def _finite_number(value):
+    if value is not None and (isinstance(value, bool) or not math.isfinite(float(value))):
+        raise ValueError("must be a finite number (not NaN or Infinity)")
+    return value
+
+
+class LateWindowReport(BaseModel):
+    """V0.9.3.1 — what LMU reported in the first seconds after the finish line
+    (client/telemetry/lap_verdict.py LateWindow). Change lists are [seconds after the
+    line, value]."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    seconds: float = Field(ge=0, le=600)
+    complete: StrictBool
+    lap_time_at_line: float = Field(ge=-1e6, le=1e6)
+    last_lap_time: float = Field(ge=-1e6, le=1e6)
+    steps: List[List[float]] = Field(default_factory=list, max_length=32)
+    penalties: List[List[float]] = Field(default_factory=list, max_length=32)
+    excursion_at: Optional[float] = Field(default=None, ge=0, le=600)
+    can_see_excursions: StrictBool = False
+
+    @field_validator("seconds", "lap_time_at_line", "last_lap_time", "excursion_at")
+    @classmethod
+    def _finite(cls, value):
+        return _finite_number(value)
+
+    @field_validator("steps", "penalties")
+    @classmethod
+    def _pairs(cls, value):
+        for row in value:
+            if len(row) != 2 or not all(math.isfinite(float(x)) for x in row):
+                raise ValueError("entries must be [seconds, value] pairs of finite numbers")
+            if not (0 <= row[0] <= 600 and 0 <= row[1] <= 1000):
+                raise ValueError("entry out of range")
+        return value
+
+
+class LapTimeCorrection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    from_: float = Field(alias="from", ge=-1e6, le=1e6)
+    to: float = Field(gt=0, le=MAX_LAP_TIME_SECONDS)
+    after_s: float = Field(ge=-1, le=600)
+
+
+class LapTimeUnconfirmed(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    lmu: float = Field(ge=-1e6, le=1e6)
+    measured: float = Field(ge=-1e6, le=1e6)
+
+
+class LapReport(BaseModel):
+    """V0.9.3.1 — why the client judged the lap as it did (reason codes, see
+    server/track_limits.py RULES) and the late window after the line."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reasons: List[str] = Field(default_factory=list, max_length=20)
+    late: Optional[LateWindowReport] = None
+    # V0.9.4: LMU's lap time arrived after the lap was finalised (corrected by the client), or
+    # never matched the measured duration (kept as LMU reported it) — diagnosis only
+    lap_time_corrected: Optional[LapTimeCorrection] = None
+    lap_time_unconfirmed: Optional[LapTimeUnconfirmed] = None
+
+    @field_validator("reasons")
+    @classmethod
+    def _codes(cls, value):
+        for code in value:
+            if not (1 <= len(code) <= 40) or not all(c.islower() or c == "_" for c in code):
+                raise ValueError("reason codes are short lower-case identifiers")
+        return value
+
+
+class LapDamage(BaseModel):
+    """V0.9.4 — body damage at the end of the lap, as LMU reports it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dent_max: int = Field(ge=0, le=255)
+    overheating: StrictBool = False
+    detached: StrictBool = False
+
+
+class LapContext(BaseModel):
+    """V0.9.4 — the car and the session at the end of the lap (client/telemetry/parser.py
+    lap_context): what the Stint Analyzer needs beyond the telemetry file. Every field is
+    optional: the client leaves out whatever LMU did not report."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pitstops: Optional[int] = Field(default=None, ge=0, le=500)
+    place: Optional[int] = Field(default=None, ge=1, le=255)
+    compound_front: Optional[int] = Field(default=None, ge=0, le=255)
+    compound_rear: Optional[int] = Field(default=None, ge=0, le=255)
+    compound_front_name: Optional[str] = Field(default=None, max_length=18)
+    compound_rear_name: Optional[str] = Field(default=None, max_length=18)
+    fuel_capacity_l: Optional[float] = Field(default=None, ge=0.5, le=500)
+    session_left_s: Optional[float] = Field(default=None, ge=0, le=10 * 86400)
+    max_laps: Optional[int] = Field(default=None, ge=0, le=100000)
+    damage: Optional[LapDamage] = None
+
+    @field_validator("compound_front_name", "compound_rear_name")
+    @classmethod
+    def _printable(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = "".join(ch for ch in value if ch.isprintable()).strip()
+        return value or None
+
+    @field_validator("fuel_capacity_l", "session_left_s")
+    @classmethod
+    def _finite_number(cls, value: Optional[float]) -> Optional[float]:
+        if value is not None and not math.isfinite(value):
+            raise ValueError("must be a finite number")
+        return value
+
+
+class GridVehicle(BaseModel):
+    """V0.9.3 — one car the client saw in the session (server/car_identity.py)."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    veh_file: str = Field(min_length=1, max_length=64)
+    model: Optional[str] = Field(default=None, max_length=64)
+    vehicle_class: Optional[str] = Field(default=None, max_length=64, alias="class")
+
+
 class LapMetadata(BaseModel):
     """Validates envelope.metadata from an upload before any of it reaches
     the DB. Field checks per the pre-launch review:
@@ -211,6 +352,19 @@ class LapMetadata(BaseModel):
     track_temp: Optional[float] = Field(default=None, ge=-50, le=150)
     sample_count: Optional[int] = Field(default=None, ge=0)
     telemetry_file: str = Field(min_length=1, max_length=255)
+    # V0.9.3 (all optional — older clients send none of them)
+    vehicle_model: Optional[str] = Field(default=None, max_length=100)
+    tail_samples: Optional[int] = Field(default=None, ge=0, le=1000)
+    track_grip_level: Optional[int] = Field(default=None, ge=0, le=4)
+    fixed_setup: Optional[StrictBool] = None
+    track_limits_steps_per_point: Optional[int] = Field(default=None, ge=0, le=255)
+    track_limits_steps_per_penalty: Optional[int] = Field(default=None, ge=0, le=255)
+    game_lap_state: Optional[GameLapState] = None
+    grid_vehicles: Optional[List[GridVehicle]] = Field(default=None, max_length=128)
+    # V0.9.3.1
+    lap_report: Optional[LapReport] = None
+    # V0.9.4
+    lap_context: Optional[LapContext] = None
 
     @field_validator("track_name", "car_name", "telemetry_file")
     @classmethod
@@ -220,7 +374,7 @@ class LapMetadata(BaseModel):
             raise ValueError("must not be blank")
         return value
 
-    @field_validator("car_class", "car_model")
+    @field_validator("car_class", "car_model", "vehicle_model")
     @classmethod
     def _blank_to_none(cls, value: Optional[str]) -> Optional[str]:
         # Unlike track_name/car_name, a blank car_class/car_model isn't an
@@ -288,6 +442,10 @@ class LapSummary(BaseModel):
     # writes the extended channels (see server/versioning.py). Lists only; the
     # analysis decides from the file itself.
     data_level: Optional[str] = None
+    # V0.9.3: car model identity and the server's track-limits verdict
+    car_model: Optional[str] = None
+    validation_status: Optional[str] = None
+    review_status: Optional[str] = None
 
 
 class LeaderboardEntry(BaseModel):
@@ -578,6 +736,11 @@ class AdminLapSummary(BaseModel):
     invalid_reason: Optional[List[str]] = None
     client_claimed_valid: bool
     uploaded_at: str
+    # V0.9.3: the server's track-limits verdict (server/track_limits.py) and its review
+    validation: Optional[dict] = None
+    review_status: Optional[str] = None
+    car_model_raw: Optional[str] = None
+    car_identity_source: Optional[str] = None
 
 
 class LapReportOut(BaseModel):
@@ -644,3 +807,73 @@ class AccountExport(BaseModel):
     created_at: str
     discord_linked: bool
     laps: List[LapSummary]
+
+
+class AdminReviewDecision(BaseModel):
+    """V0.9.3 — POST /admin/laps/{id}/review: the admin's decision on a lap the
+    track-limits check could not decide on its own."""
+
+    decision: str = Field(pattern="^(clear|invalidate)$")
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+# ---------------------------------------------------------------------------
+# V0.9.4 — race rule sets for the Stint Analyzer's strategy calculator
+# ---------------------------------------------------------------------------
+
+class RaceRules(BaseModel):
+    """What a race prescribes. Everything optional except what makes the calculator work at
+    all; values the admin does not know stay empty and the calculator says so instead of
+    assuming them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    race_laps: Optional[int] = Field(default=None, ge=1, le=10000)
+    race_minutes: Optional[float] = Field(default=None, gt=0, le=48 * 60)
+    min_pit_stops: int = Field(default=0, ge=0, le=100)
+    max_stint_laps: Optional[int] = Field(default=None, ge=1, le=10000)
+    max_stint_minutes: Optional[float] = Field(default=None, gt=0, le=48 * 60)
+    mandatory_tyre_change: StrictBool = False
+    tyre_sets: Optional[int] = Field(default=None, ge=1, le=100)
+    refuelling: StrictBool = True
+    refuel_l_per_s: Optional[float] = Field(default=None, gt=0, le=50)
+    tyre_change_s: Optional[float] = Field(default=None, ge=0, le=600)
+    min_stop_s: Optional[float] = Field(default=None, ge=0, le=3600)
+    pit_lane_loss_s: Optional[float] = Field(default=None, ge=0, le=600)
+    fuel_margin_laps: float = Field(default=1.0, ge=0, le=20)
+    notes: Optional[str] = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def _length(self):
+        if self.race_laps is None and self.race_minutes is None:
+            raise ValueError("a race length is needed: race_laps or race_minutes")
+        return self
+
+
+class RaceRuleSetIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=80)
+    description: Optional[str] = Field(default=None, max_length=500)
+    track_name: Optional[str] = Field(default=None, max_length=200)
+    car_class: Optional[str] = Field(default=None, max_length=64)
+    rules: RaceRules
+
+    @field_validator("name", "description", "track_name", "car_class")
+    @classmethod
+    def _strip(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+
+class RaceRuleSetOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    description: Optional[str] = None
+    track_name: Optional[str] = None
+    car_class: Optional[str] = None
+    rules: dict

@@ -221,6 +221,43 @@ class LMUSharedMemoryReader:
                 return Frame(telemetry=player_telemetry, scoring=player_scoring, session=scoring_info)
         return None
 
+    def read_vehicle_catalog(self) -> list:
+        """V0.9.3: every car in the session as [{"veh_file", "model", "class", "name"}].
+
+        Called every few seconds (not per frame) by the telemetry loop. Reads only a few
+        short strings per car straight from the live view — no copy of the 317 KiB struct.
+        A torn read can at worst garble one string for one call; the next call repeats it,
+        and the server only learns pairs it sees consistently (server/car_identity.py).
+        Returns [] when nothing can be read (no view, no session, a platform without the
+        mapping)."""
+        view = self._view
+        if view is None or not getattr(view, "_address", None):
+            return []
+        try:
+            live = SharedMemoryObjectOut.from_address(view._address)
+            vehicles = live.scoring.veh_scoring_info
+            count = min(max(int(live.scoring.scoring_info.num_vehicles), 0), vehicles._length_)
+            telemetry = live.telemetry.telem_info
+            active = min(max(int(live.telemetry.active_vehicles), 0), telemetry._length_)
+            models = {}
+            for j in range(active):
+                models[int(telemetry[j].id)] = model_text(bytes(telemetry[j].vehicle_model))
+            out = []
+            for i in range(count):
+                v = vehicles[i]
+                veh_file = _text(bytes(v.veh_filename))
+                if not veh_file:
+                    continue
+                out.append({
+                    "veh_file": veh_file,
+                    "model": models.get(int(v.id), ""),
+                    "class": _text(bytes(v.vehicle_class)),
+                    "name": _text(bytes(v.vehicle_name)),
+                })
+            return out
+        except Exception:  # noqa: BLE001 — purely informational, must never break recording
+            return []
+
     def read(self) -> Optional[Frame]:
         """Read one snapshot and return the player's Frame, or None if no
         player vehicle is currently active (e.g. at a menu between
@@ -269,22 +306,59 @@ class LMUSharedMemoryReader:
 
         return Frame(telemetry=player_telemetry, scoring=player_scoring, session=scoring_info)
 
-    def stream(self, poll_hz: float = 20.0) -> Iterator[Frame]:
+    def stream(self, poll_hz: float = 20.0, idle_seconds: Optional[float] = None) -> Iterator[Optional[Frame]]:
         """Poll at `poll_hz` and yield a Frame each time one is available.
         Does not call open() itself — the caller controls the open/retry
         lifecycle (see client/main.py's telemetry_loop) so a
         SharedMemoryNotFound from open() and one from a mid-stream game
         restart are handled by the same retry path instead of two
         different ones.
+
+        V0.9.3.1: with `idle_seconds`, None is yielded whenever no frame arrived for that
+        long (menu, garage) — the caller can then release a lap held for its late window
+        (LapParser.idle). Without it, nothing changes for existing callers.
         """
         if self._view is None:
             raise RuntimeError("open() must be called before stream().")
         period = 1.0 / poll_hz
+        quiet_since = time.monotonic()
         while True:
             frame = self.read()
             if frame is not None:
+                quiet_since = time.monotonic()
                 yield frame
+            elif idle_seconds is not None and time.monotonic() - quiet_since >= idle_seconds:
+                quiet_since = time.monotonic()
+                yield None
             time.sleep(period)
+
+
+# V0.9.3.1: LMU's mVehicleModel is char[30] — a longer model name arrives cut after 29
+# characters (server/car_identity.py). The cut is only visible BEFORE whitespace is stripped
+# (a name cut right after a space would look complete), so it is marked here, at the source.
+MODEL_NAME_MAX_CHARS = 29
+CUT_MARK = "…"
+
+
+def model_text(raw) -> str:
+    """LMU's model name as clean text, with CUT_MARK appended when LMU cut it."""
+    if not isinstance(raw, (bytes, bytearray)):
+        return str(raw or "").strip()
+    head = bytes(raw).split(b"\x00", 1)[0]
+    text = _text(head)
+    if text and len(head) >= MODEL_NAME_MAX_CHARS and not text.endswith(CUT_MARK):
+        text += CUT_MARK
+    return text
+
+
+def _text(raw: bytes) -> str:
+    """A NUL-terminated C string from shared memory as clean text ('' if unusable)."""
+    head = raw.split(b"\x00", 1)[0]
+    try:
+        text = head.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        text = head.decode("latin-1").strip()  # rFactor-style Windows-1252 strings
+    return text if text and text.isprintable() else ""
 
 
 class _TornRead(Exception):

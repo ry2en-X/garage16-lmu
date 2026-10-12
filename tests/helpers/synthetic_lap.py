@@ -144,6 +144,12 @@ def make_lap(
             ext[f"lat_ground_vel_{pos}"] = lat_ground.astype(np.float32)
             ext[f"long_ground_vel_{pos}"] = long_ground.astype(np.float32)
             ext[f"susp_deflection_{pos}"] = (0.05 + 0.00001 * loads[pos]).astype(np.float32)
+        # V0.9.3 scoring columns, as LMU reports them on a clean lap: the game counts lap
+        # and time (2), the car stays on the tarmac near LMU's centre path, no penalties
+        if "count_lap_flag" in ext:
+            ext["count_lap_flag"] = np.full(n, 2, dtype=np.float32)
+            ext["track_edge"] = np.full(n, 7.0, dtype=np.float32)
+            ext["path_lateral"] = (np.sin(np.linspace(0, 12, n)) * 3.0).astype(np.float32)
         ext["tc_level"] = np.full(n, 4, dtype=np.float32)
         ext["tc_active"] = (turning > 0).astype(np.float32)
         ext["rear_brake_bias"] = np.full(n, 0.55, dtype=np.float32)

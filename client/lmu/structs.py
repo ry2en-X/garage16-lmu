@@ -111,12 +111,12 @@ class VehicleScoringInfoV01(ctypes.Structure):
         ("pit_group", ctypes.c_char * 24),
         ("flag", ctypes.c_uint8),
         ("under_yellow", ctypes.c_bool),
-        # mCountLapFlag: 0 = don't count this lap (e.g. formation/out-lap
-        # under some conditions), 1 = count normally, 2 = count as lap but
-        # flag as not eligible for fastest-lap type comparisons. This is
-        # the real, game-reported signal for lap validity — see
-        # parser.py's _derive_is_valid, which uses this instead of a
-        # fabricated field.
+        # mCountLapFlag (rFactor 2 / LMU header): 0 = count neither the lap
+        # nor its time, 1 = count the lap but NOT its time, 2 = count lap
+        # and time. V0.9.3 correction: earlier versions documented
+        # "1 = count normally" and accepted 1 as valid; real LMU sessions
+        # show 2 on normal laps (CHANGELOG V0.6.1), and only 2 means the
+        # game itself counts the time — see parser.py's _derive_is_valid.
         ("count_lap_flag", ctypes.c_uint8),
         ("in_garage_stall", ctypes.c_bool),
         ("upgrade_pack", ctypes.c_uint8 * 16),
@@ -371,7 +371,21 @@ class ScoringInfoV01(ctypes.Structure):
         ("server_name", ctypes.c_char * 32),
         ("start_et", ctypes.c_float),
         ("avg_path_wetness", ctypes.c_double),
-        ("expansion", ctypes.c_uint8 * 200),
+        # V0.9.3: named from the former 200-byte reserve (13 + 187 = 200 bytes, so the
+        # struct size and everything after it are unchanged — asserted in
+        # tests/test_lmu_structs.py). Names, types and order as in s-victor's
+        # pyLMUSharedMemory lmu_data.py (MIT; field layout only, no code taken), which
+        # follows LMU's own SharedMemoryInterface header. Same lower-confidence region as
+        # the weather block above: these values are recorded as context only and never
+        # decide anything on their own.
+        ("session_time_remaining", ctypes.c_float),
+        ("time_of_day", ctypes.c_float),
+        ("is_fixed_setup", ctypes.c_bool),
+        ("track_grip_level", ctypes.c_uint8),      # 0 green .. 4 saturated
+        ("cloud_coverage", ctypes.c_uint8),        # 0 clear .. 10 storm
+        ("track_limits_steps_per_penalty", ctypes.c_uint8),
+        ("track_limits_steps_per_point", ctypes.c_uint8),
+        ("expansion", ctypes.c_uint8 * 187),
         ("vehicle", ctypes.c_void_p),
     ]
 

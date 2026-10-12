@@ -76,6 +76,10 @@ def run_setup_dialog(default_api_url: str, parent=None) -> Optional[ClientConfig
     from tkinter import ttk
 
     root = tk.Tk() if parent is None else tk.Toplevel(parent)
+    if parent is None:
+        from client.icon import apply_to_tk
+
+        apply_to_tk(root)   # V0.9.4
     root.title("Garage16 — Connect your account")
     root.geometry("440x360")
     root.resizable(False, False)

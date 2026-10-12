@@ -53,7 +53,9 @@ def _telemetry(lap_number, elapsed_time, vehicle_name=b"Car", track_name=b"Track
     ), TelemInfoV01())
 
 
-def _scoring(last_lap_time=90.0, last_sector1=30.0, last_sector2=60.0, in_pits=False, count_lap_flag=1,
+# V0.9.3: 2 is what LMU reports on a normal lap ("count lap and time"); 1 means the game
+# counts the lap but not its time and is no longer accepted (see _derive_is_valid).
+def _scoring(last_lap_time=90.0, last_sector1=30.0, last_sector2=60.0, in_pits=False, count_lap_flag=2,
              lap_dist=0.0, vehicle_class=b"Hypercar", veh_filename=b"TestCar"):
     return SimpleNamespace(
         last_lap_time=last_lap_time,
@@ -117,7 +119,7 @@ def test_is_valid_false_for_nonpositive_lap_time():
 
 
 def test_feed_returns_none_until_lap_boundary_crossed():
-    parser = LapParser()
+    parser = LapParser(late_window_seconds=0)
     frame1 = Frame(telemetry=_telemetry(lap_number=1, elapsed_time=0.0), scoring=_scoring(), session=_session())
     assert parser.feed(frame1) is None
     frame2 = Frame(telemetry=_telemetry(lap_number=1, elapsed_time=10.0), scoring=_scoring(), session=_session())
@@ -125,7 +127,7 @@ def test_feed_returns_none_until_lap_boundary_crossed():
 
 
 def test_feed_emits_completed_lap_on_boundary():
-    parser = LapParser()
+    parser = LapParser(late_window_seconds=0)
     parser.feed(Frame(telemetry=_telemetry(lap_number=1, elapsed_time=0.0), scoring=_scoring(lap_dist=100.0), session=_session()))
     parser.feed(Frame(telemetry=_telemetry(lap_number=1, elapsed_time=45.0), scoring=_scoring(lap_dist=2000.0), session=_session()))
     # Boundary frame: lap_number already 2, but lap_dist hasn't reset yet
@@ -150,7 +152,7 @@ def test_feed_emits_completed_lap_on_boundary():
 
 
 def test_feed_marks_lap_invalid_if_pit_visited_mid_lap():
-    parser = LapParser()
+    parser = LapParser(late_window_seconds=0)
     parser.feed(Frame(telemetry=_telemetry(lap_number=1, elapsed_time=0.0), scoring=_scoring(in_pits=False, lap_dist=100.0), session=_session()))
     parser.feed(Frame(telemetry=_telemetry(lap_number=1, elapsed_time=10.0), scoring=_scoring(in_pits=True, lap_dist=2000.0), session=_session()))
     parser.feed(
@@ -163,7 +165,7 @@ def test_feed_marks_lap_invalid_if_pit_visited_mid_lap():
 
 
 def test_feed_resets_pit_flag_for_next_lap():
-    parser = LapParser()
+    parser = LapParser(late_window_seconds=0)
     parser.feed(Frame(telemetry=_telemetry(lap_number=1, elapsed_time=0.0), scoring=_scoring(in_pits=True, lap_dist=100.0), session=_session()))
     parser.feed(Frame(telemetry=_telemetry(lap_number=2, elapsed_time=90.0), scoring=_scoring(in_pits=False, lap_dist=4000.0), session=_session()))
     lap1 = parser.feed(Frame(telemetry=_telemetry(lap_number=2, elapsed_time=90.05), scoring=_scoring(in_pits=False, lap_dist=5.0), session=_session()))
@@ -179,7 +181,7 @@ def test_feed_resets_pit_flag_for_next_lap():
 def test_feed_discards_buffer_on_lap_number_jump():
     """Session restart (5→1) or similar jumps must discard the buffer
     instead of emitting a bogus lap with stale/invalid data."""
-    parser = LapParser()
+    parser = LapParser(late_window_seconds=0)
     # Feed some frames for "lap 5"
     parser.feed(Frame(telemetry=_telemetry(lap_number=5, elapsed_time=0.0), scoring=_scoring(), session=_session()))
     parser.feed(Frame(telemetry=_telemetry(lap_number=5, elapsed_time=45.0), scoring=_scoring(), session=_session()))
@@ -192,7 +194,7 @@ def test_feed_discards_buffer_on_lap_number_jump():
 
 def test_feed_discards_buffer_on_backward_jump():
     """Going from lap 3 to lap 1 (session reset) should not emit."""
-    parser = LapParser()
+    parser = LapParser(late_window_seconds=0)
     parser.feed(Frame(telemetry=_telemetry(lap_number=3, elapsed_time=200.0), scoring=_scoring(), session=_session()))
     result = parser.feed(
         Frame(telemetry=_telemetry(lap_number=1, elapsed_time=0.0), scoring=_scoring(last_lap_time=0.0), session=_session())
@@ -202,7 +204,7 @@ def test_feed_discards_buffer_on_backward_jump():
 
 def test_feed_emits_on_normal_increment_after_jump():
     """After a jump (which discards), a normal n→n+1 should still work."""
-    parser = LapParser()
+    parser = LapParser(late_window_seconds=0)
     # Start at lap 5
     parser.feed(Frame(telemetry=_telemetry(lap_number=5, elapsed_time=0.0), scoring=_scoring(), session=_session()))
     # Jump to lap 1 (discards)
@@ -231,7 +233,7 @@ def test_feed_emits_on_normal_increment_after_jump():
 # 1-frame shift, using real observed values (a 2-frame lag, matching the
 # first transition measured that day).
 def test_feed_attributes_boundary_lap_dist_to_completing_lap_not_new_one():
-    parser = LapParser()
+    parser = LapParser(late_window_seconds=0)
     parser.feed(Frame(
         telemetry=_telemetry(lap_number=27, elapsed_time=2170.15),
         scoring=_scoring(lap_dist=4075.04), session=_session(),
@@ -270,7 +272,7 @@ def test_feed_attributes_boundary_lap_dist_to_completing_lap_not_new_one():
 # (4 frames, transition 31->32) — proves the wait mechanism isn't
 # accidentally limited to small lags.
 def test_feed_waits_multiple_frames_for_larger_real_world_lag():
-    parser = LapParser()
+    parser = LapParser(late_window_seconds=0)
     parser.feed(Frame(telemetry=_telemetry(lap_number=31, elapsed_time=2466.07), scoring=_scoring(lap_dist=4065.92), session=_session()))
     # Boundary, then three more stale frames (real observed sequence for
     # this transition: lap_dist stays ~4080 for 4 frames after the flip).
@@ -294,7 +296,7 @@ def test_feed_finalizes_via_safety_cap_if_lap_dist_never_resets():
     """If lap_dist never drops (an anomaly beyond anything observed so
     far), the parser must still eventually finalize the lap rather than
     buffering forever — via _MAX_RESET_WAIT_FRAMES."""
-    parser = LapParser()
+    parser = LapParser(late_window_seconds=0)
     parser.feed(Frame(telemetry=_telemetry(lap_number=1, elapsed_time=0.0), scoring=_scoring(lap_dist=100.0), session=_session()))
     result = None
     elapsed = 1.0

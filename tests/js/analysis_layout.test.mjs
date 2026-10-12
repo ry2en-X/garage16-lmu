@@ -47,7 +47,8 @@ function assertRenderable(layout) {
 // ---------------------------------------------------------------- the standard layout
 const standard = defaultLayout();
 assertRenderable(standard);
-assert.deepEqual(types(standard), ["summary", "delta", "corners", "chart:speed", "chart:throttle", "chart:brake", "trackmap", "cursor_table", "physics"]);
+// V0.9.3: coaching and the track-limits/events window appended (earlier windows keep their place)
+assert.deepEqual(types(standard), ["summary", "delta", "corners", "chart:speed", "chart:throttle", "chart:brake", "trackmap", "cursor_table", "physics", "coaching", "events", "line", "corner_detail"]);
 assert.equal(standard.widgets.find((w) => w.type === "trackmap").mode, "delta", "the track map defaults to Delta");
 assert.deepEqual(standard.colors, { a: DEFAULT_COLORS.a, b: DEFAULT_COLORS.b, delta: DEFAULT_COLORS.delta });
 assert.notEqual(defaultLayout(), defaultLayout(), "every call is a fresh object (nobody can mutate the standard)");

@@ -225,6 +225,8 @@ export function createChart(state, spec) {
         ctx.strokeStyle = series.color;
         ctx.lineWidth = spec.kind === "delta" ? 1.6 : 1.5;
         ctx.lineJoin = "round";
+        // V0.9.4: a line style per lap (Lap 3 dashed, Lap 4 dotted)
+        if (ctx.setLineDash) ctx.setLineDash(series.dash || []);
         let penDown = false;
         let lastY = 0;
         ctx.beginPath();
@@ -263,6 +265,7 @@ export function createChart(state, spec) {
           ctx.stroke();
         }
       }
+      if (ctx.setLineDash) ctx.setLineDash([]);
       ctx.restore();
     };
     const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;

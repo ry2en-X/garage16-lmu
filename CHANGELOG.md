@@ -1,5 +1,327 @@
 # Changelog
 
+## V0.9.4 — Two dashboards: LapTime Analyzer and Stint Analyzer
+
+Server `0.9.4`; Desktop-Client `0.9.4`. **Database migration `0015`** (automatic at start,
+additive, reversible: `alembic downgrade 0014`; changes no existing value and no lap's validity).
+**No new dependency.** Includes every fix of V0.9.3.1. Clients 0.8.x–0.9.3.1 keep working; client
+0.9.4 also works against a 0.9.3.1, 0.9.3 or 0.9.2 server (metadata level by level).
+
+### Two dashboards
+- The analysis is split into the **LapTime Analyzer** (`#/analysis` — one lap against another)
+  and the **Stint Analyzer** (`#/stints` — whole sessions); `#/sessions` opens the Stint Analyzer.
+  Menu, desktop client buttons (`LapTime Analyzer`, `Stint Analyzer`, `Analyse last lap`) and the
+  analysis window (`--view stints`) follow.
+
+### LapTime Analyzer
+- **Racing lines** window: both laps' driven lines drawn equally on a map that zooms down to a
+  single corner (wheel, buttons, two-finger pinch around the pinch centre, drag), car-width band,
+  scale bar, per lap and corner braking point ▲, turn-in ◆ (estimated from the steering), apex ●,
+  full throttle ▼; corner chips zoom to a corner and select it; "follow the cursor" / "show what
+  the charts show"; a stretch from–to in metres. Zoomed into less than ~600 m, the lines are
+  reloaded at 0.5 m (`GET /telemetry/analysis/line`, cached with ETag). At the cursor: Lap 2's
+  lateral distance from Lap 1's line, inside of the nearest corner = + (`map.offset_b`,
+  `map.side`; pair channel `line_offset` for a chart). The static map is cached; a cursor move
+  only draws the dots.
+- **Corner in detail**: time per phase (braking, turn-in, apex, exit, straight after) with
+  boundaries common to both laps, so the phases add up exactly to the corner's delta; braking
+  point, speed at braking, braking distance, maximum brake and pressure, peak deceleration,
+  turn-in (estimate), trail braking, coasting, minimum speed, apex, back on throttle, 50 % and full
+  throttle, exit speed, acceleration after the apex — both laps and the difference; the line
+  distance at the apex; the same corner on the driver's earlier valid laps with this car
+  (`GET /telemetry/analysis/corner-history`, from the database).
+- **Coach** grouped by phase with each phase's measured time; "brake later" only when the
+  reference lap is not slower at the apex and on the exit; with earlier laps: "in 4 of your last 5
+  laps you braked later than here".
+- **Sectors of the session**: every lap's sectors, the fastest driven sector of the session and of
+  all your laps here, this lap's potential per sector (`GET /telemetry/analysis/lap-sectors`;
+  the sum of best sectors is labelled as calculated).
+- **Lap 3 / Lap 4** over the comparison (`c=` / `d=` in the URL, `extra=` on `/compare` and
+  `/line`): dashed / dotted in every chart, their delta to the reference in the delta window, their
+  lines on the map. The delta window can show the elapsed time instead.
+- `ANALYSIS_CACHE_VERSION` 5.
+
+### Stint Analyzer
+- Sessions split into **stints** at pit stops (pit lane + standing still ≥ 1 s, LMU's pit stop
+  counter) and — for laps without pit lane data — where new tyres (tread rising), refuelling (fuel
+  rising) or another compound were **measured**; the reason is listed per stint. **Tyre sets**
+  with their age in laps.
+- **Lap flags from measured values**: invalid, out-lap, in-lap, pit stop, traffic (≥ 10 % of the
+  lap < 1 s behind a car, LMU's time gap), blue flag, race start, wet, damage, laps missing,
+  outlier (threshold adjustable). Filters switch what counts as clean.
+- Pace: rolling average 3/5/10, best/median/mean, spread and MAD, best N in a row, thirds, trend.
+  Tyres: degradation per stint (Theil–Sen, tyres and fuel together); tyres and fuel separated only
+  with laps of different fuel at the same tyre age (several stints) — otherwise the page says why.
+  Fuel and energy: per lap, per sector, by engine map, laps left, target consumption to the end of
+  the session with an adjustable safety margin. Vehicle state: tyre temperature/pressure/tread,
+  fuel load, track temperature against lap time as correlations ("not a cause"), damage. Traffic.
+  Pit stops: pit lane and standing time, fuel added, tyres changed, compound (measured) and the
+  time lost (estimate, needs 3 clean laps). Forecast of the last stint with a range (≥ 5 clean
+  laps). **Strategy calculator** with measured values and the admin's **race rule sets**
+  (Admin → Race rules; `race_rule_sets`, `GET/POST/PUT/DELETE /admin/rule-sets`,
+  `GET /telemetry/analysis/stints/rule-sets`). Stint comparison, **you and your team mates**
+  (valid laps only). Another driver's session shows their valid laps only.
+- Endpoints: `GET /telemetry/analysis/stints/sessions|session|drivers|rule-sets` — database only.
+
+### Fixes
+- **Valid LMU laps were marked invalid** when LMU wrote the finished lap's time a few frames
+  after the client finalised the lap: the lap went to the server with the previous lap's time
+  (or none) and failed "telemetry duration does not match claimed lap_time". The client now
+  recognises such a time (it does not fit the measured duration, or it is exactly the previous
+  lap's) and takes LMU's time as soon as LMU reports it in the 6 s late window
+  (`client/telemetry/parser.py` `_maybe_correct_lap_time`). Only LMU's own time is ever sent;
+  `lap_report.lap_time_corrected` / `lap_time_unconfirmed` record what happened (kept in
+  `laps.check_inputs`).
+- The Stint Analyzer shows under every invalid lap why the server did not count it.
+
+### Icon
+- An angular "16" (every corner cut at 45°) in Garage16 red: Garage16.exe (Explorer, taskbar,
+  Alt+Tab), the client window, the setup dialog, the installer and the website's favicon
+  (`client/assets/`, `packaging/garage16.ico`, `web/favicon.*`, `client/icon.py`).
+
+### Client 0.9.4 and stored figures
+- Per sample: `in_pits`, `place`, `flag`, `time_gap_ahead`, `time_gap_behind` (appended to the
+  extended columns). Per lap: `lap_context` (pit stops, place, compound index/name front/rear,
+  tank size, highest dent severity, overheating, detached part, time left, max laps) — only what
+  LMU reports; nothing guessed. New metadata level (0.9.4 → 0.9.3.1 → 0.9.3 → 0.9.2).
+- Per-lap figures (insights v3): pit lane, measured refuelling and tyre change, traffic and blue
+  flag shares, positions gained/lost, fuel per sector, energy left, engine map, the lap's corners.
+  `python -m scripts.revalidate_laps --apply` computes them for stored laps (validity unchanged).
+- `scripts/track_limits_probe.py` also records the Stint Analyzer's signals
+  (docs/LMU_VERIFICATION_PROTOCOL.md, point (w)).
+
+## V0.9.3.1 — Correction release: track limits in tiers, laps can be judged again
+
+Server `0.9.3.1`; Desktop-Client `0.9.3.1`. **Database migration `0014`** (automatic at start,
+reversible: `alembic downgrade 0013`; changes no lap's validity). **No new dependency.** Clients
+0.8.x–0.9.3 keep working; client 0.9.3.1 also works against a 0.9.3 or 0.9.2 server.
+
+Why: an external code review of V0.9.3 and research into LMU's documented behaviour
+(docs/LMU_VERIFICATION_PROTOCOL.md, V0.9.3.1) showed that V0.9.3 rejected laps LMU itself
+accepts. LMU detects track limits by track width, scores an offence 2–5 s after rejoining by
+the time gained, and keeps the score in "steps" that are only a fraction of a warning point.
+
+### Track limits: LMU verdict, Garage16 rules and measurements are kept apart
+- Every rule now has a **tier** (`server/track_limits.py` `RULES`): **lmu** (LMU's own
+  `mLapInvalidated` / `mCountLapFlag` — invalidates), **rule** (pit lane, no lap time,
+  implausible sectors — invalidates), **heuristic** (step counter rose, four wheels off, beyond
+  the edge, shorter than usual, penalty, late reports — **review only**). Every stored finding
+  carries its tier; the admin page shows the rule table with effect and whether the meaning
+  is confirmed (`GET /admin/track-limits/rules`).
+- **A rising step counter no longer invalidates a lap** (regression of V0.9.3). The finding
+  shows the steps and, with LMU's ratio, the warning points (`steps / steps per point`) and
+  whether the rise was at penalty level.
+- **Four wheels on grass/dirt/gravel no longer invalidate** on their own (no time gained = no
+  offence for LMU).
+- A heuristic can be made to invalidate once real recordings confirm it:
+  `LMU_GARAGE_TRACK_LIMITS_INVALIDATING` (comma-separated codes; default empty). LMU's own
+  verdict cannot be weakened this way.
+
+### Reports after the finish line reach the right lap
+- **Client:** a finished lap is held for **6 s after the line** (`client/telemetry/lap_verdict.py`
+  `LateWindow`) and records, change by change, what LMU reports meanwhile: the step counter, the
+  finished lap's time (`mLastLapTime`), penalties, and when the new lap first left the track. Never
+  held longer than 30 s of wall-clock time; saved at once when the session or the program ends.
+- **Attribution** (`attribute_rise`): a rise < 1 s after the line belongs to the previous lap;
+  < 6 s to the previous lap only if the new lap shows no excursion before it (and the signals to
+  see one exist); otherwise it is **ambiguous and both laps go to review**; later it belongs to
+  the current lap.
+- **Server, for every client:** a step rise in the first seconds of lap N+1 gives lap N a
+  `late_track_limits` finding (`server/lap_check.py` `link_neighbours`, in whichever order the
+  two laps arrive; stored in `laps.validation.linked`, kept when re-judging).
+- LMU replacing the lap time by a value <= 0 after the line (`game_last_lap_time_withdrawn`) is a
+  review, not a rejection, until protocol (s) confirms what it means.
+
+### Client and server decide by the same rules
+- The client no longer rejects a lap for track-limits steps or penalties. It sends its **reason
+  codes** (`lap_report.reasons`); a test pins the client's table to the server's.
+- A reason the server checks itself from the file (LMU's flags, the step counter) is left to
+  that check; the others (pit lane, no time, sectors) are taken over with the server's severity.
+- A **0.9.3 client** rejected laps for steps without saying why. The server explains such a
+  rejection from the client's game summary: only steps → **review** (`client_invalid_unexplained`,
+  a pit-lane visit cannot be ruled out); LMU's flags or sectors → invalid; nothing → invalid as before.
+- Uploader: steps down one metadata level at a time for older servers (0.9.3.1 → 0.9.3 → 0.9.2).
+
+### Stored laps can be judged again (no new upload)
+- `laps.check_inputs` (migration 0014) keeps what the verdict depends on beyond the telemetry
+  file: client verdict and reasons, game summary, tail samples, late window, LMU's ratios. For
+  existing laps the migration recovers what is still there (the 0.9.3 client's summary from the
+  stored verdict); nothing changes validity.
+- `scripts/revalidate_laps.py` reports per transition — valid → invalid, **invalid → valid
+  (restorable)**, kept (admin/report decision), valid → review, admin decided. `--apply` stores
+  verdicts only; `--apply --restore` lets restorable laps count again (they go to the review
+  queue); `--apply --update-validity` applies rejections. Laps an admin decided and laps rejected
+  by an admin or a report are never changed.
+
+### Car identity
+- **Cut model names:** `mVehicleModel` is 30 bytes, LMU cuts names after 29 characters. Known
+  cases are repaired (`MODEL_NAME_FIXES`: Aston Martin Vantage AMR LMGT3, Chevrolet Corvette Z06
+  LMGT3.R, Lamborghini Huracan LMGT3 Evo2); any other name of that length is marked "…". The
+  client marks the cut where it still can see it (before stripping — a name cut right after a
+  space would otherwise look complete). Identity rules version 2: run
+  `scripts/car_identity_report.py` (dry run, then `--apply`) for stored laps.
+- **Safer alias learning:** a pair seen only in grid lists (matched by slot id, so a torn read
+  or a reused slot could pair the wrong strings) is used after **two** separate uploads report
+  it; the lap's own car is trusted at once. Stored aliases are repaired with today's rules.
+- **What to check by hand:** report, PC probe and admin page list identities with a cut name,
+  with veh_filenames of different models, or with laps in different classes. Nothing is merged
+  or split automatically; `SPEC_RULES` stays empty until real data needs it.
+
+### Theoretical best
+- **Car model required** (`422` without it) and **track conditions are not mixed silently**:
+  each lap stores its wet share (`lap_stats.conditions`, from `mSurfaceType` = wet); laps are
+  grouped dry / partly wet / wet / unknown. By default the group of the fastest lap is used; the
+  others are counted and named; `conditions=all` mixes on request and says so. Grip level and
+  track temperature are reported as a spread. Labelled "calculated" everywhere.
+
+### Tools, docs, tests
+- `scripts/track_limits_probe.py` (PC): writes every frame of the relevant LMU signals to CSV
+  and prints every change with the time since the finish line — the instrument for the open
+  points (r)–(v) of the verification protocol.
+- Versions may have four parts (`0.9.3.1`); the minimum-client check compares all four.
+- 70 new tests (`tests/test_v0931_*.py`, plus jsdom checks in `tests/js/v093_analysis.test.mjs`), among them the regressions the review asked for: steps
+  rise but the lap stays valid, gravel without gain, late reports, identical/cut model names.
+- Measured on a synthetic 15,000-sample lap: the track-limits check takes ~3.3 ms instead of
+  ~1.7 ms per upload (the file read dominates at ~20 ms); the client's late window costs ~3 µs
+  per frame for 6 s per lap.
+
+## V0.9.3 — A car is its model, track limits checked by the server, much more analysis
+
+Server `0.9.3`; Desktop-Client `0.9.3`. **Database migration `0013`** (automatic at start,
+reversible — see "Upgrade"). **No new dependency** anywhere (server, clients, web). Clients
+0.8.x–0.9.2 keep working; client 0.9.3 also works against a 0.9.2 server.
+
+### A car is its model, not its livery
+- **The bug:** `laps.car_model` held LMU's raw `veh_filename`, which is per livery — a real
+  recording shows `397_25_499P` for "499P Custom Team 2025 #397" (car number, season, model). So
+  the Penske #6 and #3 were two different cars in every leaderboard, record and comparison.
+- **Now** (`server/car_identity.py`): the identity is LMU's own **model name**
+  (`TelemInfoV01.mVehicleModel`, "brand & model", recorded by client 0.9.3); otherwise a model
+  name **learned from the game**; otherwise the `veh_filename` without the car number, season
+  kept ("499P (2025)"). Different specifications stay apart whenever LMU names them differently
+  (an "Evo", a new aero version) — that is what LMU's model name exists for.
+- **Learned automatically, never entered by hand:** every 0.9.3 upload also reports the
+  `(veh_filename, model)` of every car the client saw in the session (read every ~10 s, a few
+  strings per car). The server stores these aliases (`car_aliases`) and moves laps of older
+  clients to the model name on its own. If the game ever reports two models for one group, the
+  group is marked as a conflict, never used for grouping, and anything it moved goes back.
+- Nothing is lost: each lap keeps what LMU sent (`car_model_raw`, `car_vehicle_model`) and how
+  its identity was decided (`car_identity_source`). `scripts/car_identity_report.py` shows the
+  identity of every combination and what the current rules would make of it (dry run; `--apply`).
+- `scripts/car_identity_probe.py` (on the PC, LMU running) lists every car of the session as LMU
+  reports it and as Garage16 would group it — the evidence for any future specification rule
+  (`SPEC_RULES`, deliberately empty until real data needs it).
+- The record lock (PostgreSQL) is now keyed by the car model — two liveries of one model racing
+  for the same record were not serialised before.
+
+### Track limits: decided by the server, from the telemetry, with reasons
+- **The bug:** validity came from one client bit, and `count_lap_flag` was read with the wrong
+  meaning — 1 means "count the lap but **not** its time" (rFactor 2 header; normal laps show 2)
+  and was accepted. A real track-limits lap was only rejected by accident (sector fallback).
+- **Now** (`server/track_limits.py`) the server checks the uploaded file itself with independent
+  signals and keeps every finding with **where** on the lap it happened and **which signal** said
+  so (`laps.validation`):
+  - **invalid:** LMU's `lap_invalidated` set during the lap · `count_lap_flag` ≠ 2 at the end of
+    the lap · LMU track-limits points added · all four wheels on grass/dirt/gravel at the same
+    time (≥ 3 samples) · the client rejected the lap (pit lane) — the old AND with the client stays
+  - **review** (counts until an admin decides): the car's centre clearly beyond LMU's
+    approximate track edge · the lap clearly shorter than the layout's usual driven distance
+    (possible shortcut) · a penalty during the lap
+  - **info:** two or three wheels off; an implausible signal (ignored for that lap, never used to
+    strike a lap); a lap without such signals (old client: "not verifiable", the client decides)
+- The edges of the lap are handled explicitly: the first second (LMU may clear last lap's flags
+  late) and the samples recorded after the lap-number flip (`tail_samples`, now sent by the
+  client) are left out.
+- The client applies the same corrected rules for its own opinion (`client/telemetry/parser.py`).
+- **Admin → Track-limits review**: the queue of review laps with every finding; "Lap counts" /
+  "Invalidate lap" (`GET /admin/review`, `POST /admin/laps/{id}/review`).
+- `scripts/revalidate_laps.py` re-checks stored laps (dry run by default; `--apply` stores
+  verdicts and figures without changing validity — flagged laps go to the review queue;
+  `--update-validity` only on request).
+- The driver sees why: the lap list's `invalid_reason` names the finding and its distance; the
+  analysis window **Track limits & events** lists all of them; the track map marks them.
+
+### Much more analysis data
+- **New derived channels** (`server/telemetry_channels.py`): damper velocity per wheel (time
+  derivative of the travel, **bump = +**, the sign decided per lap from the braking dive),
+  heave/roll/pitch from the suspension, rake, tyre tread **inner/middle/outer** per wheel (from
+  LMU's left/centre/right by wheel side), carcass and inner-layer temperature, **wheel slip**
+  (spin +, lock −; rolling radius estimated per lap, convention-free), wheels off track, wheels on
+  a kerb, distance to the track edge, track-limits points, lap invalidated, combined G.
+- **Histograms** (`GET /telemetry/analysis/distribution`): share of the lap's **time** per bin,
+  both laps on the same bins. Window **Damper histograms** (bump/rebound and low/high-speed shares
+  at 25 mm/s) and window **Histogram** for any channel (e.g. time per gear).
+- **Lap events** (`GET /telemetry/analysis/events`): the track-limits findings plus measured
+  **lock-ups and wheelspin** per wheel, each with its place on the lap.
+- **Window "Tyres & brakes"**: lap averages (from the stored per-lap figures — no request) and
+  values at the cursor (loaded on demand).
+- **Window "Where to find time"**: the corners where Lap 1 loses most, with plain hints built from
+  measured values — later braking, more minimum speed, earlier full throttle, faster exit,
+  over-braking, wheel lock-ups. Every sentence names the two values it compares.
+- Standard layout: + "Where to find time" and "Track limits & events" (appended, so every earlier
+  window keeps its place). The heavier windows are one click away in "Customise view".
+
+### Per-lap figures, theoretical best, sessions
+- At upload the server stores compact figures per lap (`laps.lap_stats`, ~1–4 KB): fuel, virtual
+  energy and tyre use, full-throttle/braking/coasting/trail-braking shares, gear changes, peak G,
+  tyre temperatures/pressures, hottest brake, session grip level and fixed setup — and a **time
+  profile** every 50 m of the game's lap distance.
+- **Theoretical best** (`GET /telemetry/analysis/theoretical-best`): the fastest time over every
+  50 m stretch of your valid laps, summed — and from which laps they come; plus the simpler sector
+  ideal. Segment times of a lap add up exactly to its lap time, so the ideal is a sum of really
+  driven stretches.
+- **New page "My sessions"** (`GET /telemetry/analysis/sessions`): consecutive laps grouped into
+  stints with best, median, spread of the clean laps (without laps > 107 % of the median), laps
+  within 0.5 s, the lap-time trend over the stint, fuel/energy/wear per lap, a bar per lap (click =
+  analyse) and the theoretical best on request. From the database only — no lap file is opened.
+
+### Client 0.9.3
+- Records four values per sample from the player's scoring struct (`path_lateral`, `track_edge`,
+  `count_lap_flag`, `num_penalties`, appended after every existing column), LMU's model name, the
+  session's grid every ~10 s, `tail_samples`, the game's own lap state summary and the session's
+  grip level / fixed setup / track-limits settings (the 13 bytes LMU named in `ScoringInfoV01`'s
+  reserve; struct size unchanged).
+- Sends the new fields; a 0.9.2 server answers "Extra inputs are not permitted" and the client
+  uploads the same lap once more without them (remembered for the run) — nothing is rejected.
+
+### Efficiency (measured on a synthetic 15,000-sample lap, not real LMU data)
+- The upload still reads the lap file **once** for all checks (52 of 200 columns):
+  ~23 ms instead of ~7 ms (validation only) per upload.
+- Damper histograms of four wheels from a cold file: ~23 ms; lap events: ~14 ms; theoretical best
+  over 200 laps: ~4 ms (database only). Histogram/event answers are a few KB and cached like
+  `/compare` (ETag; `ANALYSIS_CACHE_VERSION = 4`).
+
+### Open source and code reuse
+Reviewed (licences actually read, commits pinned): uPlot, Chart.js, SortableJS (MIT — not taken:
+the existing engine/editor already do this, no measurable gain), Apache Arrow (already used),
+pyLMUSharedMemory (MIT — **facts** about LMU's fields taken, no code), TinyPedal (GPL-3 — only
+read), oasis4/LMU-telemetry and alelosbrigia/LMU-telemetry (**non-commercial only — excluded**),
+cfcata03/LMU-Dash (MIT — nothing better than what exists). No third-party code was copied; no
+dependency was added. Details: `docs/OPEN_SOURCE_REVIEW_V0_9_3.md`, `THIRD_PARTY_NOTICES.md`.
+
+### Upgrade
+Migration `0013` adds the identity, verdict and figures columns and the `car_aliases` table, and
+rewrites existing `car_model` values to "model (season)" while keeping the raw value; the
+downgrade restores them byte for byte. Step-by-step with the NAS paths: `docs/ADMIN_GUIDE.md`,
+"Neu in V0.9.3". The server image now contains the two new scripts.
+
+### Verified
+- Rules, edges and defensive paths of the track-limits check; identity derivation, alias learning
+  and conflict undo; per-lap figures, theoretical best and sessions; damper sign recovery for both
+  raw signs; a wheel locked on purpose found at its place; tread zones by wheel side — unit tests.
+- End to end through the real client Uploader and the real API: invalid / review / clean laps,
+  admin review, two car numbers on one leaderboard, regrouping of old laps, the uploader's fallback
+  for an old server, histogram/events/theoretical-best/sessions endpoints, the report and
+  re-check scripts — `tests/test_v093_*.py`.
+- Migration `0013` on real rows (upgrade regroups, downgrade restores) on SQLite; the new windows,
+  the sessions page, layout rules and German texts in jsdom — `tests/js/v093_analysis.test.mjs`.
+
+### Not verified (needs real LMU on Windows — `docs/LMU_VERIFICATION_PROTOCOL.md` (m)–(q))
+What LMU actually reports in `lap_invalidated`, `track_limits_steps`, `surface_type`,
+`path_lateral`/`track_edge` and `mVehicleModel` during real track-limits situations and for real
+specification variants; the 13 named `ScoringInfoV01` bytes. Every one of these signals is
+range-checked, and an implausible one is ignored rather than trusted.
+
 ## V0.9.2 — Analysis app on the PC: "Client" or "Client + analysis app"
 
 Server `0.9.2`; Desktop-Client `0.9.2`. **No migration** (Alembic unchanged). New dependency
@@ -16,14 +338,9 @@ server and plain client have none. Everything is additive; clients 0.8.x–0.9.1
   existing installation switches the edition; login and recorded laps stay (they live outside the
   program folder). The installer clears only its own `_internal` folder first, so nothing of the
   analysis window is left behind when switching back.
-- **GitHub**: the `build-client` workflow builds both editions (matrix). **Actions → build-client →
-  Run workflow** (or a pushed `client-v*` tag) publishes a **GitHub release with all four files**,
-  tagged `client-v<CLIENT_VERSION>`, marked *Latest*, with a description saying which download is
-  which — drivers download from *Releases → Latest* and double-click; no terminal anywhere. Re-running
-  replaces that release's files. The README starts with this download section.
-- `packaging/build_windows.ps1` also finds Inno Setup when it is installed per user
-  (`%LOCALAPPDATA%\Programs\Inno Setup 6`), not only under Program Files (found on the first real
-  Windows build).
+- **GitHub**: the `build-client` workflow builds both editions (matrix). Pushing a tag
+  `client-v0.9.2` additionally creates a **GitHub release with all four files** and a description
+  saying which download is which.
 - **Website**: a new **Download** page (menu, and a button on the start page) shows both editions
   **side by side** — "Client" | "Client + analysis app" — with what each does and what the app
   needs. The links come from the server: `LMU_GARAGE_CLIENT_DOWNLOAD_URL` (existing) and the new
@@ -71,14 +388,11 @@ server and plain client have none. Everything is additive; clients 0.8.x–0.9.1
 - Download page in a real Chromium, English and German, desktop and phone: both cards side by side
   (stacked on the phone), no sideways scrolling.
 
-- **Real Windows build (Windows 11, Python 3.12):** both editions built with
-  `build_windows.ps1`; the packaged analysis edition's `--analysis-selftest` loaded pythonnet and the
-  WebView2 assemblies and reported "Analysis window: ready" (WebView2 runtime 154); the plain client
-  reported that it opens the browser. Installers built after the Inno Setup path fix.
-
 ### Not verified
-Implemented but requires a real run: the window on WebView2 itself (opening it, signing in), the
-Inno Setup edition switch, and the GitHub workflow/release job (first run on GitHub). The repository is private: friends cannot download release files from
+Implemented but requires a real Windows run: the Windows build of the analysis edition (pythonnet
++ WebView2 in the PyInstaller bundle — the CI build's `--analysis-selftest` is its first real check),
+the window on WebView2 itself, the Inno Setup edition switch, and the GitHub release job (first run
+on the first `client-v*` tag). The repository is private: friends cannot download release files from
 it — put the two setup files on the webspace (`download.garage16.de`) and set the two `.env` links.
 
 ## V0.9.1 — Analysis: compare in two clicks, your own layout, much less data moved

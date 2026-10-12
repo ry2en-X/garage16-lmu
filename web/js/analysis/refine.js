@@ -77,8 +77,13 @@ export function isUsable(response, requested) {
     if (g.start > requested.start + g.step || g.start + g.step * (n - 1) < requested.end - g.step * 2) return false;
     if (!Array.isArray(response.time && response.time.a) || response.time.a.length !== n) return false;
     if (response.delta && response.delta.length !== n) return false;
+    // V0.9.4: Lap 3 / Lap 4 drawn over the pair — same grid, or the answer is not used
+    for (const side of requested.extraSides || []) {
+      if (!Array.isArray(response.time[side]) || response.time[side].length !== n) return false;
+    }
+    for (const series of Object.values(response.extra_delta || {})) if (series && series.length !== n) return false;
     for (const entry of Object.values(response.channels || {})) {
-      for (const side of ["a", "b"]) if (entry[side] && entry[side].length !== n) return false;
+      for (const side of ["a", "b", "c", "d"]) if (entry[side] && entry[side].length !== n) return false;
     }
     return !!response.laps && !!response.laps.a;
   } catch {

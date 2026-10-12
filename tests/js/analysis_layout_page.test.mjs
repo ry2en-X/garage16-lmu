@@ -122,6 +122,13 @@ globalThis.fetch = async (url) => {
     return answer ? json(answer) : json({ detail: "unexpected" }, 500);
   }
   if (p === "/telemetry/analysis/quick") return replies.quick ? json(replies.quick) : json({ detail: "unexpected" }, 500);
+  // V0.9.3: the events window (one small request per opened comparison)
+  if (p === "/telemetry/analysis/events") {
+    return json({
+      track_limits: { a: { status: "valid", findings: [], signals: ["lap_invalidated", "client"], review_status: null }, b: u.searchParams.get("lap_b") ? { status: "valid", findings: [], signals: ["client"], review_status: null } : null },
+      wheels: { a: [], b: u.searchParams.get("lap_b") ? [] : null },
+    });
+  }
   const lapMatch = p.match(/^\/telemetry\/analysis\/laps\/(\d+)$/);
   if (lapMatch) {
     const answer = replies.lap[lapMatch[1]];
@@ -164,7 +171,7 @@ localStorage.setItem("lmu_garage_session", JSON.stringify({ driverId: 1, display
 // ================================================================ first open: the standard layout
 calls.length = 0;
 let app = await open();
-assert.deepEqual(order(app), ["summary", "delta", "corners", "chart:speed", "chart:throttle", "chart:brake", "trackmap", "cursor_table", "physics"]);
+assert.deepEqual(order(app), ["summary", "delta", "corners", "chart:speed", "chart:throttle", "chart:brake", "trackmap", "cursor_table", "physics", "coaching", "events", "line", "corner_detail"]);
 let cu = compareCalls();
 assert.equal(cu.length, 1, "one request opens the analysis");
 assert.equal(cu[0].searchParams.get("channels"), "speed,throttle,brake", "only what the standard layout shows is requested");
@@ -287,7 +294,7 @@ assert.ok(drawn.drawImage > drawsBefore, "the map redraws for the same cursor");
 const customize = app.querySelector(".analysis-customize");
 customize.click();
 assert.ok(app.querySelector("[data-editor]"), "'Customise view' opens the editor");
-assert.equal(app.querySelectorAll(".awin__handle").length, 9, "every window gets a drag handle in edit mode");
+assert.equal(app.querySelectorAll(".awin__handle").length, 13, "every window gets a drag handle in edit mode");
 assert.equal(text(customize), "Done");
 assert.equal(state.getCursor(), 30, "the shared state survives a rebuild");
 
@@ -296,7 +303,7 @@ const idOf = (key) => [...app.querySelectorAll(".awin")].find((w) => (w.getAttri
 calls.length = 0;
 app.querySelector(`[data-widget="${idOf("speed")}"] .awin__up`).click();
 assert.deepEqual(order(app).slice(0, 4), ["summary", "delta", "chart:speed", "corners"]);
-assert.deepEqual(stored().layout.map((w) => w.position), [0, 1, 2, 3, 4, 5, 6, 7, 8], "positions stored");
+assert.deepEqual(stored().layout.map((w) => w.position), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], "positions stored");
 assert.equal(stored().layout[2].channel, "speed", "the new order is stored");
 assert.equal(compareCalls().length, 0, "reordering needs no data");
 app.querySelector(`[data-widget="${idOf("speed")}"] .awin__down`).click();
@@ -313,7 +320,7 @@ assert.ok(app.querySelector(".awin--dragging"), "the dragged window is marked");
 handle(speedId).dispatchEvent(mouse("pointermove", { clientX: 30, clientY: 510 }));   // y = 510 -> window index 5
 assert.equal(app.querySelectorAll(".awin--drop-target").length, 1, "the drop target is marked");
 handle(speedId).dispatchEvent(mouse("pointerup", { clientX: 30, clientY: 510 }));
-assert.deepEqual(order(app), ["summary", "delta", "corners", "chart:throttle", "chart:brake", "chart:speed", "trackmap", "cursor_table", "physics"], "dropped on the 6th window: speed moves there");
+assert.deepEqual(order(app), ["summary", "delta", "corners", "chart:throttle", "chart:brake", "chart:speed", "trackmap", "cursor_table", "physics", "coaching", "events", "line", "corner_detail"], "dropped on the 6th window: speed moves there");
 assert.equal(stored().layout[5].channel, "speed");
 // cancelling or dropping on itself changes nothing
 speedId = idOf("speed");
@@ -410,7 +417,7 @@ app.querySelector(".analysis-customize").click();
 calls.length = 0;
 app.querySelector(".editor__reset").click();
 await settle(60);
-assert.deepEqual(order(app), ["summary", "delta", "corners", "chart:speed", "chart:throttle", "chart:brake", "trackmap", "cursor_table", "physics"], "'Restore standard layout'");
+assert.deepEqual(order(app), ["summary", "delta", "corners", "chart:speed", "chart:throttle", "chart:brake", "trackmap", "cursor_table", "physics", "coaching", "events", "line", "corner_detail"], "'Restore standard layout'");
 assert.equal(localStorage.getItem(LAYOUT_KEY), null);
 assert.equal(localStorage.getItem("some_other_key"), "keep me");
 assert.equal(localStorage.getItem("lmu_garage_session") !== null, true, "the sign-in is untouched");
@@ -761,7 +768,7 @@ assert.equal(dialog(), null);
 assert.equal(window.location.hash, "#/analysis?a=1&b=8&note=already_best_team_best");
 app = await open(window.location.hash);
 assert.ok(text(app).includes("You already are Team Best — compared with the next-fastest team lap."), "the analysis explains why this lap was picked");
-assert.deepEqual(parseAnalysisExtras("#/analysis?a=1&b=8&note=<script>"), { quick: null, ref: null, track: null, model: null, note: null }, "the note parameter is whitelisted");
+assert.deepEqual(parseAnalysisExtras("#/analysis?a=1&b=8&note=<script>"), { laps: [], quick: null, ref: null, track: null, model: null, note: null }, "the note parameter is whitelisted");
 
 // server trouble: a safe sentence, never the raw error
 const realFetch = globalThis.fetch;

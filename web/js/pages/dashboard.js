@@ -166,14 +166,21 @@ function renderLapsTable(laps) {
   const rows = laps.map((lap) =>
     el("tr", {}, [
       el("td", {}, lap.track_name),
-      el("td", {}, lap.car_name),
+      el("td", { title: lap.car_name }, lap.car_model || lap.car_name),
       el("td", {}, `#${lap.lap_number}`),
       el("td", {}, el("span", { class: "lap-time" }, formatLapTime(lap.lap_time))),
       el(
         "td",
         {},
         [
-          el("span", { class: `tag ${lap.is_valid ? "tag--valid" : "tag--invalid"}` }, lap.is_valid ? t("valid") : t("invalid")),
+          el("span", {
+            class: `tag ${lap.is_valid ? "tag--valid" : "tag--invalid"}`,
+            title: !lap.is_valid && lap.invalid_reason ? lap.invalid_reason.join(" · ") : null,
+          }, lap.is_valid ? t("valid") : t("invalid")),
+          // V0.9.3: the track-limits check left this lap to an admin; it counts until then
+          lap.review_status === "pending"
+            ? el("span", { class: "tag tag--basic", style: "margin-left:6px;", title: t("The automatic track-limits check asked an admin to look at this lap. It counts until then.") }, t("under review"))
+            : null,
           lap.data_level === "basic"
             ? el("span", { class: "tag tag--basic", style: "margin-left:6px;", title: t("Recorded by a client older than 0.9.0 — only the basic channels in the analysis") }, t("basic data"))
             : null,

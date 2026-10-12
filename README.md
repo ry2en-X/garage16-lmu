@@ -5,28 +5,8 @@ desktop client reads shared memory and uploads laps, a FastAPI server
 stores and evaluates them (PR/WR/TEAM_BEST), a Discord bot announces
 records, and a static web app shows leaderboards/teams.
 
-**Current version: server 0.9.2 / desktop client 0.9.2.** The instance runs at **https://garage16.de**. See `CHANGELOG.md` for what changed and
+**Current version: server 0.9.4 / desktop client 0.9.4.** The instance runs at **https://garage16.de**. See `CHANGELOG.md` for what changed and
 `docs/` for deployment, privacy, and LMU-verification protocols.
-
-## Download the client (drivers — no terminal needed)
-
-Open **[Releases → Latest](../../releases/latest)**, download **one** file, double-click it:
-
-| File | What you get |
-|---|---|
-| **`Garage16-Client-Setup.exe`** | **Client** — records your Le Mans Ultimate laps and uploads them; the analysis opens in your browser |
-| **`Garage16-Client-Analysis-Setup.exe`** | **Client + analysis app** — the same, plus the analysis in its own window (needs the Microsoft Edge WebView2 Runtime, already part of Windows 11 and updated Windows 10) |
-
-Windows 10/11, no Python, no admin rights. Updating or switching later: run the newer or the other
-setup over the existing installation — login and laps stay. Windows SmartScreen may warn about the
-unsigned app: *More info → Run anyway*. Then follow **[docs/FRIENDS_GUIDE.md](docs/FRIENDS_GUIDE.md)**
-(German). *Deutsch:* Unter **Releases → Latest** eine der beiden Dateien herunterladen und doppelklicken —
-„Client“ (Analyse im Browser) oder „Client + Analysetool“ (Analyse im eigenen Fenster).
-
-The installers are built by GitHub itself (`.github/workflows/build-client.yml`): **Actions →
-build-client → Run workflow** publishes both editions as the latest release (details:
-[docs/CLIENT_BUILD.md](docs/CLIENT_BUILD.md)). The release files are only downloadable for people who
-can see this repository — for friends without access, see the same document.
 
 **Running Garage16 or playing on it?** Two short, practical guides —
 everything below this README is the full technical reference:
@@ -418,6 +398,78 @@ builds both editions; a `client-v*` tag also publishes a GitHub release with all
 Verified: unit/jsdom tests, real PyInstaller builds of both editions on Linux, and the real window
 (pywebview, Qt WebEngine under Xvfb) against the real stack. Requires real Windows verification: the
 WebView2 window, the Windows bundle of pythonnet/WebView2, the installer edition switch.
+
+### V0.9.4 — two dashboards: LapTime Analyzer and Stint Analyzer
+
+- **LapTime Analyzer** (`#/analysis`): new windows **Racing lines** (`web/js/analysis/linemap.js`
+  — both driven lines on a zoomable map, pinch zoom, car-width band, scale bar, braking ▲ /
+  turn-in ◆ (estimated) / apex ● / full throttle ▼ per lap, "Lap 2 1.4 m further inside" at the
+  cursor, 0.5 m detail from `GET /telemetry/analysis/line` when zoomed in), **Corner in detail**
+  (time per phase braking / turn-in / apex / exit / straight — the phases add up exactly to the
+  corner's delta —, every measured value of both laps, the same corner on earlier laps from
+  `GET /telemetry/analysis/corner-history`) and **Sectors of the session**
+  (`GET /telemetry/analysis/lap-sectors`). The coach groups hints by phase; "brake later" only
+  when the reference is not slower at apex and exit. Up to two more laps over the pair
+  (`c=`, `d=` in the URL, `extra=` on `/compare`), delta or elapsed time, the pair channel
+  `line_offset`.
+- **Stint Analyzer** (`#/stints`, `#/sessions` still works): sessions split into stints at pit
+  stops (measured pit lane + standstill, LMU's pit counter) or measured new tyres / refuelling;
+  lap flags from measured values; pace with filters, degradation (Theil–Sen), fuel/energy with
+  target consumption, vehicle state with correlations ("not a cause"), traffic, pit stops with
+  estimated time loss, forecast (≥ 5 clean laps), strategy calculator with the admin's
+  **race rule sets**, stint and team-mate comparison. `server/stints.py`,
+  `server/routers/stints.py`; statistics in `web/js/stints/stats.js`.
+- **Client 0.9.4** records per sample `in_pits`, `place`, `flag`, the time gaps to the cars
+  ahead/behind, and per lap `lap_context` (pit stops, compound, damage, tank size, position, time
+  left). Migration **0015** (`laps.lap_context`, `race_rule_sets`). Per-lap figures (insights v3)
+  add pit lane, measured refuelling and tyre changes, traffic, fuel per sector, engine map, the
+  lap's corners; `scripts.revalidate_laps --apply` fills them in for stored laps.
+- Desktop client: buttons **LapTime Analyzer**, **Stint Analyzer**, **Analyse last lap**
+  (`--analysis-window --view stints`).
+
+### V0.9.3.1 — track limits in tiers, laps can be judged again (correction release)
+
+- **Track limits in tiers** (`server/track_limits.py` `RULES`): LMU's own verdict and decided
+  Garage16 rules invalidate; measurements (track-limits steps, four wheels off, beyond the edge,
+  late reports, …) only send a lap to Admin → Track-limits review. `GET /admin/track-limits/rules`
+  lists every rule with its tier and effect; `LMU_GARAGE_TRACK_LIMITS_INVALIDATING` lets a
+  confirmed measurement invalidate (default: none).
+- **Late window:** the client holds a finished lap 6 s after the line and records what LMU still
+  reports (`client/telemetry/lap_verdict.py`); the server links a step rise at the start of lap
+  N+1 to lap N (`server/lap_check.py` `link_neighbours`). Unclear attribution → review on both laps.
+- **Same rules on both sides:** the client sends reason codes (`lap_report`); its yes/no follows
+  the server's table.
+- **Re-judging stored laps:** `laps.check_inputs` (migration 0014); `python -m scripts.revalidate_laps`
+  reports transitions (dry run), `--apply`, `--apply --restore`, `--apply --update-validity`.
+- **Car identity:** cut model names (30-byte field) repaired or marked "…"; grid-only aliases used
+  after two reports; identities to check by hand in the report, the PC probe and the admin page.
+- **Theoretical best:** car model required, dry/wet/unknown laps never mixed silently.
+- On the PC: `py -m scripts.track_limits_probe --csv tracklimits.csv` records the LMU signals
+  for docs/LMU_VERIFICATION_PROTOCOL.md (r)–(v).
+
+### V0.9.3 — car models, server-side track limits, deeper analysis
+
+- **Car identity** (`server/car_identity.py`): a car is its MODEL — LMU's own model name
+  (`mVehicleModel`), else an alias learned from what clients report about the session's grid,
+  else `veh_filename` without the car number ("499P (2025)"). Raw values stay per lap
+  (`car_model_raw`, `car_vehicle_model`, `car_identity_source`); aliases in `car_aliases`.
+  `python -m scripts.car_identity_report` (dry run / `--apply`), and on the PC
+  `py -m scripts.car_identity_probe --csv cars.csv` with LMU running.
+- **Track limits** (`server/track_limits.py`): the server decides from the uploaded telemetry —
+  LMU's `lap_invalidated`, track-limits points, `count_lap_flag` (2 = time counts), surface type
+  per wheel, distance to LMU's track edge, driven distance, penalties, plus the client's verdict.
+  Every finding is stored with its lap distance (`laps.validation`); undecided laps go to
+  Admin → Track-limits review (`GET /admin/review`, `POST /admin/laps/{id}/review`).
+  `python -m scripts.revalidate_laps` re-checks stored laps (dry run by default).
+- **Analysis:** new derived channels (damper velocity, heave/roll/pitch, rake, tyre tread
+  inner/middle/outer, carcass, wheel slip, wheels off track, edge distance, …);
+  `GET /telemetry/analysis/distribution` (histograms, time-weighted; damper bump/rebound and
+  low/high-speed shares), `GET /telemetry/analysis/events` (track-limits findings, lock-ups,
+  wheelspin); windows "Where to find time", "Track limits & events", "Tyres & brakes", "Damper
+  histograms", "Histogram".
+- **Per-lap figures** (`server/lap_insights.py`, `laps.lap_stats`) computed once at upload from the
+  same file read; `GET /telemetry/analysis/theoretical-best` and `GET /telemetry/analysis/sessions`
+  work from the database only. Web page `#/sessions` ("My sessions").
 
 ### Tracks, classes and cars — nothing to enter by hand (V0.8.9)
 

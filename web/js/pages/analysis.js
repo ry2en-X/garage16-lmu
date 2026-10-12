@@ -4,6 +4,7 @@
 //   #/analysis?a=<lap id>&b=<lap id>
 //   #/analysis?a=<lap id>&ref=wr|team_best|my_best      resolve Lap 2 on the server
 //   #/analysis?quick=wr|team_best|my_best[&track=..]    "You vs ..." (see server /quick)
+//   #/analysis?a=..&b=..&c=..&d=..                      V0.9.4: Lap 3 / Lap 4 drawn over the pair
 //
 // Lap 1 (a) is usually your own lap; Lap 2 (b) can be ANY valid lap — e.g. the
 // leaderboard's number one. Both are drawn over the same stretch of track with the
@@ -26,7 +27,9 @@ import { createEditorPanel } from "../analysis/editor.js";
 import { renderGrid } from "../analysis/grid.js";
 import { chooseMaxPoints } from "../analysis/insights.js";
 import { createLayoutStore, requiredChannels, setTrackmapMode } from "../analysis/layout.js";
-import { applyColors, basicDataNotice, createViewState, distanceAt, indexForDistance } from "../analysis/model.js";
+import { createEventsStore } from "../analysis/events.js";
+import { applyColors, basicDataNotice, createViewState, distanceAt, EXTRA_SIDES, indexForDistance, lapColor, lapName } from "../analysis/model.js";
+import { createLazy, createSelection } from "../analysis/corner_detail.js";
 import { baseAdapter, covers, isUsable, planRefinement, REFINE } from "../analysis/refine.js";
 import { notice } from "../analysis/widgets.js";
 import { T } from "../analysis/strings.js";
@@ -56,7 +59,13 @@ export function parseAnalysisExtras(hash = window.location.hash) {
     return value && value.length <= 200 ? value : null;
   };
   const note = params.get("note");
+  const lapId = (key) => {
+    const value = Number(params.get(key));
+    return Number.isInteger(value) && value > 0 ? value : null;
+  };
   return {
+    // V0.9.4: up to two more laps (ids), drawn over Lap 1 / Lap 2
+    laps: [lapId("c"), lapId("d")].filter((id, i, all) => id && all.indexOf(id) === i),
     quick: pick("quick"),
     ref: pick("ref"),
     track: text("track"),
@@ -93,7 +102,7 @@ export async function renderAnalysis(container) {
     renderSignInPrompt(container, t("Sign in to analyse laps."));
     return;
   }
-  container.appendChild(el("h1", {}, t("Lap analysis")));
+  container.appendChild(el("h1", {}, t("LapTime Analyzer")));
   container.appendChild(el("p", { class: "subtitle" }, t("Compare two laps channel by channel — against anyone's valid lap, e.g. the leaderboard's number one.")));
 
   const { a, b } = parseAnalysisQuery();
@@ -154,7 +163,8 @@ export async function renderAnalysis(container) {
   container.appendChild(status);
   let data;
   try {
-    data = await api.analysisCompare({ lapA: a, lapB: b || undefined, channels: wanted, step: GRID_STEP_M, maxPoints });
+    const extra = extras.laps.filter((id) => id !== a && id !== b);
+    data = await api.analysisCompare({ lapA: a, lapB: b || undefined, channels: wanted, step: GRID_STEP_M, maxPoints, extra });
   } catch (err) {
     status.className = "notice notice--error";
     status.textContent = err.message;
@@ -167,7 +177,8 @@ export async function renderAnalysis(container) {
     return;
   }
   status.remove();
-  renderResult(container, data, catalog, { a, b }, { layoutStore, maxPoints, note: extras.note });
+  const extraIds = (data.extra_sides || []).map((side) => data.laps[side] && data.laps[side].id).filter(Boolean);
+  renderResult(container, data, catalog, { a, b, extra: extraIds }, { layoutStore, maxPoints, note: extras.note });
 }
 
 // ----------------------------------------------------------------------------
@@ -203,7 +214,11 @@ function quickStartCard() {
       }
     },
   }, T.quick[mode]));
-  return el("div", { class: "card quick" }, [el("h2", {}, T.quickTitle), el("div", { class: "inline-form" }, buttons), status, actions]);
+  return el("div", { class: "card quick" }, [
+    el("h2", {}, T.quickTitle), el("div", { class: "inline-form" }, buttons), status, actions,
+    // V0.9.3: stints, consistency and the theoretical best live on their own page
+    el("p", { class: "subtitle", style: "margin:10px 0 0;" }, el("a", { href: "#/stints" }, t("Stint Analyzer: sessions, stints, consistency & theoretical best →"))),
+  ]);
 }
 
 async function runQuick(container, mode, { track, carModel }) {
@@ -254,8 +269,16 @@ function renderResult(container, baseData, catalog, ids, env) {
   let data = baseData;
   let detail = null; // { start, end, step } of the refined stretch in use
   const hasB = !!baseData.laps.b;
+  const extraIds = ids.extra || [];
+  // V0.9.4: the extra laps stay when Lap 1 / Lap 2 change (c=, d= in the URL)
+  const keep = (list = extraIds) => Object.fromEntries(list.slice(0, 2).map((id, i) => [EXTRA_SIDES[i], String(id)]));
   const state = createViewState(baseData);
-  container._analysis = { state, layoutStore }; // read by tests/js/*.test.mjs
+  const selection = createSelection();
+  const history = createLazy(() => api.analysisCornerHistory(ids.a));
+  const lapSectors = createLazy(() => api.analysisLapSectors(ids.a));
+  // V0.9.3: track-limits findings + lock-ups/wheelspin of both laps, loaded once (small)
+  const events = createEventsStore(() => api.analysisEvents({ lapA: ids.a, lapB: ids.b || undefined }));
+  container._analysis = { state, layoutStore, events }; // read by tests/js/*.test.mjs
 
   // A view of the shared state whose subscriptions can be released when the windows are
   // rebuilt (layout change) — otherwise every rebuild would leave listeners behind.
@@ -304,12 +327,16 @@ function renderResult(container, baseData, catalog, ids, env) {
   const pickerSlot = el("div");
   const showPicker = (slot) => {
     pickerSlot.innerHTML = "";
-    const other = slot === "a" ? ids.b : ids.a;
+    const other = slot === "a" ? ids.b : ids.a;   // (an extra lap: Lap 1 is excluded)
     renderLapPicker(pickerSlot, {
-      title: slot === "a" ? t("Choose Lap 1") : t("Choose Lap 2 (compare against)"),
+      title: slot === "a" ? t("Choose Lap 1") : slot === "b" ? t("Choose Lap 2 (compare against)") : t("Choose a lap to draw over the comparison"),
       context: { track: baseData.laps.a.track_name, carClass: baseData.laps.a.car_class, carModel: baseData.laps.a.car_model },
       excludeId: other || undefined,
-      onPick: (id) => (slot === "a" ? go(id, ids.b) : go(ids.a, id)),
+      onPick: (id) => {
+        if (slot === "a") go(id, ids.b, keep());
+        else if (slot === "b") go(ids.a, id, keep());
+        else go(ids.a, ids.b, keep([...extraIds, id]));   // V0.9.4: one more lap over the pair
+      },
     });
     pickerSlot.scrollIntoView && pickerSlot.scrollIntoView({ behavior: "smooth", block: "nearest" });
   };
@@ -321,10 +348,23 @@ function renderResult(container, baseData, catalog, ids, env) {
     }) }, T.compareButton),
     el("button", { class: "btn btn--ghost", onclick: () => showPicker("a") }, t("Change Lap 1")),
     el("button", { class: "btn btn--ghost", onclick: () => showPicker("b") }, hasB ? t("Change Lap 2") : t("Compare with…")),
-    hasB ? el("button", { class: "btn btn--ghost", onclick: () => go(ids.b, ids.a) }, t("Swap laps")) : null,
+    hasB ? el("button", { class: "btn btn--ghost", onclick: () => go(ids.b, ids.a, keep()) }, t("Swap laps")) : null,
     hasB ? el("button", { class: "btn btn--ghost", onclick: () => go(ids.a, null) }, t("Remove Lap 2")) : null,
+    hasB && extraIds.length < 2 ? el("button", { class: "btn btn--ghost analysis-add-lap", onclick: () => showPicker("extra") }, t("+ Lap 3/4 over it")) : null,
     customizeButton,
   ]));
+  // V0.9.4: the extra laps, each with its colour, line style and a way to remove it
+  if (extraIds.length) {
+    container.appendChild(el("div", { class: "analysis-extra-laps" }, (baseData.extra_sides || []).map((side, i) => {
+      const lap = baseData.laps[side];
+      return el("span", { class: `analysis-extra-lap analysis-extra-lap--${side}`, style: `border-color:${lapColor(side)};` }, [
+        el("span", { style: `color:${lapColor(side)};` }, `${lapName(side)}: `),
+        `${lap.driver_name} · ${formatLapTime(lap.lap_time)} · ${t("lap #{0}", [lap.lap_number])}`,
+        el("button", { type: "button", class: "analysis-extra-lap__remove", title: t("Remove this lap"), "aria-label": t("Remove this lap"),
+          onclick: () => go(ids.a, ids.b, keep(extraIds.filter((_, k) => k !== i))) }, "×"),
+      ]);
+    })));
+  }
   container.appendChild(pickerSlot);
   if (!hasB) showPicker("b");
 
@@ -339,14 +379,14 @@ function renderResult(container, baseData, catalog, ids, env) {
   async function ensureChannels(keys) {
     const missing = keys.filter((k) => !baseData.channels[k]).slice(0, 24);
     if (!missing.length) return;
-    const extra = await api.analysisCompare({ lapA: ids.a, lapB: ids.b || undefined, channels: missing, step: GRID_STEP_M, maxPoints });
+    const extra = await api.analysisCompare({ lapA: ids.a, lapB: ids.b || undefined, channels: missing, step: GRID_STEP_M, maxPoints, extra: extraIds });
     if (!sameGrid(extra.grid, baseData.grid)) throw new Error(t("The laps changed while loading — reload the page."));
     // While zoomed in, the charts draw the refined stretch: it needs the channel too.
     // (Done without rebuilding anything, so the window that asked for it stays put.)
     let detailExtra = null;
     if (detail && data !== baseData) {
       detailExtra = await api.analysisCompare({
-        lapA: ids.a, lapB: ids.b || undefined, channels: missing, step: detail.step, start: detail.start, end: detail.end, maxPoints: REFINE.maxPoints,
+        lapA: ids.a, lapB: ids.b || undefined, channels: missing, step: detail.step, start: detail.start, end: detail.end, maxPoints: REFINE.maxPoints, extra: extraIds,
       });
       if (!sameGrid(detailExtra.grid, data.grid)) throw new Error(t("The view changed while loading — try again."));
     }
@@ -370,6 +410,14 @@ function renderResult(container, baseData, catalog, ids, env) {
       mapState: baseAdapter(scoped, baseData),
       catalog,
       ensureChannels,
+      events,
+      // V0.9.4: the corner the windows show, the driver's earlier laps, the session's sectors,
+      // and the racing lines of a stretch in high resolution
+      selection,
+      history,
+      lapSectors,
+      fetchLine: (opts) => api.analysisLine({ lapA: ids.a, lapB: ids.b || undefined, extra: extraIds, ...opts }),
+      fetchDistribution: (opts) => api.analysisDistribution({ lapA: ids.a, lapB: ids.b || undefined, ...opts }),
       onTrackmapMode: (mode) => {
         const map = layoutStore.get().widgets.find((w) => w.type === "trackmap");
         if (map) layoutStore.set(setTrackmapMode(layoutStore.get(), map.id, mode));
@@ -479,7 +527,7 @@ function renderResult(container, baseData, catalog, ids, env) {
       if (Date.now() < refineBlockedUntil) return;
       try {
         response = await api.analysisCompare({
-          lapA: ids.a, lapB: ids.b || undefined, channels, step: plan.step, start: plan.start, end: plan.end, maxPoints: REFINE.maxPoints,
+          lapA: ids.a, lapB: ids.b || undefined, channels, step: plan.step, start: plan.start, end: plan.end, maxPoints: REFINE.maxPoints, extra: extraIds,
         });
       } catch (err) {
         // The overview stays: the charts are less detailed, not broken. After "too many
@@ -487,7 +535,7 @@ function renderResult(container, baseData, catalog, ids, env) {
         if (err && err.status === 429) refineBlockedUntil = Date.now() + REFINE.backoffMs;
         return;
       }
-      if (isUsable(response, plan)) {
+      if (isUsable(response, { ...plan, extraSides: baseData.extra_sides || [] })) {
         refineCache.set(key, response);
         while (refineCache.size > REFINE.cacheEntries) refineCache.delete(refineCache.keys().next().value);
       }
@@ -496,6 +544,7 @@ function renderResult(container, baseData, catalog, ids, env) {
     // zoom/pan, or no longer covering what is on screen) — either alone is enough for most
     // cases, together they leave no gap.
     if (seq !== refineSeq || !container.isConnected) return;
+    plan.extraSides = baseData.extra_sides || [];
     if (!isUsable(response, plan) || !covers(asStretch(response), state.getView())) return;
     swapData({ ...response, map: baseData.map }, asStretch(response));
   }

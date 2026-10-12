@@ -24,6 +24,10 @@ COPY docker/entrypoint.sh ./docker/entrypoint.sh
 # V0.8.8: the telemetry cleanup tool (README, "Telemetry storage cleanup") was documented as
 # "run it inside the server container" but was never copied into the image.
 COPY scripts/telemetry_cleanup.py ./scripts/telemetry_cleanup.py
+# V0.9.3: car-identity report and the re-check of stored laps, both run inside this container
+# (docs/ADMIN_GUIDE.md, "Neu in V0.9.3")
+COPY scripts/car_identity_report.py ./scripts/car_identity_report.py
+COPY scripts/revalidate_laps.py ./scripts/revalidate_laps.py
 
 # BUGFIX (found via real deployment testing, 2026-09-25) — see
 # Dockerfile.discord_bot's identical comment for the full story: source

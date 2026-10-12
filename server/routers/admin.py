@@ -22,11 +22,21 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .. import car_identity, track_limits
 from ..config import settings
 from ..database import get_db
 from ..driver_lifecycle import delete_driver_rows
-from ..models import Driver, Lap, LapReport
-from ..schemas import AdminDriverOut, AdminInvalidateRequest, AdminLapReportOut, AdminLapSummary, AdminLockRequest
+from ..models import CarAlias, Driver, Lap, LapReport, RaceRuleSet
+from ..schemas import (
+    AdminDriverOut,
+    AdminInvalidateRequest,
+    AdminLapReportOut,
+    AdminLapSummary,
+    AdminLockRequest,
+    AdminReviewDecision,
+    RaceRuleSetIn,
+    RaceRuleSetOut,
+)
 from ..team_lifecycle import TeamOwnershipConflict, resolve_owned_teams_before_driver_deletion
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -48,6 +58,8 @@ def _lap_summary(lap: Lap, driver_name: str) -> AdminLapSummary:
         track_name=lap.track_name, car_name=lap.car_name, car_class=lap.car_class, car_model=lap.car_model,
         lap_time=lap.lap_time, is_valid=lap.is_valid, invalid_reason=lap.invalid_reason,
         client_claimed_valid=lap.client_claimed_valid, uploaded_at=lap.uploaded_at.isoformat(),
+        validation=lap.validation, review_status=lap.review_status,
+        car_model_raw=lap.car_model_raw, car_identity_source=lap.car_identity_source,
     )
 
 
@@ -129,6 +141,154 @@ def invalidate_lap(
     db.add(lap)
     db.commit()
     return {"status": "ok", "lap_id": lap_id}
+
+
+# ---------------------------------------------------------------- V0.9.3: track-limits review
+
+@router.get("/review", response_model=List[AdminLapSummary], dependencies=[Depends(require_admin)])
+def review_queue(
+    status_filter: str = Query(default="pending", alias="status", pattern="^(pending|cleared|invalidated)$"),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+) -> List[AdminLapSummary]:
+    """Laps the track-limits check (server/track_limits.py) flagged for a human look:
+    they count provisionally until an admin clears or invalidates them. Each entry
+    carries the verdict with every finding (what, where on the lap, which signal)."""
+    laps = (
+        db.query(Lap).filter(Lap.review_status == status_filter)
+        .order_by(Lap.uploaded_at.desc()).limit(limit).all()
+    )
+    names = dict(db.query(Driver.id, Driver.display_name).filter(Driver.id.in_({lap.driver_id for lap in laps})).all()) if laps else {}
+    return [_lap_summary(lap, names.get(lap.driver_id, "(deleted driver)")) for lap in laps]
+
+
+@router.post("/laps/{lap_id}/review", dependencies=[Depends(require_admin)])
+def review_lap(lap_id: int, body: AdminReviewDecision, db: Session = Depends(get_db)) -> dict:
+    """clear: the lap stays valid and leaves the queue. invalidate: same effect as
+    PATCH /laps/{id}/invalidate (leaderboards and records follow live), with the
+    review's findings as the reason."""
+    lap = db.query(Lap).filter(Lap.id == lap_id).one_or_none()
+    if lap is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Lap not found.")
+    note = (body.note or "").strip()
+    if body.decision == "clear":
+        lap.review_status = "cleared"
+    else:
+        lap.review_status = "invalidated"
+        lap.is_valid = False
+        reasons = [f"admin review: {note}" if note else "admin review: track limits"]
+        lap.invalid_reason = reasons
+    verdict = dict(lap.validation or {})
+    verdict["review"] = {"decision": body.decision, "note": note or None, "at": datetime.now(timezone.utc).isoformat()}
+    lap.validation = verdict
+    db.add(lap)
+    db.commit()
+    return {"status": "ok", "lap_id": lap_id, "review_status": lap.review_status}
+
+
+@router.get("/track-limits/rules", dependencies=[Depends(require_admin)])
+def track_limits_rules() -> dict:
+    """V0.9.3.1: every track-limits rule with its tier (LMU verdict / Garage16 rule /
+    heuristic), its effect and whether its meaning is confirmed — plus which heuristics this
+    server lets invalidate (LMU_GARAGE_TRACK_LIMITS_INVALIDATING; default: none)."""
+    from ..lap_check import promoted_codes
+
+    promoted = promoted_codes()
+    rules = track_limits.rules_table()
+    for rule in rules:
+        rule["effect"] = track_limits.severity_of(rule["code"], promoted)
+    return {"version": track_limits.TRACK_LIMITS_VERSION, "rules": rules, "invalidating_heuristics": sorted(promoted)}
+
+
+@router.get("/car-identity", dependencies=[Depends(require_admin)])
+def car_identity_overview(db: Session = Depends(get_db)) -> dict:
+    """What the server has learned about car models (server/car_identity.py): every
+    alias with how often the game confirmed it, conflicts (two models reported for one
+    veh_filename group — never used), and how the laps' identities were decided."""
+    aliases = db.query(CarAlias).order_by(CarAlias.canonical, CarAlias.alias_key).all()
+    sources = dict(db.query(Lap.car_identity_source, func.count()).group_by(Lap.car_identity_source).all())
+    # V0.9.3.1: identities real data must decide on (cut names, two veh models or classes)
+    combos = (
+        db.query(Lap.car_model, Lap.car_model_raw, Lap.car_class, func.count())
+        .filter(Lap.car_model.is_not(None))
+        .group_by(Lap.car_model, Lap.car_model_raw, Lap.car_class).all()
+    )
+    suspects = car_identity.identity_suspects(
+        {"identity": model, "veh_file": raw, "car_class": cls, "laps": count} for model, raw, cls, count in combos)
+    return {
+        "aliases": [
+            {"key": a.alias_key, "model": a.canonical, "source": a.source, "seen": a.seen_count,
+             "conflict": bool(a.conflict), "conflict_with": a.conflict_with,
+             "used": car_identity.alias_usable(a),
+             "last_seen": a.last_seen.isoformat() if a.last_seen else None}
+            for a in aliases
+        ],
+        "laps_by_source": {str(k): v for k, v in sources.items()},
+        "suspects": suspects,
+        "rules_version": car_identity.IDENTITY_RULES_VERSION,
+    }
+
+
+# ---------------------------------------------------------------------------
+# V0.9.4 — race rule sets for the Stint Analyzer's strategy calculator
+# ---------------------------------------------------------------------------
+
+MAX_RULE_SETS = 200
+
+
+def _rule_set_or_404(db: Session, rule_set_id: int) -> RaceRuleSet:
+    row = db.get(RaceRuleSet, rule_set_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Rule set not found.")
+    return row
+
+
+def _name_taken(db: Session, name: str, except_id: Optional[int] = None) -> bool:
+    stmt = select(RaceRuleSet.id).where(func.lower(RaceRuleSet.name) == name.lower())
+    if except_id is not None:
+        stmt = stmt.where(RaceRuleSet.id != except_id)
+    return db.execute(stmt).first() is not None
+
+
+@router.get("/rule-sets", response_model=List[RaceRuleSetOut], dependencies=[Depends(require_admin)])
+def list_rule_sets(db: Session = Depends(get_db)) -> list:
+    return db.query(RaceRuleSet).order_by(RaceRuleSet.name).all()
+
+
+@router.post("/rule-sets", response_model=RaceRuleSetOut, status_code=status.HTTP_201_CREATED,
+             dependencies=[Depends(require_admin)])
+def create_rule_set(body: RaceRuleSetIn, db: Session = Depends(get_db)) -> RaceRuleSet:
+    if db.query(func.count(RaceRuleSet.id)).scalar() >= MAX_RULE_SETS:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"At most {MAX_RULE_SETS} rule sets.")
+    if _name_taken(db, body.name):
+        raise HTTPException(status.HTTP_409_CONFLICT, "A rule set with this name exists already.")
+    row = RaceRuleSet(name=body.name, description=body.description, track_name=body.track_name,
+                      car_class=body.car_class, rules=body.rules.model_dump(exclude_none=True))
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.put("/rule-sets/{rule_set_id}", response_model=RaceRuleSetOut, dependencies=[Depends(require_admin)])
+def update_rule_set(rule_set_id: int, body: RaceRuleSetIn, db: Session = Depends(get_db)) -> RaceRuleSet:
+    row = _rule_set_or_404(db, rule_set_id)
+    if _name_taken(db, body.name, except_id=row.id):
+        raise HTTPException(status.HTTP_409_CONFLICT, "A rule set with this name exists already.")
+    row.name, row.description, row.track_name, row.car_class = body.name, body.description, body.track_name, body.car_class
+    row.rules = body.rules.model_dump(exclude_none=True)
+    row.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.delete("/rule-sets/{rule_set_id}", dependencies=[Depends(require_admin)])
+def delete_rule_set(rule_set_id: int, db: Session = Depends(get_db)) -> dict:
+    row = _rule_set_or_404(db, rule_set_id)
+    db.delete(row)
+    db.commit()
+    return {"status": "deleted", "id": rule_set_id}
 
 
 @router.get("/drivers", response_model=List[AdminDriverOut], dependencies=[Depends(require_admin)])
