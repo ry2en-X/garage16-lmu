@@ -67,7 +67,9 @@ def _laps():
 
 
 def _stored_files():
-    return sorted(p for p in settings.telemetry_storage_dir.rglob("*") if p.is_file())
+    # V0.9.8: the write lock (.garage16-write.lock, server/write_lock.py) is infrastructure, not a lap file
+    root = settings.telemetry_storage_dir
+    return sorted(p for p in root.rglob("*") if p.is_file() and not p.relative_to(root).parts[0].startswith("."))
 
 
 @pytest.fixture(autouse=True)

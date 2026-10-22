@@ -60,7 +60,7 @@ def test_new_uploads_store_their_check_inputs(client):
     lap_id = upload_df(client, me, _steps_lap(41), lap_report={"reasons": ["track_limits_points"]},
                        game_lap_state=dict(STATE_093), track_limits_steps_per_point=4, tail_samples=2)["lap_id"]
     lap = lap_row(lap_id)
-    assert lap.is_valid is True and lap.review_status == "pending"
+    assert lap.is_valid is True and lap.review_status == "held"      # V0.9.9: REVIEW holds a new lap
     assert lap.check_inputs["client_reasons"] == ["track_limits_points"]
     assert lap.check_inputs["client_state"] == STATE_093 and lap.check_inputs["tail_samples"] == 2
     [f] = [f for f in lap.validation["findings"] if f["code"] == "track_limits_points"]
@@ -166,7 +166,11 @@ def test_a_step_rise_right_after_the_line_goes_to_the_lap_before(client, order):
     [linked] = first.validation["linked"]
     assert linked["code"] == "late_track_limits" and linked["severity"] == "review"
     assert linked["detail"]["next_lap_id"] == lap2 and linked["detail"]["attribution"] == "this_lap"
-    assert first.validation["status"] == "review" and first.review_status == "pending" and first.is_valid is True
+    # V0.9.9: a lap that was already stored when the next lap's report arrived keeps counting
+    # provisionally ("pending" — a record it holds is never taken away by a later upload); a lap
+    # that arrives AFTER its next lap is held like any new REVIEW lap
+    expected = "pending" if order == (1, 2) else "held"
+    assert first.validation["status"] == "review" and first.review_status == expected and first.is_valid is True
 
 
 def test_linked_findings_survive_revalidation_and_are_not_duplicated(client, capsys):

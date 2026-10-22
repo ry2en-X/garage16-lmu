@@ -688,6 +688,7 @@ def test_lap_id_checks_cover_missing_foreign_invalid_gone_and_damaged_laps(clien
     os.remove(_lap_row(gone).telemetry_path)
     assert client.get(f"/telemetry/analysis/laps/{gone}", headers=h).status_code == 404
 
+    os.chmod(_lap_row(damaged).telemetry_path, 0o640)   # V0.9.9: stored originals are read-only
     with open(_lap_row(damaged).telemetry_path, "wb") as handle:
         handle.write(b"this is no parquet file")
     resp = client.get(f"/telemetry/analysis/laps/{damaged}", headers=h)

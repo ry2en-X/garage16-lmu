@@ -215,7 +215,7 @@ export function renderHistogram(widget, ctx) {
     }));
     body.appendChild(canvas);
     body.appendChild(facts);
-    const draw = coalesce(() => drawHistogram(canvas, plan, { height: widget.size === "small" ? 110 : 150, unit: entry.unit, discrete: entry.discrete }));
+    const draw = coalesce(() => drawHistogram(canvas, plan, { height: Number.isFinite(widget.boxHeight) ? Math.max(widget.boxHeight - 110, 80) : widget.size === "small" ? 110 : 150, unit: entry.unit, discrete: entry.discrete }));
     stop = onResize(body, draw);
     draw();
   }).catch((err) => {

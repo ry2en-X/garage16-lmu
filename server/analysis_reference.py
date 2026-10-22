@@ -40,6 +40,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from .models import Driver, Lap, TeamMembership
+from .official import official_filter, visible_filter
 
 KINDS = ("wr", "team_best", "my_best")
 SCOPES = ("model", "class")
@@ -88,7 +89,7 @@ def _fastest(
 ) -> List[Lap]:
     stmt = (
         select(Lap)
-        .where(Lap.is_valid.is_(True), Lap.track_name == context.track_name, _same_car(context, scope), *driver_filter)
+        .where(official_filter(), Lap.track_name == context.track_name, _same_car(context, scope), *driver_filter)
         .order_by(Lap.lap_time.asc(), Lap.id.asc())
         .limit(limit)
     )
@@ -187,7 +188,7 @@ def quick_pair(
         # No track given ("You vs ..." from the analysis start page): use the one the
         # viewer drove most recently, and that lap's car.
         recent = db.execute(
-            select(Lap).where(Lap.driver_id == viewer.id, Lap.is_valid.is_(True))
+            select(Lap).where(Lap.driver_id == viewer.id, visible_filter())
             .order_by(Lap.uploaded_at.desc(), Lap.id.desc()).limit(CANDIDATES_TO_TRY)
         ).scalars().all()
         latest = next((lap for lap in recent if analysable(lap)), None)
@@ -195,7 +196,7 @@ def quick_pair(
             return QuickPair(mode, None, ReferenceResult(mode, None, NO_OWN_LAP))
         track_name = latest.track_name
         car_model = car_model or latest.car_model
-    own = [Lap.driver_id == viewer.id, Lap.is_valid.is_(True), Lap.track_name == track_name]
+    own = [Lap.driver_id == viewer.id, visible_filter(), Lap.track_name == track_name]
     if car_model:
         own.append(Lap.car_model == car_model)
     order = (Lap.uploaded_at.desc(), Lap.id.desc()) if mode == "my_best" else (Lap.lap_time.asc(), Lap.id.asc())

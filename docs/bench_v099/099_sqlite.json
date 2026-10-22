@@ -1,0 +1,53 @@
+{
+  "version": "0.9.9",
+  "python": "3.12.3",
+  "machine": "x86_64",
+  "processor": "x86_64",
+  "cpus": 2,
+  "database": "sqlite",
+  "laps": 40,
+  "threads": 4,
+  "repeat": 5,
+  "file_bytes": {
+    "normal": 8017525,
+    "long": 19854007
+  },
+  "rows": {
+    "normal": 12600,
+    "long": 32400
+  },
+  "hash_mb_s": 387.9,
+  "check_ms": {
+    "normal": 70.7,
+    "long": 154.5
+  },
+  "check_peak_mb": {
+    "normal": 8.8,
+    "long": 19.2
+  },
+  "upload": {
+    "laps_per_s": 9.21,
+    "p50_ms": 102.2,
+    "p95_ms": 135.7,
+    "sql_per_upload": 18.0,
+    "write_lock_p50_ms": 80.8,
+    "write_lock_p95_ms": 106.4
+  },
+  "parallel": {
+    "laps_per_s": 8.26,
+    "errors": 0
+  },
+  "read_ms": {
+    "first": 33.6,
+    "again": 10.2
+  },
+  "db": {
+    "laps": 80,
+    "bytes": {
+      "database_file": 847872
+    },
+    "bytes_per_lap": {
+      "database_file": 10598
+    }
+  }
+}

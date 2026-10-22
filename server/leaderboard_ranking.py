@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from .models import Driver, Lap
 from .schemas import LeaderboardEntry
 from .versioning import data_level_for_client_version
+from .official import official_filter
 
 
 def ranked_leaderboard(db: Session, filters: Sequence[ColumnElement], limit: int) -> List[LeaderboardEntry]:
@@ -43,7 +44,7 @@ def ranked_leaderboard(db: Session, filters: Sequence[ColumnElement], limit: int
             .over(partition_by=Lap.driver_id, order_by=(Lap.lap_time.asc(), Lap.id.asc()))
             .label("rank"),
         )
-        .where(Lap.is_valid.is_(True), *filters)
+        .where(official_filter(), *filters)
         .subquery()
     )
 

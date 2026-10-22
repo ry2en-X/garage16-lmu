@@ -1,0 +1,3 @@
+lap_id,label,note
+0,clean,"Beispielzeile: saubere Runde, alle Räder immer innerhalb der weißen Linie (diese Zeile löschen)"
+0,violation,"Beispielzeile: Kurve 3 mit allen vier Rädern über die Linie, LMU hat ungültig gemeldet (löschen)"

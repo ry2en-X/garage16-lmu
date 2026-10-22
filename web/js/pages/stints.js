@@ -231,6 +231,11 @@ function filterBar(box, data, state, rerender) {
 
 function stintColor(n) { return COLORS[(n - 1) % COLORS.length]; }
 
+// V0.9.7: " (0.021 … 0.068)" — the 95 % range of a slope
+function ciText(ci, digits = 3) {
+  return ci && fin(ci[0]) && fin(ci[1]) ? ` (${ci[0].toFixed(digits)} … ${ci[1].toFixed(digits)})` : "";
+}
+
 function paceSection({ data, state, clean }) {
   const laps = data.laps;
   const p = S.paceSummary(laps, clean, { window: state.window });
@@ -263,7 +268,8 @@ function paceSection({ data, state, clean }) {
     stat(t("Robust spread (MAD)"), fin(p.mad) ? `± ${p.mad.toFixed(3)} s` : dash, t("Median absolute deviation: hardly moved by a single bad lap.")),
     stat(t("Within 0.5 s of best"), `${p.within_half_second} / ${p.laps}`),
     stat(t("Best {0} in a row", [p.best_window ? p.best_window.n : state.window]), p.best_window ? lapTime(p.best_window.average) : dash, t("Fastest average over consecutive clean laps — your consistency window.")),
-    stat(t("Trend"), p.trend ? t("{0} s/lap", [signed(p.trend.slope, 3, "")]) : dash, t("Theil–Sen slope of the clean lap times over the session: + = getting slower.")),
+    stat(t("Trend"), p.trend ? t("{0} s/lap", [signed(p.trend.slope, 3, "")]) + ciText(p.trend.ci) : dash, t("Theil–Sen slope of the clean lap times over the session: + = getting slower. In brackets: the 95 % range of the slope.")),
+    stat(t("Consistency (trend removed)"), p.consistency ? `± ${p.consistency.sigma.toFixed(3)} s` : dash, t("Lap-to-lap spread around the trend line (robust): how evenly you drive, without the slow change from tyres and fuel.")),
   ] : [];
   const parts = [svgChart, legend([
     ...data.stints.map((st) => ({ color: stintColor(st.number), label: t("Stint {0}", [st.number]), dot: true })),
@@ -292,7 +298,7 @@ function stintsSection({ data, clean }) {
         String(st.tyre_set || dash),
         lapTime(members.length ? Math.min(...members.map((l) => l.lap_time)) : null),
         lapTime(S.median(members.map((l) => l.lap_time))),
-        deg.ok ? signed(deg.slope, 3, "s") : el("span", { class: "subtitle", title: t("At least {0} clean laps needed.", [S.MIN_DEGRADATION_LAPS]) }, dash),
+        deg.ok ? el("span", { title: deg.ci ? t("95 % range: {0} to {1} s", [deg.ci[0].toFixed(3), deg.ci[1].toFixed(3)]) : "" }, signed(deg.slope, 3, "s")) : el("span", { class: "subtitle", title: t("At least {0} clean laps needed.", [S.MIN_DEGRADATION_LAPS]) }, dash),
         f(S.median(members.map((l) => l.fuel_used_l)), 2, "L"),
         f(S.median(members.map((l) => l.energy_used_pct)), 2, "%"),
         f(S.median(members.map((l) => l.wear_used_avg)), 3, "%"),
@@ -327,7 +333,8 @@ function tyresSection({ data, clean }) {
   const parts = [chart([...series, ...lines], { yFormat: (v) => formatLapTime(v), xLabel: t("tyre age (laps)"), yLabel: t("lap time"), title: t("Lap time over tyre age") })];
   const fc = S.fuelCorrectedDegradation(laps, clean);
   if (fc.ok) {
-    parts.push(el("p", {}, [estimateTag(), " ", t("Separated from the fuel load ({0} laps): tyres {1} per lap of age, fuel {2} per litre.", [fc.n, signed(fc.per_lap_tyre, 3, "s"), signed(fc.per_litre, 3, "s")])]));
+    parts.push(el("p", {}, [estimateTag(), " ", t("Separated from the fuel load ({0} laps): tyres {1} per lap of age, fuel {2} per litre.", [fc.n, signed(fc.per_lap_tyre, 3, "s") + ciText(fc.per_lap_tyre_ci), signed(fc.per_litre, 3, "s") + ciText(fc.per_litre_ci)]),
+      fc.per_lap_tyre_ci && fc.per_lap_tyre_ci[0] < 0 && fc.per_lap_tyre_ci[1] > 0 ? ` ${t("The tyre effect is not distinguishable from zero with these laps.")}` : ""]));
   } else {
     const why = {
       collinear: t("Tyre age and fuel load went down together in these laps, so their effects cannot be told apart. That needs laps with different fuel on tyres of the same age (e.g. several stints with refuelling)."),

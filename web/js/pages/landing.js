@@ -17,9 +17,13 @@ export async function renderLanding(container) {
     el("div", { class: "hero" }, [
       el("h1", { style: "font-size:2.4em; margin-bottom:4px;" }, t("GARAGE16")),
       el("p", { class: "subtitle", style: "font-size:1.2em;" }, t("Your LMU Data. Your Records. Your Team.")),
-      el("div", { class: "inline-form", style: "margin-top:16px;" }, [
-        el("a", { href: "#/leaderboard", class: "btn" }, t("Explore Leaderboards")),
-        el("a", { href: signedIn ? "#/dashboard" : "#/account", class: "btn btn--ghost" }, signedIn ? t("Go to your Garage") : t("Get Garage16")),
+      // V0.9.6: the main button is what this visitor most likely wants next
+      el("div", { class: "inline-form", style: "margin-top:16px;" }, signedIn ? [
+        el("a", { href: "#/dashboard", class: "btn" }, t("Go to your Garage")),
+        el("a", { href: "#/leaderboard", class: "btn btn--ghost" }, t("Explore Leaderboards")),
+      ] : [
+        el("a", { href: "#/account", class: "btn" }, t("Get Garage16")),
+        el("a", { href: "#/leaderboard", class: "btn btn--ghost" }, t("Explore Leaderboards")),
         el("a", { href: "#/download", class: "btn btn--ghost" }, t("Download the client")),
       ]),
     ])
@@ -38,7 +42,7 @@ export async function renderLanding(container) {
           el("div", { class: "card-row" }, [
             el("div", {}, [
               el("a", { href: `#/driver/${e.driver_id}` }, [el("strong", {}, e.driver_name)]),
-              el("div", { class: "subtitle", style: "margin:2px 0 0;" }, `${e.track_name} — ${e.car_name}`),
+              el("div", { class: "subtitle", style: "margin:2px 0 0;" }, `${e.track_name} · ${e.car_model || e.car_name}`),
             ]),
             el("div", {}, [
               el("span", { class: "lap-time" }, formatLapTime(e.lap_time)),
@@ -52,15 +56,6 @@ export async function renderLanding(container) {
   } catch (err) {
     container.appendChild(el("div", { class: "notice notice--error" }, err.message));
   }
-
-  // --- Explore: entry points, not a full nav duplicate ---
-  container.appendChild(el("h2", {}, t("Explore")));
-  container.appendChild(
-    el("div", { class: "card", style: "display:flex; gap:24px; flex-wrap:wrap;" }, [
-      el("a", { href: "#/leaderboard" }, t("Leaderboards →")),
-      el("a", { href: "#/teams" }, t("Teams →")),
-    ])
-  );
 
   // --- What Garage16 does (static — no data needed) ---
   container.appendChild(el("h2", {}, t("What Garage16 Does")));

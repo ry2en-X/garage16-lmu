@@ -12,6 +12,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from tests.helpers.lapfile import with_signals
 
 
 def _write_recorded_lap(tmp_dir: Path, lap_time: float = 90.0, lap_number: int = 1) -> Path:
@@ -19,7 +20,7 @@ def _write_recorded_lap(tmp_dir: Path, lap_time: float = 90.0, lap_number: int =
     parquet file with the columns validate_dataframe() requires, plus the
     metadata JSON recorder.save() produces (including the local-only
     `uploaded` field the client must strip before sending)."""
-    n = 100
+    n = int(lap_time * 20) + 1          # V0.9.9: a checkable frame rate (server/lap_decision.py)
     df = pd.DataFrame({
         "t": np.linspace(0, lap_time, n),
         "lap_dist": np.linspace(0, 4500, n),
@@ -32,6 +33,7 @@ def _write_recorded_lap(tmp_dir: Path, lap_time: float = 90.0, lap_number: int =
         "rpm": np.full(n, 6000.0),
         "fuel": np.linspace(50, 48, n),
     })
+    df = with_signals(df)               # V0.9.9: the track-limits signals a 0.9.4 client records
     parquet_path = tmp_dir / "lap.parquet"
     df.to_parquet(parquet_path, index=False)
 

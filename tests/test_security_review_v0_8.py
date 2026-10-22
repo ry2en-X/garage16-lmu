@@ -4,6 +4,7 @@ not just tidiness), and empirical confirmation that telemetry storage
 path construction neutralizes path traversal."""
 
 from __future__ import annotations
+from tests.helpers.lapfile import with_signals
 
 
 def _register(client, name="Driver"):
@@ -136,13 +137,14 @@ def test_uploading_a_lap_with_traversal_payloads_in_track_and_car_name_stays_san
     lap_time = 90.0
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
-        n = 50
+        n = int(lap_time * 20) + 1  # V0.9.9: a checkable frame rate (server/lap_decision.py)
         df = pd.DataFrame({
             "t": np.linspace(0, lap_time, n), "lap_dist": np.linspace(0, 4500, n),
             "speed": np.full(n, 4500.0 / lap_time), "throttle": np.full(n, 0.8), "brake": np.zeros(n),
             "clutch": np.zeros(n), "steering": np.zeros(n), "gear": np.full(n, 4),
             "rpm": np.full(n, 6000.0), "fuel": np.linspace(50, 48, n),
         })
+        df = with_signals(df)  # V0.9.9: the track-limits signals a 0.9.4 client records
         df.to_parquet(tmp_dir / "lap.parquet", index=False)
         meta_path = tmp_dir / "lap.json"
         meta_path.write_text(json.dumps({

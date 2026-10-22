@@ -2,6 +2,7 @@
 // linked to from leaderboard rows and team member lists (§5).
 
 import { api } from "../api.js";
+import { renderActivityList } from "../activity.js";
 import { el, formatLapTime, formatDate, recordTypeLabel, roleLabel } from "../format.js";
 
 import { t } from "../i18n.js";
@@ -66,26 +67,8 @@ export async function renderDriverProfile(container, driverId) {
 
   // --- Recent Activity ---
   container.appendChild(el("h2", {}, t("Recent Activity")));
-  if (!profile.recent_activity.length) {
-    container.appendChild(el("div", { class: "empty-state" }, t("No activity yet.")));
-  } else {
-    const card = el("div", { class: "card" });
-    profile.recent_activity.forEach((a) => {
-      card.appendChild(
-        el("div", { class: "card-row" }, [
-          el("div", {}, [
-            el("span", { class: "tag" }, recordTypeLabel(a.record_type)),
-            el("span", { style: "margin-left:8px;" }, `${a.track_name} — ${a.car_name}`),
-          ]),
-          el("div", {}, [
-            el("span", { class: "lap-time" }, formatLapTime(a.lap_time)),
-            el("div", { class: "subtitle", style: "margin:2px 0 0; text-align:right;" }, formatDate(a.created_at)),
-          ]),
-        ])
-      );
-    });
-    container.appendChild(card);
-  }
+  // V0.9.6: one row per lap, every record it set as a badge (activity.js)
+  container.appendChild(renderActivityList(profile.recent_activity, { limit: 15 }));
 }
 
 function _stat(value, label) {

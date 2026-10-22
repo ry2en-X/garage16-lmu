@@ -29,6 +29,7 @@ from ..lap_insights import consistency, group_sessions
 from ..models import Driver, Lap, RaceRuleSet, TeamMembership
 from ..rate_limit import rate_limit
 from ..stints import analyse_session
+from ..official import visible_filter
 
 router = APIRouter(prefix="/telemetry/analysis/stints", tags=["stints"])
 
@@ -55,7 +56,7 @@ def _lap_dict(lap: Lap, with_stats: bool = True) -> dict:
 def _driver_laps(db: Session, driver_id: int, viewer: Driver, track_name=None, car_model=None) -> List[Lap]:
     stmt = select(Lap).where(Lap.driver_id == driver_id)
     if driver_id != viewer.id:
-        stmt = stmt.where(Lap.is_valid.is_(True))
+        stmt = stmt.where(visible_filter())
     if track_name:
         stmt = stmt.where(Lap.track_name == track_name)
     if car_model:
@@ -145,7 +146,7 @@ def team_comparison(
     (median of the clean laps, spread, best), consumption and wear per lap (medians)."""
     ids = [viewer.id, *_teammate_ids(db, viewer)][:TEAM_COMPARISON_MAX_DRIVERS]
     names = dict(db.execute(select(Driver.id, Driver.display_name).where(Driver.id.in_(ids))).all())
-    stmt = select(Lap).where(Lap.driver_id.in_(ids), Lap.track_name == track_name, Lap.is_valid.is_(True))
+    stmt = select(Lap).where(Lap.driver_id.in_(ids), Lap.track_name == track_name, visible_filter())
     if car_model:
         stmt = stmt.where(or_(Lap.car_model == car_model, Lap.car_name == car_model))
     laps = db.execute(stmt.order_by(Lap.id.desc()).limit(MAX_LAPS_READ * 2)).scalars().all()

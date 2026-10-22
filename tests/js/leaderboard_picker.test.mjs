@@ -54,7 +54,11 @@ await renderLeaderboard(root);
 // 1. every known track is offered straight away, incl. ones nobody drove
 assert.ok(labels($("venueSelect")).some((l) => l.startsWith("Monza") && l.includes("no laps yet")), labels($("venueSelect")).join("|"));
 assert.ok(labels($("venueSelect")).some((l) => l.startsWith("Circuit de la Sarthe")));
-assert.equal($("classSelect").disabled, true);
+// V0.9.6: the busiest track and its busiest class are chosen and shown straight away
+assert.equal($("venueSelect").value, "Fuji Speedway", "the track with the most laps is preselected");
+assert.equal($("classSelect").value, "Hypercar");
+assert.ok(calls.some((c) => c.startsWith("/leaderboard/class/Fuji%20Speedway%20-%20Classic/Hypercar")), "…and its table loaded without a click");
+assert.ok(window.location.hash.includes("track=Fuji+Speedway+-+Classic") && window.location.hash.includes("class=Hypercar"), "the choice is in the address");
 
 // 2. typing "fuji" narrows to the WHOLE track, selects it, and shows its variants
 $("trackSearch").value = "fuji";
@@ -74,8 +78,9 @@ assert.deepEqual(classLabels.map((l) => l.split(" · ")[0]), CLASSES);
 assert.ok(classLabels[0].includes("5 laps") && classLabels[5].includes("no laps yet"));
 
 // 4. picking a class and searching queries the chosen layout + readable class name
+calls.length = 0;
 $("classSelect").value = "Hypercar";
-[...root.querySelectorAll("button")].find((b) => b.textContent === "Search").click();
+$("classSelect").dispatchEvent(new dom.window.Event("change"));   // V0.9.6: no "Search" button — a change reloads
 await settle();
 assert.ok(calls.some((c) => c.startsWith("/leaderboard/class/Fuji%20Speedway%20-%20Classic/Hypercar")), calls.join("\n"));
 assert.ok(root.textContent.includes("Jordan Example"));

@@ -25,6 +25,9 @@ from client.telemetry.channels import EXTENDED_COLUMNS
 G = 9.80665
 
 
+RAMP_M = 150.0      # V0.9.9: metres over which the speed changes (about 2.5 m/s², 0.25 G)
+
+
 def make_lap(
     n: int = 3000,
     lap_time: float = 90.0,
@@ -45,11 +48,25 @@ def make_lap(
     arc = np.pi * radius
     total = 2 * straight + 2 * arc
     # speed as a function of position along the path
+    # V0.9.9: the speed changes over RAMP_M metres instead of jumping from 75 to 38 m/s between two
+    # samples — a jump like that is an impossible deceleration, which the lap check now notices
+    # (server/lap_decision.py, implausible_acceleration). The ramp ends exactly at the corner entry
+    # and starts exactly at its exit, so the corners themselves are unchanged.
+    ramp = min(RAMP_M, 0.45 * straight)
+
     def speed_at(s):
         s = np.mod(s, total)
-        in_turn1 = (s >= straight) & (s < straight + arc)
-        in_turn2 = (s >= 2 * straight + arc)
-        v = np.where(in_turn1 | in_turn2, 38.0, 75.0)
+        turn_starts = (straight, 2 * straight + arc)
+        turn_ends = (straight + arc, total)
+        v = np.full(np.shape(s), 75.0)
+        for start, end in zip(turn_starts, turn_ends):
+            inside = (s >= start) & (s < end)
+            v = np.where(inside, 38.0, v)
+            before = (s >= start - ramp) & (s < start)          # braking into the corner
+            v = np.where(before, 75.0 - (75.0 - 38.0) * (s - (start - ramp)) / ramp, v)
+            after_end = end if end < total else 0.0             # accelerating out of it
+            after = (s >= after_end) & (s < after_end + ramp)
+            v = np.where(after, 38.0 + (75.0 - 38.0) * (s - after_end) / ramp, v)
         return v * speed_scale
 
     s = np.zeros(n)

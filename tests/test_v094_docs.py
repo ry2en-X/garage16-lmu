@@ -25,10 +25,10 @@ def test_versions_and_changelog():
     from client.uploader.uploader import CLIENT_VERSION
     from server.main import VERSION
 
-    assert VERSION == CLIENT_VERSION == "0.9.4"
-    assert (ROOT / "CHANGELOG.md").read_text(encoding="utf-8").split("\n## ", 2)[1].startswith("V0.9.4")
+    # V0.9.5 is the current server (tests/test_v095_docs.py); the desktop client stays 0.9.4
+    assert CLIENT_VERSION == "0.9.4" and VERSION == "0.9.9"
+    assert "\n## V0.9.4 — " in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     assert '#define AppVersion "0.9.4"' in (ROOT / "packaging/version.iss").read_text(encoding="utf-8")
-    assert "server 0.9.4 / desktop client 0.9.4" in (ROOT / "README.md").read_text(encoding="utf-8")
 
 
 def test_the_protocol_has_the_stint_point_and_the_probe_records_it():

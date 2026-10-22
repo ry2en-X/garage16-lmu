@@ -1,0 +1,117 @@
+{
+ "_comment": "V0.9.8/V0.9.9 \u2014 line / branch coverage floors (percent) checked by scripts/release_check.py. A floor is the level reached when it was set, rounded down: it may rise, never fall. Goal for the critical modules: 90 % lines, 85 % branches \u2014 the modules below it are listed in docs/QUALITY.md with what is missing.",
+ "total": {
+  "lines": 88,
+  "branches": 77
+ },
+ "files": {
+  "server/auth.py": {
+   "lines": 100,
+   "branches": 100
+  },
+  "server/records.py": {
+   "lines": 100,
+   "branches": 100
+  },
+  "server/driver_lifecycle.py": {
+   "lines": 100,
+   "branches": 100
+  },
+  "server/leaderboard_ranking.py": {
+   "lines": 100,
+   "branches": 100
+  },
+  "server/security.py": {
+   "lines": 90,
+   "branches": 62
+  },
+  "server/crypto.py": {
+   "lines": 100,
+   "branches": 87
+  },
+  "server/client_ip.py": {
+   "lines": 97,
+   "branches": 95
+  },
+  "server/rate_limit.py": {
+   "lines": 97,
+   "branches": 83
+  },
+  "server/write_lock.py": {
+   "lines": 96,
+   "branches": 77
+  },
+  "server/sessions.py": {
+   "lines": 100,
+   "branches": 87
+  },
+  "server/validation.py": {
+   "lines": 93,
+   "branches": 80
+  },
+  "server/lap_check.py": {
+   "lines": 96,
+   "branches": 92
+  },
+  "server/track_limits.py": {
+   "lines": 94,
+   "branches": 84
+  },
+  "server/distance_axis.py": {
+   "lines": 95,
+   "branches": 71
+  },
+  "server/telemetry_analysis.py": {
+   "lines": 92,
+   "branches": 74
+  },
+  "server/lap_insights.py": {
+   "lines": 97,
+   "branches": 85
+  },
+  "server/car_identity.py": {
+   "lines": 97,
+   "branches": 89
+  },
+  "server/consistency.py": {
+   "lines": 83,
+   "branches": 75
+  },
+  "server/upload_log.py": {
+   "lines": 96,
+   "branches": 92
+  },
+  "server/telemetry_lifecycle.py": {
+   "lines": 98,
+   "branches": 90
+  },
+  "server/team_lifecycle.py": {
+   "lines": 94,
+   "branches": 85
+  },
+  "server/routers/telemetry.py": {
+   "lines": 93,
+   "branches": 90
+  },
+  "server/lap_decision.py": {
+   "lines": 97,
+   "branches": 93
+  },
+  "server/integrity.py": {
+   "lines": 98,
+   "branches": 97
+  },
+  "server/audit.py": {
+   "lines": 97,
+   "branches": 95
+  },
+  "server/official.py": {
+   "lines": 100,
+   "branches": 100
+  },
+  "server/request_context.py": {
+   "lines": 100,
+   "branches": 100
+  }
+ }
+}

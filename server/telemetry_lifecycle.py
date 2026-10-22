@@ -66,13 +66,25 @@ def find_missing_files(db: Session) -> List[MissingFile]:
     return missing
 
 
-def find_orphaned_files(db: Session, *, min_age: timedelta = DEFAULT_MIN_ORPHAN_AGE) -> List[OrphanFile]:
+def stored_path(path: str, stored_prefix: "str | None" = None) -> Path:
+    """V0.9.8: where a lap's file is when the storage is looked at under another path than the
+    one stored in laps.telemetry_path (a restore validates its staged copy at /restore while the
+    rows say /data/telemetry/...): the stored prefix is replaced by the storage root."""
+    if stored_prefix:
+        prefix = stored_prefix.rstrip("/")
+        if path == prefix or path.startswith(prefix + "/"):
+            return settings.telemetry_storage_dir / path[len(prefix):].lstrip("/")
+    return Path(path)
+
+
+def find_orphaned_files(db: Session, *, min_age: timedelta = DEFAULT_MIN_ORPHAN_AGE,
+                        stored_prefix: "str | None" = None) -> List[OrphanFile]:
     """Files under the telemetry storage root with no matching
     Lap.telemetry_path, older than `min_age` (see module docstring for
     why the age check exists — it's the actual safety mechanism here, not
     a tuning knob to relax casually)."""
     known_paths = {
-        Path(p).resolve() for (p,) in db.query(Lap.telemetry_path).all()
+        stored_path(p, stored_prefix).resolve() for (p,) in db.query(Lap.telemetry_path).all()
     }
     cutoff = datetime.now(timezone.utc).timestamp() - min_age.total_seconds()
 
@@ -83,6 +95,10 @@ def find_orphaned_files(db: Session, *, min_age: timedelta = DEFAULT_MIN_ORPHAN_
     orphans = []
     for path in root.rglob("*"):
         if not path.is_file():
+            continue
+        # V0.9.8: the write lock / maintenance marker and a restore's rollback copy
+        # (.pre_restore_<stamp>/, scripts/restore.sh) are not lap files — never orphans
+        if path.relative_to(root).parts[0].startswith("."):
             continue
         if path.resolve() in known_paths:
             continue

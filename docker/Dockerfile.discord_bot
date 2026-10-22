@@ -6,7 +6,9 @@ COPY discord_bot/requirements.txt ./discord_bot/requirements.txt
 # The bot reads the same DB as the server (server/models.py) — it needs
 # the same SQLAlchemy + driver stack, not just discord.py.
 COPY server/requirements.txt ./server/requirements.txt
-RUN pip install --no-cache-dir -r discord_bot/requirements.txt -r server/requirements.txt
+# V0.9.7: the tested versions (constraints.txt)
+COPY constraints.txt ./constraints.txt
+RUN pip install --no-cache-dir -r discord_bot/requirements.txt -r server/requirements.txt -c constraints.txt
 
 COPY server ./server
 COPY discord_bot ./discord_bot

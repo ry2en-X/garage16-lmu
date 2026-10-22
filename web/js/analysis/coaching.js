@@ -27,26 +27,36 @@ export const COACH = { minLoss: 0.03, brakeM: 5, minSpeedKmh: 2, throttleM: 10, 
 
 const num = (v) => v !== null && v !== undefined && Number.isFinite(v);
 
+// V0.9.7: how precisely a point is placed on each lap (server: the distance between the two
+// recorded samples around it, `res`). A difference of two points can be off by both — so a
+// difference only becomes a hint when it is larger than the threshold AND than that sum.
+export function pointUncertainty(a, b, key) {
+  const r = (lap) => (lap && lap.res && num(lap.res[key]) ? lap.res[key] : 0);
+  return r(a) + r(b);
+}
+
 // Pure: the hints for one corner, from Lap 1's (a) and Lap 2's (b) measurements.
 export function cornerHints(corner, lockups = []) {
   const { a, b } = corner;
   const hints = [];
+  const brakeNeed = Math.max(COACH.brakeM, pointUncertainty(a, b, "brake"));
+  const throttleNeed = Math.max(COACH.throttleM, pointUncertainty(a, b, "throttle"));
   if (num(a.brake) && num(b.brake)) {
     const diff = a.brake - b.brake; // > 0: Lap 1 brakes later
     // Lap 2 brakes later AND is not slower at the apex or on the exit for it
     const apexOk = !num(a.min) || !num(b.min) || b.min >= a.min - COACH.minSpeedKmh;
     const exitOk = !num(a.exit) || !num(b.exit) || b.exit >= a.exit - COACH.exitKmh;
-    if (diff <= -COACH.brakeM && apexOk && exitOk) {
-      hints.push({ kind: "brake_later", value: Math.round(-diff), text: t("Brake {0} m later — Lap 2 brakes at {1}, Lap 1 at {2}.", [Math.round(-diff), formatMetres(b.brake), formatMetres(a.brake)]) });
-    } else if (diff >= COACH.brakeM && num(a.min) && num(b.min) && a.min < b.min - COACH.minSpeedKmh) {
-      hints.push({ kind: "overbraking", value: Math.round(diff), text: t("Lap 1 brakes {0} m later but is {1} km/h slower at the apex — brake a little earlier or release the brake sooner.", [Math.round(diff), (b.min - a.min).toFixed(1)]) });
+    if (diff <= -brakeNeed && apexOk && exitOk) {
+      hints.push({ kind: "brake_later", value: Math.round(-diff), uncertainty: pointUncertainty(a, b, "brake"), text: t("Brake {0} m later — Lap 2 brakes at {1}, Lap 1 at {2}.", [Math.round(-diff), formatMetres(b.brake), formatMetres(a.brake)]) });
+    } else if (diff >= brakeNeed && num(a.min) && num(b.min) && a.min < b.min - COACH.minSpeedKmh) {
+      hints.push({ kind: "overbraking", value: Math.round(diff), uncertainty: pointUncertainty(a, b, "brake"), text: t("Lap 1 brakes {0} m later but is {1} km/h slower at the apex — brake a little earlier or release the brake sooner.", [Math.round(diff), (b.min - a.min).toFixed(1)]) });
     }
   }
   if (num(a.min) && num(b.min) && a.min < b.min - COACH.minSpeedKmh && !hints.some((h) => h.kind === "overbraking")) {
     hints.push({ kind: "min_speed", value: b.min - a.min, text: t("Carry {0} km/h more minimum speed ({1} instead of {2} km/h).", [(b.min - a.min).toFixed(1), b.min.toFixed(1), a.min.toFixed(1)]) });
   }
-  if (num(a.throttle) && num(b.throttle) && a.throttle - b.throttle >= COACH.throttleM) {
-    hints.push({ kind: "throttle_earlier", value: Math.round(a.throttle - b.throttle), text: t("Back to full throttle {0} m earlier.", [Math.round(a.throttle - b.throttle)]) });
+  if (num(a.throttle) && num(b.throttle) && a.throttle - b.throttle >= throttleNeed) {
+    hints.push({ kind: "throttle_earlier", value: Math.round(a.throttle - b.throttle), uncertainty: pointUncertainty(a, b, "throttle"), text: t("Back to full throttle {0} m earlier.", [Math.round(a.throttle - b.throttle)]) });
   } else if (num(b.throttle) && !num(a.throttle)) {
     hints.push({ kind: "throttle_missing", value: null, text: t("Lap 1 never reaches full throttle on the way out; Lap 2 does at {0}.", [formatMetres(b.throttle)]) });
   }
@@ -138,7 +148,10 @@ export function renderCoaching(widget, ctx) {
             ? el("ul", { class: "coach__phases" }, groups.map((g) => el("li", { class: "coach__phase", "data-phase": g.phase || "" }, [
               g.phase ? el("span", { class: `coach__phase-head ${g.delta > 0 ? "analysis-diff--loss" : "analysis-diff--gain"}` }, `${labels[g.phase] || g.phase} ${formatDelta(g.delta)} s`) : null,
               g.hints.length
-                ? el("ul", { class: "coach__hints" }, g.hints.map((h) => el("li", { "data-hint": h.kind }, h.text)))
+                ? el("ul", { class: "coach__hints" }, g.hints.map((h) => el("li", { "data-hint": h.kind }, [
+                  h.text,
+                  h.uncertainty ? el("span", { class: "coach__uncertain", title: t("Measuring accuracy of the two points (distance between recorded samples)") }, ` (±${h.uncertainty.toFixed(1)} m)`) : null,
+                ])))
                 : (g.phase ? el("span", { class: "subtitle" }, ` — ${t("no single measured value differs clearly here")}`) : null),
             ])))
             : el("div", { class: "subtitle" }, t("The time is lost gradually (no single measured value differs clearly) — compare the speed traces.")),
@@ -152,7 +165,7 @@ export function renderCoaching(widget, ctx) {
         plan.strengths.map((c) => t("corner {0} ({1} s)", [c.n, formatDelta(c.delta)])).join(" · "),
       ]));
     }
-    body.appendChild(el("div", { class: "subtitle coach__caption" }, t("Each hint compares values measured on both laps (braking point, minimum, full-throttle point, exit speed, wheel lock-ups). Lap 2 is the reference. The time per phase is measured; the phases add up to the corner's time.")));
+    body.appendChild(el("div", { class: "subtitle coach__caption" }, t("Each hint compares values measured on both laps (braking point, minimum, full-throttle point, exit speed, wheel lock-ups). Lap 2 is the reference. The time per phase is measured; the phases add up to the corner's time. ± is the measuring accuracy of a point: a difference smaller than that is never called a hint.")));
   }
   const off = ctx.events ? ctx.events.subscribe(render) : () => {};
   render();

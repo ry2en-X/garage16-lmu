@@ -1,13 +1,13 @@
-// analysis/editor.js — the panel shown in edit mode ("Ansicht anpassen"): add a
-// window, set the three main colours, restore the Garage16 standard layout (V0.9.1).
-// It only edits the layout object (via onChange) — nothing here touches laps, accounts
-// or telemetry; resetting removes the stored UI preference and nothing else.
+// analysis/editor.js — the bar shown in edit mode ("Ansicht anpassen"): a quick way to add a
+// tile from a list (keyboard-friendly; the picker on the side is the main way), the three main
+// colours, "close gaps", restore the Garage16 standard layout (V0.9.1, grid version V0.9.5).
+// It only edits the layout object (via onChange) — nothing here touches laps, accounts or
+// telemetry; resetting removes the stored UI preference and nothing else.
 
 import { el } from "../format.js";
-import { addWidget, MAX_WIDGETS, SINGLE_TYPES } from "./layout.js";
+import { addWidget, compactLayout, MAX_WIDGETS, setColors, SINGLE_TYPES } from "./layout.js";
 import { DEFAULT_COLORS } from "./model.js";
 import { moduleForType } from "./modules.js";
-import { setColors } from "./layout.js";
 import { T } from "./strings.js";
 
 export function createEditorPanel({ layout, catalog, onChange, onReset, onDone, persisted }) {
@@ -15,16 +15,15 @@ export function createEditorPanel({ layout, catalog, onChange, onReset, onDone, 
   const shownCharts = new Set(layout.widgets.filter((w) => w.type === "chart").map((w) => w.channel));
   const shownSingles = new Set(layout.widgets.filter((w) => SINGLE_TYPES.includes(w.type)).map((w) => w.type));
 
-  // --- add a window
+  // --- quick add: the tile goes to the first free spot at its standard size
   const add = el("select", { class: "editor__add", id: "editor_add", "aria-label": T.addWindow }, [el("option", { value: "" }, T.addChoose)]);
   for (const type of SINGLE_TYPES) {
     if (shownSingles.has(type)) continue;
     add.appendChild(el("option", { value: `type:${type}` }, moduleForType(type).title));
   }
-  // V0.9.3: a histogram window starts on the first channel that has none yet (change it in
-  // the window's own channel menu)
+  // a histogram starts on the first channel that has none yet (change it in the tile's own menu)
   const shownHistograms = new Set(layout.widgets.filter((w) => w.type === "histogram").map((w) => w.channel));
-  const pairKeys = new Set(catalog.channels.filter((c) => c.pair).map((c) => c.key));   // V0.9.4: no histogram
+  const pairKeys = new Set(catalog.channels.filter((c) => c.pair).map((c) => c.key));
   const histogramChannel = ["gear", "speed", ...catalog.channels.map((c) => c.key)].find((k) => valid.has(k) && !shownHistograms.has(k) && !pairKeys.has(k));
   if (histogramChannel) add.appendChild(el("option", { value: `histogram:${histogramChannel}` }, moduleForType("histogram").title));
   const groups = new Map();
@@ -52,6 +51,7 @@ export function createEditorPanel({ layout, catalog, onChange, onReset, onDone, 
   const isDefaultColors = ["a", "b", "delta"].every((k) => layout.colors[k] === DEFAULT_COLORS[k].toLowerCase());
   const colorReset = el("button", { type: "button", class: "btn btn--ghost editor__colors-reset", disabled: isDefaultColors ? "disabled" : null, onclick: () => onChange(setColors(layout, { a: DEFAULT_COLORS.a, b: DEFAULT_COLORS.b, delta: DEFAULT_COLORS.delta })) }, T.colorReset);
 
+  const compact = el("button", { type: "button", class: "btn btn--ghost editor__compact", title: T.compactHint, onclick: () => onChange(compactLayout(layout)) }, T.compact);
   const reset = el("button", { type: "button", class: "btn btn--ghost editor__reset", onclick: () => {
     if (typeof window.confirm === "function" && !window.confirm(T.resetConfirm)) return;
     onReset();
@@ -64,7 +64,7 @@ export function createEditorPanel({ layout, catalog, onChange, onReset, onDone, 
     persisted ? null : el("div", { class: "notice notice--error editor__storage" }, T.storageUnavailable),
     el("div", { class: "inline-form editor__row" }, [el("label", { for: "editor_add" }, T.addWindow), add]),
     el("div", { class: "inline-form editor__row" }, [el("strong", {}, `${T.colors}: `), swatch(T.colorLap1, "a"), swatch(T.colorLap2, "b"), swatch(T.colorDelta, "delta"), colorReset]),
-    el("div", { class: "inline-form editor__row" }, [reset, done]),
+    el("div", { class: "inline-form editor__row" }, [compact, reset, done]),
   ]);
   return { element };
 }

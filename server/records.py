@@ -6,6 +6,7 @@ from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from .models import Lap, RecordEvent, TeamMembership
+from .official import is_official, official_filter
 
 
 def _car_identity_filter(lap: Lap):
@@ -33,7 +34,7 @@ def _car_identity_filter(lap: Lap):
 
 def _prior_best(db: Session, lap: Lap, **extra_filters) -> Optional[float]:
     query = db.query(func.min(Lap.lap_time)).filter(
-        Lap.is_valid.is_(True),
+        official_filter(),
         Lap.track_name == lap.track_name,
         _car_identity_filter(lap),
         Lap.id != lap.id,
@@ -59,7 +60,9 @@ def evaluate_and_record(db: Session, lap: Lap) -> List[RecordEvent]:
     write sequence across concurrent uploads instead of just the final
     write. See that module for the reasoning.
     """
-    if not lap.is_valid:
+    if not is_official(lap):
+        # V0.9.9: a held (REVIEW) or quarantined lap sets no record — its events are evaluated
+        # when an admin clears it (routers/admin.py review_lap)
         return []
 
     # car_name here is purely the human-readable label stored on the
@@ -91,7 +94,7 @@ def evaluate_and_record(db: Session, lap: Lap) -> List[RecordEvent]:
             .join(TeamMembership, TeamMembership.driver_id == Lap.driver_id)
             .filter(
                 TeamMembership.team_id == team_id,
-                Lap.is_valid.is_(True),
+                official_filter(),
                 Lap.track_name == lap.track_name,
                 _car_identity_filter(lap),
                 Lap.id != lap.id,

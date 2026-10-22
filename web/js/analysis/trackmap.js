@@ -256,7 +256,7 @@ export function createTrackMap(state, opts = {}) {
   }
 
   function draw() {
-    const fit = fitCanvas(canvas, HEIGHT);
+    const fit = fitCanvas(canvas, opts.height || HEIGHT);
     if (!fit) return;
     const { ctx, w, h } = fit;
     const key = `${w}x${h}|${mode}`;

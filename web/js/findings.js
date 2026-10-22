@@ -40,7 +40,19 @@ export function findingText(f) {
     case "penalty_added": return t("Penalty received from LMU");
     case "wheels_off": return t("{0} wheels off the track", [d.wheels ?? 2]);
     case "signal_unreliable": return t("Signal ignored as implausible: {0}", [f.source]);
-    case "not_verifiable": return t("No track-limits data in this lap (recorded by an older client)");
+    case "not_verifiable": return t("No track-limits data in this lap — it cannot be checked");
+    // V0.9.9: the decision layer (server/lap_decision.py)
+    case "signals_missing": return t("Signals this client version always records are missing: {0}", [[...(d.missing || []), ...(d.empty || []), ...(d.unreadable || [])].join(", ") || "?"]);
+    case "insufficient_evidence": return t("Only one independent track-limits signal could be checked");
+    case "coverage_gap": return t("No telemetry for {0} s", [d.seconds ?? "?"]);
+    case "low_frame_rate": return t("Only {0} frames per second", [d.frame_rate_hz ?? "?"]);
+    case "position_jump": return t("Lap distance jumps {0} m ahead (speed allows {1} m)", [d.advance_m ?? "?", d.by_speed_m ?? "?"]);
+    case "speed_distance_mismatch": return t("Speed trace and lap distance disagree (ratio {0})", [d.ratio ?? "?"]);
+    case "implausible_acceleration": return t("Implausible acceleration ({0} G)", [d.g ?? "?"]);
+    case "frozen_samples": return t("{0} s of repeated samples while the time advanced", [d.seconds ?? "?"]);
+    case "telemetry_reused": return t("This exact file was already uploaded by another driver");
+    case "check_failed": return t("The check could not run on this file");
+    case "unsupported_inputs": return t("Check inputs from a newer server version");
     default: return f.code;
   }
 }
@@ -67,7 +79,18 @@ export function ruleTitle(code) {
     penalty_added: t("Penalty received from LMU"),
     wheels_off: t("Wheels off the track"),
     signal_unreliable: t("Signal ignored as implausible"),
-    not_verifiable: t("No track-limits data (older client)"),
+    not_verifiable: t("No track-limits data (not checkable)"),
+    signals_missing: t("Expected signals missing"),
+    insufficient_evidence: t("Too few independent signals"),
+    coverage_gap: t("Gap in the telemetry"),
+    low_frame_rate: t("Too few frames per second"),
+    position_jump: t("Lap distance jumps ahead"),
+    speed_distance_mismatch: t("Speed and lap distance disagree"),
+    implausible_acceleration: t("Implausible acceleration"),
+    frozen_samples: t("Repeated samples"),
+    telemetry_reused: t("File uploaded by another driver"),
+    check_failed: t("Check failed"),
+    unsupported_inputs: t("Check inputs from a newer server"),
   }[code] || code;
 }
 
@@ -77,6 +100,7 @@ export function tierText(tier) {
     rule: t("Garage16 rule"),
     heuristic: t("measurement (review only)"),
     signal: t("signal"),
+    quality: t("data quality (review only)"),
   }[tier] || "";
 }
 

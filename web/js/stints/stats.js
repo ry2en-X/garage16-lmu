@@ -104,7 +104,24 @@ export function theilSen(xs, ys) {
   const slope = median(slopes);
   const intercept = median(pts.map(([x, y]) => y - slope * x));
   const residuals = pts.map(([x, y]) => y - (intercept + slope * x));
-  return { slope, intercept, n: pts.length, spread: mad(residuals) };
+  // V0.9.7: Sen's 95 % confidence interval of the slope (distribution-free: the ranks of the
+  // pairwise slopes around the median, C = 1.96 * sqrt(n(n-1)(2n+5)/18); Sen 1968, ties ignored)
+  slopes.sort((p, q) => p - q);
+  const n = pts.length;
+  const c = 1.96 * Math.sqrt((n * (n - 1) * (2 * n + 5)) / 18);
+  const lo = Math.floor((slopes.length - c) / 2);
+  const hi = Math.ceil((slopes.length + c) / 2) - 1;
+  const ci = lo >= 0 && hi < slopes.length && lo <= hi ? [slopes[lo], slopes[hi]] : null;
+  return { slope, intercept, n, spread: mad(residuals), ci };
+}
+
+// Two-sided 95 % quantile of Student's t with df degrees of freedom (Cornish–Fisher expansion
+// around the normal quantile; within 0.5 % of the tables for df >= 3).
+export function t95(df) {
+  if (!(df >= 1)) return null;
+  const z = 1.959964;
+  return z + (z ** 3 + z) / (4 * df) + (5 * z ** 5 + 16 * z ** 3 + 3 * z) / (96 * df ** 2)
+    + (3 * z ** 7 + 19 * z ** 5 + 17 * z ** 3 - 15 * z) / (384 * df ** 3);
 }
 
 export function pearson(xs, ys) {
@@ -135,19 +152,30 @@ export function regress2(x1, x2, y) {
       s[i][3] += x[i] * v;
     }
   }
-  // Gauss-Jordan
+  // Gauss-Jordan on [X'X | X'y | I] — V0.9.7: the inverse too, for the standard errors
+  for (let i = 0; i < 3; i += 1) s[i].push(...[0, 1, 2].map((j) => (i === j ? 1 : 0)));
   for (let c = 0; c < 3; c += 1) {
     let pivot = c;
     for (let r = c + 1; r < 3; r += 1) if (Math.abs(s[r][c]) > Math.abs(s[pivot][c])) pivot = r;
     if (Math.abs(s[pivot][c]) < 1e-12) return { ok: false, reason: "singular", n: rows.length };
     [s[c], s[pivot]] = [s[pivot], s[c]];
+    const d = s[c][c];
+    for (let k = 0; k < 7; k += 1) s[c][k] /= d;
     for (let r = 0; r < 3; r += 1) {
       if (r === c) continue;
-      const f = s[r][c] / s[c][c];
-      for (let k = c; k < 4; k += 1) s[r][k] -= f * s[c][k];
+      const f = s[r][c];
+      for (let k = 0; k < 7; k += 1) s[r][k] -= f * s[c][k];
     }
   }
-  return { ok: true, b0: s[0][3] / s[0][0], b1: s[1][3] / s[1][1], b2: s[2][3] / s[2][2], n: rows.length, r: corr.r };
+  const b = [s[0][3], s[1][3], s[2][3]];
+  const inv = [0, 1, 2].map((i) => [s[i][4], s[i][5], s[i][6]]);
+  const rss = rows.reduce((sum, [a, c, v]) => sum + (v - (b[0] + b[1] * a + b[2] * c)) ** 2, 0);
+  const df = rows.length - 3;
+  const sigma2 = df > 0 ? rss / df : null;
+  const se = (i) => (sigma2 !== null && inv[i][i] >= 0 ? Math.sqrt(sigma2 * inv[i][i]) : null);
+  const q = t95(df);
+  const ci = (i) => (se(i) !== null && q ? [b[i] - q * se(i), b[i] + q * se(i)] : null);
+  return { ok: true, b0: b[0], b1: b[1], b2: b[2], se1: se(1), se2: se(2), ci1: ci(1), ci2: ci(2), n: rows.length, r: corr.r };
 }
 
 // ------------------------------------------------------------------ laps and filters
@@ -179,7 +207,19 @@ export function paceSummary(laps, clean, { window = 5 } = {}) {
     thirds: thirds(times),
     best_window: bestWindow(times, Math.min(window, times.length)),
     trend: times.length >= MIN_DEGRADATION_LAPS ? theilSen(times.map((_, i) => i), times) : null,
+    // V0.9.7: consistency WITHOUT the trend. A driver whose laps get 0.05 s slower every lap
+    // (tyres) has a large stdev although every lap is exactly on the line — the spread of the
+    // residuals around the Theil–Sen trend (robust: MAD × 1.4826 ≈ one sigma) is the
+    // lap-to-lap consistency itself.
+    consistency: times.length >= MIN_DEGRADATION_LAPS ? detrendedSpread(times) : null,
   };
+}
+
+export function detrendedSpread(times) {
+  const fit = theilSen(times.map((_, i) => i), times);
+  if (!fit) return null;
+  const residuals = times.map((v, i) => v - (fit.intercept + fit.slope * i));
+  return { sigma: 1.4826 * mad(residuals), n: times.length, trend: fit.slope };
 }
 
 // Degradation per stint: Theil–Sen slope of clean lap time over tyre age (s per lap) — the
@@ -198,7 +238,7 @@ export function fuelCorrectedDegradation(laps, clean) {
   // one stint alone never separates them (age up, fuel down, lap by lap)
   if (new Set(pts.map((l) => l.stint)).size < 2) return { ok: false, reason: "one_stint", n: pts.length };
   const fit = regress2(pts.map((l) => l.tyre_age), pts.map((l) => l.fuel_start_l), pts.map((l) => l.lap_time));
-  return fit.ok ? { ...fit, per_lap_tyre: fit.b1, per_litre: fit.b2, estimated: true } : fit;
+  return fit.ok ? { ...fit, per_lap_tyre: fit.b1, per_litre: fit.b2, per_lap_tyre_ci: fit.ci1, per_litre_ci: fit.ci2, estimated: true } : fit;
 }
 
 // ------------------------------------------------------------------ forecast

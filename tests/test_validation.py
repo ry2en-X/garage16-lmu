@@ -155,7 +155,12 @@ def test_unknown_sector_times_are_not_a_plausibility_failure_but_a_review():
     result = validate_dataframe(df, _meta(lap_time=90.0, sector_times=(0.0, 0.0, 0.0)))
     assert result.is_valid is True
     verdict = tl.assess({}, client_valid=True, sectors_ok=sectors_ok([0.0, 0.0, 0.0]))
-    assert [f.code for f in verdict.findings if f.severity == tl.REVIEW] == ["sector_times_implausible"]
+    # V0.9.9: reported, but no longer a review reason (REVIEW now holds a lap out of the
+    # leaderboards; unknown sectors say nothing about validity). The lap without any columns is
+    # REVIEW for another reason: it cannot be checked at all (not_verifiable).
+    severities = {f.code: f.severity for f in verdict.findings}
+    assert severities["sector_times_implausible"] == tl.INFO
+    assert severities["not_verifiable"] == tl.REVIEW
     # real (non-zero) sectors that do not add up are still wrong
     bad = validate_dataframe(df, _meta(lap_time=90.0, sector_times=(30.0, 20.0, 10.0)))
     assert bad.is_valid is False and any("sector_times" in r for r in bad.reasons)

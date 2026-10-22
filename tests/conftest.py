@@ -86,3 +86,71 @@ def _reset_analysis_cache():
     yield
     analysis_cache.clear()
     clear_lap_cache()
+
+
+# ---------------------------------------------------------------------------
+# V0.9.7: release gate — a skipped test is NOT a passed test
+# ---------------------------------------------------------------------------
+#
+# Many tests skip themselves when a tool is missing (node/jsdom for the frontend, bash/gzip for the
+# backup scripts, xvfb for the client GUI, caddy for the reverse proxy). That keeps a quick local
+# run usable, but a release must not be built from a run in which half the checks silently did not
+# happen. With GARAGE16_STRICT_TESTS=1 (set by scripts/release_check.py and the CI pipeline):
+#
+#   * the session refuses to start when a dependency the suite needs is missing — reported as an
+#     INFRASTRUCTURE problem with exit code 6, never as a test result;
+#   * every skip counts as a failure, unless its reason matches GARAGE16_ALLOWED_SKIPS
+#     (comma-separated substrings) or is one of the documented opt-in checks ("opt-in").
+
+STRICT_EXIT_INFRASTRUCTURE = 6
+_STRICT = os.environ.get("GARAGE16_STRICT_TESTS") == "1"
+_ALWAYS_ALLOWED_SKIPS = ("opt-in",)
+
+
+def _allowed_skips() -> tuple:
+    extra = [s.strip() for s in os.environ.get("GARAGE16_ALLOWED_SKIPS", "").split(",") if s.strip()]
+    return _ALWAYS_ALLOWED_SKIPS + tuple(extra)
+
+
+def pytest_sessionstart(session):
+    if not _STRICT:
+        return
+    from scripts.test_requirements import missing_test_dependencies
+
+    # tools (caddy, xvfb-run, …) are not required up front: their tests skip, and a skip fails
+    # in strict mode with the test's own explanation
+    missing = missing_test_dependencies(include_tools=False)
+    if missing:
+        pytest.exit(
+            "INFRASTRUCTURE: the test environment is incomplete, nothing was tested — missing: "
+            + "; ".join(missing)
+            + ". Set it up with scripts/setup_test_env.sh (or see README, 'Running the tests').",
+            returncode=STRICT_EXIT_INFRASTRUCTURE,
+        )
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    report = outcome.get_result()
+    if not _STRICT or not report.skipped or hasattr(report, "wasxfail"):
+        return
+    reason = report.longrepr[2] if isinstance(report.longrepr, tuple) else str(report.longrepr)
+    if any(token in reason for token in _allowed_skips()):
+        return
+    report.outcome = "failed"
+    report.longrepr = f"STRICT (GARAGE16_STRICT_TESTS=1): a skipped test counts as a failure — {reason}"
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_make_collect_report(collector):
+    """A whole module skipped at import (pytest.importorskip) is the same: not tested."""
+    outcome = yield
+    report = outcome.get_result()
+    if not _STRICT or not report.skipped:
+        return
+    reason = report.longrepr[2] if isinstance(report.longrepr, tuple) else str(report.longrepr)
+    if any(token in reason for token in _allowed_skips()):
+        return
+    report.outcome = "failed"
+    report.longrepr = f"STRICT (GARAGE16_STRICT_TESTS=1): a module skipped at import counts as a failure — {reason}"

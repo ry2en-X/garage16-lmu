@@ -34,10 +34,11 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import HTTPException, Request, status
 
+from .client_ip import client_ip
 from .config import settings
 
 # key -> (window_start_epoch, count)
@@ -46,16 +47,9 @@ _lock = threading.Lock()
 
 
 def _client_ip(request: Request) -> str:
-    # If running behind a reverse proxy (the expected production setup —
-    # see require_https in main.py), the proxy should be configured to
-    # pass the real client IP via X-Forwarded-For; trust it only because
-    # main.py's require_https already assumes a trusted proxy sits in
-    # front. If X-Forwarded-For is absent (direct connection, e.g. local
-    # dev), fall back to the socket's own address.
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    # V0.9.8: X-Forwarded-For only from a trusted proxy, read from the right (server/client_ip.py) —
+    # before, the first entry of a header the caller writes himself was taken as his address.
+    return client_ip(request)
 
 
 def _check(bucket: str, key: str, max_requests: int, window_seconds: float) -> bool:

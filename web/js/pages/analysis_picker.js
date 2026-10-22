@@ -22,26 +22,64 @@ function basicTag(item) {
     : null;
 }
 
-function lapRow(lap, { showTrack, onPick, excludeId }) {
+// V0.9.6: the car MODEL (the livery name is in the tooltip); the fastest valid lap of the list
+// is marked; a click anywhere on the row selects it (the button stays, for keyboards).
+function lapRow(lap, { onPick, excludeId, bestId }) {
   const disabled = excludeId != null && lap.id === excludeId;
-  return el("tr", {}, [
-    showTrack ? el("td", {}, lap.track_name) : null,
-    el("td", {}, lap.car_name || lap.car_model || ""),
+  const row = el("tr", { class: `picker__row${disabled ? " picker__row--off" : ""}${lap.id === bestId ? " picker__row--best" : ""}` }, [
+    el("td", { title: lap.car_name || "" }, lap.car_model || lap.car_name || ""),
     el("td", {}, `#${lap.lap_number}`),
-    el("td", {}, el("span", { class: "lap-time" }, formatLapTime(lap.lap_time))),
+    el("td", {}, [el("span", { class: "lap-time" }, formatLapTime(lap.lap_time)), lap.id === bestId ? el("span", { class: "tag tag--gold picker__best" }, t("best")) : null]),
     el("td", {}, [el("span", { class: `tag ${lap.is_valid ? "tag--valid" : "tag--invalid"}` }, lap.is_valid ? t("valid") : t("invalid")), " ", basicTag(lap)]),
-    el("td", {}, formatDate(lap.uploaded_at)),
-    el("td", {}, el("button", { class: "btn btn--ghost", disabled: disabled ? "disabled" : null, onclick: () => onPick(lap.id) }, disabled ? t("Already chosen") : t("Select"))),
+    el("td", { class: "picker__when" }, formatDate(lap.uploaded_at)),
+    el("td", {}, el("button", { class: "btn btn--ghost", disabled: disabled ? "disabled" : null, onclick: (event) => { event.stopPropagation(); onPick(lap.id); } }, disabled ? t("Already chosen") : t("Select"))),
+  ]);
+  if (!disabled) row.addEventListener("click", () => onPick(lap.id));
+  return row;
+}
+
+function oneTable(laps, options) {
+  const valid = laps.filter((l) => l.is_valid && l.lap_time > 0);
+  const best = valid.length ? valid.reduce((a, b) => (b.lap_time < a.lap_time ? b : a)) : null;
+  const head = [t("Car"), t("Lap"), t("Time"), "", t("Set"), ""];
+  return el("table", { class: "timing-table picker__table" }, [
+    el("thead", {}, el("tr", {}, head.map((h, i) => el("th", { class: i === 4 ? "picker__when" : null }, h)))),
+    el("tbody", {}, laps.map((lap) => lapRow(lap, { ...options, bestId: best ? best.id : null }))),
   ]);
 }
 
+// The "basic data" explanation, only when such a lap is in the list.
+function basicLegend(laps) {
+  if (!laps.some((lap) => isBasicLap(lap))) return null;
+  return el("div", { class: "subtitle", style: "margin:0 0 12px;" }, [
+    el("span", { class: "tag tag--basic" }, t("basic data")),
+    t(" = recorded with a client older than 0.9.0: it can still be compared, but only on the basic channels (no suspension, tyre forces, G-forces or TC/ABS)."),
+  ]);
+}
+
+// V0.9.6: across all tracks the laps are grouped per track (the most recent track open), so the
+// first choice is "which track", not a scroll through one long table.
 function lapTable(laps, options) {
   if (!laps.length) return el("div", { class: "empty-state" }, t("No laps found here."));
-  const head = [options.showTrack ? t("Track") : null, t("Car"), t("Lap"), t("Time"), "", t("Set"), ""].filter((h) => h !== null);
-  return el("table", { class: "timing-table" }, [
-    el("thead", {}, el("tr", {}, head.map((h) => el("th", {}, h)))),
-    el("tbody", {}, laps.map((lap) => lapRow(lap, options))),
-  ]);
+  if (!options.showTrack) return el("div", {}, [basicLegend(laps), oneTable(laps, options)]);
+  const groups = new Map();
+  for (const lap of laps) {
+    if (!groups.has(lap.track_name)) groups.set(lap.track_name, []);
+    groups.get(lap.track_name).push(lap);
+  }
+  const nodes = [...groups].map(([track, list], i) => {
+    const best = list.filter((l) => l.is_valid && l.lap_time > 0).reduce((a, b) => (!a || b.lap_time < a.lap_time ? b : a), null);
+    const group = el("details", { class: "picker__group", "data-track": track }, [
+      el("summary", {}, [
+        el("strong", {}, track),
+        el("span", { class: "subtitle picker__group-meta" }, `${tp("{0} lap", "{0} laps", list.length, [list.length])}${best ? ` · ${t("best")} ${formatLapTime(best.lap_time)}` : ""}`),
+      ]),
+      oneTable(list, options),
+    ]);
+    if (i === 0) group.open = true;
+    return group;
+  });
+  return el("div", {}, [basicLegend(laps), ...nodes]);
 }
 
 export function renderLapPicker(container, { title, context = {}, excludeId, onPick }) {
@@ -51,10 +89,6 @@ export function renderLapPicker(container, { title, context = {}, excludeId, onP
   const tabBar = el("div", { class: "inline-form picker__tabs" });
   const body = el("div", { class: "picker__body" });
   box.appendChild(tabBar);
-  box.appendChild(el("div", { class: "subtitle", style: "margin:0 0 12px;" }, [
-    el("span", { class: "tag tag--basic" }, t("basic data")),
-    t(" = recorded with a client older than 0.9.0: it can still be compared, but only on the basic channels (no suspension, tyre forces, G-forces or TC/ABS)."),
-  ]));
   box.appendChild(body);
   container.appendChild(box);
 
@@ -69,6 +103,7 @@ export function renderLapPicker(container, { title, context = {}, excludeId, onP
     buttons[id] = el("button", { class: "btn btn--ghost", onclick: () => show(id) }, label);
     tabBar.appendChild(buttons[id]);
   }
+  if (tabs.length === 1) tabBar.style.display = "none";   // V0.9.6: one tab is no choice
 
   const notice = (message, error = false) => el("div", { class: `notice${error ? " notice--error" : ""}` }, message);
 
@@ -115,6 +150,8 @@ export function renderLapPicker(container, { title, context = {}, excludeId, onP
           return;
         }
         const leader = entries[0].lap_time;
+        const legend = basicLegend(entries);
+        if (legend) list.appendChild(legend);
         list.appendChild(
           el("table", { class: "timing-table" }, [
             el("thead", {}, el("tr", {}, ["#", t("Driver"), t("Lap"), t("Gap"), ""].map((h) => el("th", {}, h)))),

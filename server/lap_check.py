@@ -34,10 +34,11 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
-from . import car_identity, lap_insights, track_limits
+from . import car_identity, lap_decision, lap_insights, track_limits
 from .config import settings
 from .models import Lap
 from .validation import PLAUSIBILITY_REASON_PREFIXES, ValidationResult, validate_and_read
+from .official import official_filter
 
 logger = logging.getLogger("lmu_garage.lap_check")
 
@@ -72,7 +73,16 @@ class LapCheck:
 
     @property
     def review_status(self) -> Optional[str]:
-        return "pending" if self.is_valid and self.verdict.status == track_limits.STATUS_REVIEW else None
+        # V0.9.9: "held" — a REVIEW lap is stored but not official until an admin clears it
+        # (server/official.py). "pending" (counts provisionally) remains only on laps judged before.
+        return "held" if self.is_valid and self.verdict.status == track_limits.STATUS_REVIEW else None
+
+    @property
+    def status(self) -> str:
+        """VALID / INVALID / REVIEW of the whole check (server/lap_decision.py)."""
+        if not self.is_valid:
+            return track_limits.STATUS_INVALID
+        return self.verdict.status
 
     def invalid_reason(self) -> Optional[list]:
         if self.is_valid:
@@ -100,7 +110,7 @@ def is_automatic_reason(text) -> bool:
 
 def reference_distance(db: Session, track_name: str, exclude_lap_id: Optional[int] = None) -> Optional[float]:
     """Median driven distance of the most recent valid laps on this layout."""
-    query = db.query(Lap.lap_stats).filter(Lap.track_name == track_name, Lap.is_valid.is_(True), Lap.lap_stats.is_not(None))
+    query = db.query(Lap.lap_stats).filter(Lap.track_name == track_name, official_filter(), Lap.lap_stats.is_not(None))
     if exclude_lap_id is not None:
         query = query.filter(Lap.id != exclude_lap_id)
     rows = query.order_by(Lap.id.desc()).limit(REFERENCE_LAPS).all()
@@ -187,9 +197,14 @@ def inputs_for_lap(lap: Lap) -> dict:
 # ---------------------------------------------------------------------------
 
 def check_lap(db: Session, path: Path, metadata, *, client_valid: bool, exclude_lap_id: Optional[int] = None,
-              inputs: Optional[dict] = None, promote: Optional[frozenset] = None) -> LapCheck:
+              inputs: Optional[dict] = None, promote: Optional[frozenset] = None,
+              client_version: Optional[str] = None, reused_by_others: int = 0,
+              reference: Optional[float] = None) -> LapCheck:
     """`metadata`: LapMetadata (or anything with the same attributes). `inputs`: stored
-    check inputs (re-judging); built from `metadata` when not given."""
+    check inputs (re-judging); built from `metadata` when not given. V0.9.9: `client_version`
+    decides which signals the file must contain; `reused_by_others`: how many OTHER drivers
+    already uploaded exactly this file. `db` may be None (the reference dataset,
+    scripts/trackcheck_eval.py): the layout's usual distance is then `reference`."""
     if inputs is None:
         inputs = inputs_from_metadata(metadata, client_valid)
     if promote is None:
@@ -207,7 +222,8 @@ def check_lap(db: Session, path: Path, metadata, *, client_valid: bool, exclude_
     tail = max(tail, int(getattr(validation, "reset_tail", 0) or 0))
     client_ok = bool(inputs.get("client_valid", client_valid))
     try:
-        reference = reference_distance(db, metadata.track_name, exclude_lap_id) if columns else None
+        if db is not None:
+            reference = reference_distance(db, metadata.track_name, exclude_lap_id) if columns else None
         verdict = track_limits.assess(
             columns, tail_samples=tail, client_valid=client_ok, client_state=inputs.get("client_state"),
             reference_distance=reference, client_reasons=inputs.get("client_reasons"), late=inputs.get("late"),
@@ -216,11 +232,26 @@ def check_lap(db: Session, path: Path, metadata, *, client_valid: bool, exclude_
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Track-limits check crashed for %s: %s", Path(path).name, exc)
-        verdict = track_limits.Verdict(
-            status=track_limits.STATUS_VALID if client_ok else track_limits.STATUS_INVALID,
-            findings=[] if client_ok else [track_limits.Finding("client_invalid", track_limits.INVALID, "client")],
-            signals=["client"],
+        # V0.9.9: a crash is never a pass — REVIEW (or the client's own rejection)
+        findings = [track_limits.Finding("check_failed", track_limits.severity_of("check_failed"), "decision",
+                                         detail={"error": type(exc).__name__})]
+        if not client_ok:
+            findings.append(track_limits.Finding("client_invalid", track_limits.INVALID, "client"))
+        verdict = track_limits._verdict(findings, ["client"])
+    try:
+        lap_decision.assess(
+            columns, verdict, client_version=client_version, tail_samples=tail, plausible=validation.is_valid,
+            plausibility_reasons=validation.reasons, reused_by_others=reused_by_others,
+            inputs_version=inputs.get("version"), known_inputs_version=INPUTS_VERSION,
         )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Lap decision crashed for %s: %s", Path(path).name, exc)
+        verdict.add([track_limits.Finding("check_failed", track_limits.severity_of("check_failed"), "decision",
+                                          detail={"error": type(exc).__name__, "step": "decision"})])
+    if verdict.decision is not None:
+        # what else the verdict depended on, so a later re-check can be compared exactly
+        verdict.decision["reference_distance_m"] = round(reference, 1) if reference else None
+        verdict.decision["promoted"] = sorted(promote)
     try:
         stats = lap_insights.compute(columns, lap_time=metadata.lap_time, tail_samples=tail,
                                       sector_times=getattr(metadata, "sector_times", None)) if columns else {}
@@ -302,9 +333,12 @@ def _neighbour(db: Session, lap: Lap, offset: int) -> Optional[Lap]:
     return best
 
 
-def _link(target: Lap, source: Lap, reports: List[dict]) -> bool:
+def _link(target: Lap, source: Lap, reports: List[dict], hold: bool = False) -> bool:
     """Adds the late_track_limits findings `source`'s early reports imply to `target` (the
-    lap before it). Idempotent; never if the client already observed the late window."""
+    lap before it). Idempotent; never if the client already observed the late window.
+    V0.9.9 `hold`: `target` is the lap being uploaded right now — it is held (not official). A lap
+    that was already stored keeps counting provisionally ("pending"): a record it may hold is never
+    taken away silently by a later upload; the admin decides in the review queue."""
     validation = dict(target.validation or {})
     if not validation or _has_client_late(validation):
         return False
@@ -324,11 +358,11 @@ def _link(target: Lap, source: Lap, reports: List[dict]) -> bool:
     validation["status"] = combined_status(validation)
     target.validation = validation
     if target.is_valid and validation["status"] == track_limits.STATUS_REVIEW and not target.review_status:
-        target.review_status = "pending"
+        target.review_status = "held" if hold else "pending"
     return True
 
 
-def link_neighbours(db: Session, lap: Lap) -> int:
+def link_neighbours(db: Session, lap: Lap, new_lap: bool = False) -> int:
     """Attributes track-limits reports LMU sent after the finish line (see the module
     docstring). Call after the lap row is flushed; runs in the caller's transaction.
     Returns how many laps got a linked finding."""
@@ -343,7 +377,7 @@ def link_neighbours(db: Session, lap: Lap) -> int:
         following = _neighbour(db, lap, +1)
         if following is not None:
             reports = _early_reports(following.validation)
-            if reports and _link(lap, following, reports):
+            if reports and _link(lap, following, reports, hold=new_lap):
                 db.add(lap)
                 changed += 1
     except Exception as exc:  # noqa: BLE001 — attribution is a refinement, never a reason to fail an upload

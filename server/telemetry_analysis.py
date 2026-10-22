@@ -9,10 +9,12 @@ Pipeline for one lap
      columns; a comparison of 8 channels reads about a tenth of them)
   2. expand the three per-wheel list columns of the core format
      (tire_pressures, tire_temps_outer, brake_temps) into per-wheel columns
-  3. make the distance axis usable: lap_dist is only monotonic up to sensor
-     jitter, so it is replaced by its running maximum and duplicate positions
-     (standing car, stalled frames) are dropped. Interpolation needs a strictly
-     increasing axis.
+  3. make the distance axis usable (V0.9.5, see distance_axis()): repeated polls of an
+     unchanged telemetry frame are dropped; lap_dist (LMU's SCORING value, which the
+     game may refresh less often than the telemetry) is kept wherever it advances, and
+     the samples in between get their distance from the integrated speed, scaled so it
+     meets lap_dist exactly at the next update. Interpolation needs a strictly
+     increasing axis, so rows that do not advance (standing car) are dropped.
   4. calibrate the sign conventions from the lap itself
      (telemetry_channels.calibrate_orientation)
   5. compute each requested channel at the native sample rate, THEN resample to
@@ -42,6 +44,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
+from .distance_axis import distance_axis, fill_short_gaps  # noqa: F401  (re-exported)
 from .telemetry_channels import (
     CATALOG,
     WHEEL_POSITIONS,
@@ -135,12 +138,36 @@ def _wheel_list_to_array(column: pa.ChunkedArray) -> Optional[np.ndarray]:
     return values.reshape(-1, 4)
 
 
+# V0.9.9: what a lap file may unpack to. A real lap: ~190 columns, 5,000–35,000 rows (60 Hz polls,
+# up to a ~9 min lap), 10–60 MB uncompressed. The limits leave a wide margin and stop a small,
+# highly compressed file ("decompression bomb") from taking the server's memory.
+MAX_FILE_ROWS = 200_000
+MAX_FILE_COLUMNS = 1_000
+MAX_FILE_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
+LIMIT_MESSAGE = "exceeds the decoding limits"
+
+
+def check_limits(pf: "pq.ParquetFile") -> None:
+    """Raises AnalysisError when the file's own footer announces more than the limits allow
+    (checked before any column is decoded)."""
+    meta = pf.metadata
+    if meta is None:
+        return
+    uncompressed = sum(meta.row_group(i).total_byte_size for i in range(meta.num_row_groups))
+    if meta.num_rows > MAX_FILE_ROWS or meta.num_columns > MAX_FILE_COLUMNS or uncompressed > MAX_FILE_UNCOMPRESSED_BYTES:
+        raise AnalysisError(
+            f"Telemetry file {LIMIT_MESSAGE} ({meta.num_rows} rows, {meta.num_columns} columns, "
+            f"{uncompressed // (1024 * 1024)} MiB uncompressed)")
+
+
 def _open(path: Path) -> "pq.ParquetFile":
     """Opens a lap file once, memory-mapped (the OS pages in only the column chunks that are read)."""
     try:
-        return pq.ParquetFile(str(path), memory_map=True)
+        pf = pq.ParquetFile(str(path), memory_map=True)
     except Exception as exc:  # noqa: BLE001
         raise AnalysisError(f"Telemetry file could not be read: {exc}") from exc
+    check_limits(pf)
+    return pf
 
 
 def read_raw(path: Path, wanted: Sequence[str], parquet: "Optional[pq.ParquetFile]" = None) -> Dict[str, np.ndarray]:
@@ -196,6 +223,7 @@ class LapSeries:
     raw: Dict[str, np.ndarray]
     orientation: Orientation
     available: set = field(default_factory=set)  # logical columns the file offers
+    axis: dict = field(default_factory=dict)      # V0.9.5: distance_axis() stats
 
     @property
     def length(self) -> float:
@@ -212,6 +240,12 @@ def _monotonic_axis(lap_dist: np.ndarray, t: np.ndarray) -> np.ndarray:
     keep &= advances
     keep &= running > -np.inf
     return keep
+
+
+# V0.9.5: distance_axis() lives in distance_axis.py (lap_insights uses it too).
+
+TIME_RESTART_S = 0.05     # V0.9.7: time going back more than this = a restart inside the file
+
 
 
 # Prepared laps, kept briefly (V0.9.1). Zooming in sends several requests for the same two laps
@@ -274,19 +308,24 @@ def _load_lap_uncached(path: Path, wanted: Sequence[str]) -> LapSeries:
     raw = read_raw(path, wanted, parquet)
     if "lap_dist" not in raw or "t" not in raw or len(raw["t"]) < MIN_POINTS:
         raise AnalysisError("Telemetry file has too few samples.")
+    # V0.9.7: time that jumps BACK (a session restart, a rewind) means the file holds more than one
+    # attempt. The distance axis would silently keep the first part only and show it as the lap —
+    # refused instead (the upload check marks such a lap invalid for the same reason).
+    t_raw = raw["t"][np.isfinite(raw["t"])]
+    if len(t_raw) > 1 and float(np.min(np.diff(t_raw))) < -TIME_RESTART_S:
+        raise AnalysisError("Telemetry time jumps back inside the lap (a restart?) — not one continuous lap.")
 
-    keep = _monotonic_axis(raw["lap_dist"], raw["t"])
+    keep, dist, axis_stats = distance_axis(raw["lap_dist"], raw["t"], raw.get("speed"))
     if int(keep.sum()) < MIN_POINTS:
         raise AnalysisError("Telemetry file has no usable distance axis.")
     raw = {name: values[keep] for name, values in raw.items()}
-    dist = np.maximum.accumulate(raw["lap_dist"])
     if float(dist[-1] - dist[0]) < 50.0:
         raise AnalysisError("Lap is too short to analyse.")
     t = raw["t"]
     if np.any(np.diff(t) < -1e-6):
         raise AnalysisError("Telemetry timestamps are not increasing.")
 
-    return LapSeries(dist=dist, raw=raw, orientation=calibrate_orientation(raw), available=available)
+    return LapSeries(dist=dist, raw=raw, orientation=calibrate_orientation(raw), available=available, axis=axis_stats)
 
 
 # ---------------------------------------------------------------------------
@@ -498,11 +537,69 @@ def _corner_channels(series: "LapSeries") -> Optional[dict]:
     pressures = [channel_values(series, f"brake_pressure_{w}") if f"brake_pressure_{w}" in CATALOG else None
                  for w in WHEEL_POSITIONS]
     pressures = [p for p in pressures if p is not None]
+    long_g = channel_values(series, "long_g") if "accel_z" in series.raw else None
     return {"dist": series.dist, "t": series.raw["t"], "speed": speed,
+            # V0.9.5: smoothed once per lap for the peak deceleration (see DECEL_WINDOW_S)
+            "long_g_smooth": _window_mean(long_g, series.raw["t"], DECEL_WINDOW_S) if long_g is not None else None,
             "brake": channel_values(series, "brake"), "throttle": channel_values(series, "throttle"),
             "steering": channel_values(series, "steering") if "steering" in series.raw else None,
-            "long_g": channel_values(series, "long_g") if "accel_z" in series.raw else None,
+            "long_g": long_g,
             "brake_pressure": np.nanmax(np.vstack(pressures), axis=0) if pressures else None}
+
+
+DECEL_WINDOW_S = 0.10   # V0.9.5: peak deceleration = the highest 0.1 s average, not one frame
+
+
+def _crossing(values: np.ndarray, dist: np.ndarray, i: int, threshold: float, absolute: bool = False) -> float:
+    """V0.9.5: where `values` crosses `threshold` between sample i-1 and sample i (i = the first
+    sample at/above it), linearly interpolated — sub-sample instead of "the next sample". At 80 m/s
+    and 50-60 Hz the samples lie ~1.5 m apart, the same order as the braking-point differences the
+    corner table shows. Falls back to dist[i] when there is nothing to interpolate."""
+    if i is None or i <= 0 or i >= len(dist):
+        return float(dist[min(max(i or 0, 0), len(dist) - 1)])
+    a, b = float(values[i - 1]), float(values[i])
+    if absolute:
+        a, b = abs(a), abs(b)
+    if not (math.isfinite(a) and math.isfinite(b)) or a >= threshold or b <= a:
+        return float(dist[i])
+    f = min(max((threshold - a) / (b - a), 0.0), 1.0)
+    return float(dist[i - 1] + f * (dist[i] - dist[i - 1]))
+
+
+def _time_mean(values: np.ndarray, t: np.ndarray) -> Optional[float]:
+    """Mean over TIME (each sample weighted by the time it stands for), not over samples."""
+    if values.size == 0:
+        return None
+    w = np.diff(t, append=t[-1]) if len(t) > 1 else np.ones(1)
+    if len(t) > 1:
+        w[-1] = w[-2] if len(w) > 1 else 1.0
+    ok = np.isfinite(values) & (w > 0)
+    if not ok.any():
+        return None
+    return float(np.sum(values[ok] * w[ok]) / np.sum(w[ok]))
+
+
+def _window_mean(values: np.ndarray, t: np.ndarray, seconds: float) -> np.ndarray:
+    """Centred moving average over ~`seconds` (sample count from the median frame time)."""
+    if len(t) < 3:
+        return values
+    dt = np.diff(t)
+    dt = dt[dt > 0]
+    if not dt.size:
+        return values
+    window = int(round(seconds / float(np.median(dt))))
+    if window <= 1:
+        return values
+    filled = np.where(np.isfinite(values), values, np.nan)
+    # NaN-aware: average of the finite samples in the window
+    ok = np.isfinite(filled).astype(float)
+    vals = np.nan_to_num(filled)
+    kernel = np.ones(window)
+    pad = (window // 2, window - 1 - window // 2)
+    num = np.convolve(np.pad(vals, pad, mode="edge"), kernel, mode="valid")
+    den = np.convolve(np.pad(ok, pad, mode="edge"), kernel, mode="valid")
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.where(den > 0, num / den, np.nan)
 
 
 def _first(mask: np.ndarray) -> Optional[int]:
@@ -523,6 +620,18 @@ def _brake_run(brake: np.ndarray, t: np.ndarray, start: int, stop: int) -> int:
 
 def _r(value, digits=1):
     return None if value is None or not np.isfinite(value) else round(float(value), digits)
+
+
+RESOLUTION_KEYS = ("brake", "brake_end", "turn_in", "apex", "throttle_on", "throttle_50", "throttle")
+
+
+def _spacing(dist: np.ndarray, x: float) -> float:
+    """Distance between the two samples around position x (V0.9.7)."""
+    i = int(np.clip(np.searchsorted(dist, x, "left"), 1, len(dist) - 1))
+    if i < len(dist) - 1 and dist[i] == x:
+        # exactly on a sample: the wider of its two neighbours' intervals
+        return round(float(max(dist[i] - dist[i - 1], dist[i + 1] - dist[i])), 2)
+    return round(float(dist[i] - dist[i - 1]), 2)
 
 
 def _corner_lap(lap: dict, start: float, entry_at: float, end: float) -> Optional[dict]:
@@ -568,18 +677,21 @@ def _corner_lap(lap: dict, start: float, entry_at: float, end: float) -> Optiona
         if on is not None:
             ib0 = i0 + on
             ib1 = _brake_run(brake, t, ib0, i1)
-            out["brake"] = round(float(dist[ib0]), 1)
-            out["brake_speed"] = round(float(speed[ib0]), 1)
+            brake_at = _crossing(brake, dist, ib0, BRAKE_ON_PCT)
+            out["brake"] = round(brake_at, 1)
+            out["brake_speed"] = round(float(np.interp(brake_at, dist, speed)), 1)
             out["brake_end"] = round(float(dist[ib1]), 1)
-            out["brake_len"] = round(float(dist[ib1] - dist[ib0]), 1)
+            out["brake_len"] = round(float(dist[ib1] - brake_at), 1)
             out["brake_max"] = _r(np.nanmax(brake[ib0:ib1 + 1]), 0)
             if pressure is not None:
                 out["brake_pressure_max"] = _r(np.nanmax(pressure[ib0:ib1 + 1]), 0)
             if long_g is not None and ib1 > ib0:
                 decel = -long_g[ib0:ib1 + 1]
+                smooth = lap.get("long_g_smooth")
+                peak_source = -smooth[ib0:ib1 + 1] if smooth is not None else decel
                 if np.isfinite(decel).any():
-                    out["decel_peak"] = _r(np.nanmax(decel), 2)
-                    out["decel_mean"] = _r(np.nanmean(decel), 2)
+                    out["decel_peak"] = _r(np.nanmax(peak_source), 2) if np.isfinite(peak_source).any() else None
+                    out["decel_mean"] = _r(_time_mean(decel, t[ib0:ib1 + 1]), 2)
 
     # --- turn-in (estimated) and trail braking
     it = None
@@ -593,7 +705,7 @@ def _corner_lap(lap: dict, start: float, entry_at: float, end: float) -> Optiona
                 found = _first(window >= TURN_IN_FRACTION * peak)
                 if found is not None and search_from + found <= ia:
                     it = search_from + found
-                    out["turn_in"] = round(float(dist[it]), 1)
+                    out["turn_in"] = round(_crossing(steering, dist, it, TURN_IN_FRACTION * peak, absolute=True), 1)
                     if brake is not None:
                         out["brake_at_turn_in"] = _r(brake[it], 0)
                         if ib0 is not None:
@@ -617,10 +729,10 @@ def _corner_lap(lap: dict, start: float, entry_at: float, end: float) -> Optiona
             on = _first(throttle[lowest:i1] >= PEDAL_ON_PCT)
             if on is not None:
                 ion = lowest + on
-                out["throttle_on"] = round(float(dist[ion]), 1)
+                out["throttle_on"] = round(_crossing(throttle, dist, ion, PEDAL_ON_PCT), 1)
                 half = _first(throttle[ion:i1] >= THROTTLE_HALF_PCT)
                 if half is not None:
-                    out["throttle_50"] = round(float(dist[ion + half]), 1)
+                    out["throttle_50"] = round(_crossing(throttle, dist, ion + half, THROTTLE_HALF_PCT), 1)
                 if ib1 is not None and ion > ib1:
                     seg = slice(ib1, ion + 1)
                     idle = (throttle[seg] < PEDAL_ON_PCT) & ((brake[seg] if brake is not None else 0) < PEDAL_ON_PCT)
@@ -632,18 +744,24 @@ def _corner_lap(lap: dict, start: float, entry_at: float, end: float) -> Optiona
     if throttle is not None:
         full = np.flatnonzero(throttle[ia + 1:i1] >= THROTTLE_FULL_PCT)  # after the apex
         if len(full):
-            exit_at = float(dist[ia + 1 + full[0]])
+            exit_at = _crossing(throttle, dist, ia + 1 + int(full[0]), THROTTLE_FULL_PCT)
             out["throttle"] = round(exit_at, 1)
     if exit_at is None:
         exit_at = min(apex + 100.0, end)
     out["exit"] = round(float(np.interp(exit_at, dist, speed)), 1)
+
+    # --- V0.9.7: how precisely each point is placed — the distance between the two recorded
+    # samples it lies between (a crossing is interpolated in there; it cannot be more precise than
+    # that). Normally speed / frame rate (~1.4 m at 260 km/h and 50 Hz); wider where samples are
+    # missing. The hints only call a difference a difference when it is bigger than this.
+    out["res"] = {key: _spacing(dist, out[key]) for key in RESOLUTION_KEYS if out.get(key) is not None}
 
     # --- acceleration after the apex
     if long_g is not None:
         ie = int(np.searchsorted(dist, min(apex + EXIT_ACCEL_M, end), "right"))
         seg = long_g[ia:max(ie, ia + 1)]
         if seg.size and np.isfinite(seg).any():
-            out["accel_exit"] = _r(np.nanmean(seg), 2)
+            out["accel_exit"] = _r(_time_mean(seg, t[ia:ia + seg.size]), 2)
     return out
 
 
@@ -734,6 +852,13 @@ def _find_corners(grid: np.ndarray, v: np.ndarray, step: float) -> List[Tuple[in
     return out
 
 
+def _finite_interp(grid: np.ndarray, x: np.ndarray, values: np.ndarray) -> np.ndarray:
+    ok = np.isfinite(values)
+    if ok.sum() < 2:
+        return np.full(len(grid), np.nan)
+    return np.interp(grid, x[ok], values[ok])
+
+
 def corner_analysis(a: "LapSeries", b: "LapSeries") -> List[dict]:
     """Corners of the common stretch and, for each, how both laps drove it (V0.9.1; phases and
     the braking / throttle details since V0.9.4).
@@ -759,7 +884,11 @@ def corner_analysis(a: "LapSeries", b: "LapSeries") -> List[dict]:
         return []
     step = 2.0
     grid = np.arange(lo, hi, step)
-    v = (np.interp(grid, a.dist, speed_a) + np.interp(grid, b.dist, speed_b)) / 2.0
+    # V0.9.7: detection needs a speed at every grid point — a NaN would spread through the
+    # smoothing and hide every corner. Interpolated over the samples that HAVE a speed.
+    v = (_finite_interp(grid, a.dist, speed_a) + _finite_interp(grid, b.dist, speed_b)) / 2.0
+    if not np.isfinite(v).all():
+        return []
     found = _find_corners(grid, v, step)
     if not found:
         return []
@@ -796,10 +925,12 @@ def lap_corners(dist: np.ndarray, t: np.ndarray, speed_kmh: np.ndarray, brake_pc
         return []
     step = 2.0
     grid = np.arange(float(dist[0]), float(dist[-1]), step)
-    v = np.interp(grid, dist, speed_kmh)
+    v = _finite_interp(grid, dist, speed_kmh)      # V0.9.7: NaN-safe, as in corner_analysis
+    if not np.isfinite(v).all():
+        return []
     found = _find_corners(grid, v, step)
     lap = {"dist": dist, "t": t, "speed": speed_kmh, "brake": brake_pct, "throttle": throttle_pct,
-           "steering": None, "long_g": None, "brake_pressure": None}
+           "steering": None, "long_g": None, "long_g_smooth": None, "brake_pressure": None}
     out = []
     for j, (apex, entry_index) in enumerate(found):
         entry = float(grid[entry_index])
@@ -1008,6 +1139,8 @@ def orientation_report(series: LapSeries) -> dict:
     return {
         "steering": o.steering, "lat_g": o.lat_g, "long_g": o.long_g, "slip": o.slip, "yaw": o.yaw, "susp": o.susp,
         "decided_from_data": dict(o.decided_from_data),
+        # V0.9.5: how the distance axis was built (anchors = samples with a fresh lap_dist)
+        "distance_axis": dict(series.axis),
     }
 
 

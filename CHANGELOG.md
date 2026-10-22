@@ -1,5 +1,406 @@
 # Changelog
 
+## V0.9.9 — Track limits you can follow, stored laps you can trust
+
+Server `0.9.9`; desktop client unchanged (`0.9.4`). **One additive migration (0017)**: three nullable
+lap columns (received size, upload request id, integrity MAC) and the `audit_events` table with an
+append-only trigger. Rollback: `alembic downgrade 0016` (docs/ADMIN_GUIDE.md). Track-limits rule
+version 3, decision version 1. Inventory and work log: `docs/V0_9_9_BESTANDSAUFNAHME.md`,
+`docs/V0_9_9_PROTOKOLL.md`; what only the NAS can do: `docs/V0_9_9_NAS_ANLEITUNG.md`.
+
+### V0.9.9.1 audit (before the first NAS update; same version number, archive rebuilt)
+- Integrity cache: the file fingerprint includes `st_ctime_ns`. Before, a file changed in place with
+  the same size and its mtime put back with `utime()` was answered "ok" from the cache for up to
+  10 minutes (the full check always found it). Regression test included.
+- Restore: step 4 compares the newest audit row of the fully validated staging database with the
+  manifest's `audit_head` and aborts before anything is switched when they differ (a deleted last
+  row leaves an intact-looking chain; a last row rewritten with the key verifies). Rules for older
+  backups: no `audit_head` (V0.9.8) → not compared; `null` → no audit rows allowed; unreadable →
+  refused (docs/RUNBOOKS.md 6). `consistency_check --audit-head`.
+- Backups read `audit_head` from the dump itself: audit rows are also written outside the upload
+  write lock (admin decisions, quarantine), so a separate query after `pg_dump` could record a row
+  the dump does not contain — and the new restore check would refuse a sound backup.
+- Mutation check: mutant descriptions are unique per function. Before, one equivalent-key text
+  matched two mutants in four places (27 keys skipped 31 mutants); three of the skipped ones were not
+  equivalent (all three are killed). Test `tests/test_v099_mutation_keys.py` guards it.
+
+### V0.9.9.2 fix (found on the first real NAS update, archive rebuilt again)
+- With `LMU_GARAGE_REQUIRE_HTTPS=1` (the compose default) the HTTPS middleware answered the
+  container healthcheck's plain-HTTP `GET /health/ready` with 400, so the server never became healthy
+  and the reverse proxy never started. `/health/live` and `/health/ready` are now exempt like
+  `/health` (they carry no details). Present since V0.9.8. Regression test
+  `tests/test_v0992_healthcheck_https.py` ties the exempt paths to the probe in docker-compose.yml.
+
+### P0 — the track-limit decision
+- `server/lap_decision.py` (new) completes the pipeline input → time axis → position → track limits
+  → decision → record. Status VALID / INVALID / REVIEW, mapped onto the existing API fields
+  (`is_valid`, `validation.status`, `review_status`). Every verdict records the validator versions,
+  the signals used, data quality, every finding with place and source, and the evidence (a count of
+  independent signal families — explicitly not a probability).
+- **Missing data is no longer "clean"**: a lap without track-limits signals (`not_verifiable`, was
+  INFO), a missing/empty/unreadable signal its client version always records (`signals_missing`),
+  a single signal family (`insufficient_evidence`), gaps > 1 s, < 10 frames/s, lap distance jumping
+  ahead, speed and distance disagreeing by > 5 %, > 8 G over 0.1 s, frozen samples, the same file
+  from another driver, a crashing check (was: VALID) — all REVIEW. One wrong sample never invalidates.
+- **REVIEW holds** (`review_status = held`, `server/official.py`): stored and analysable, not in
+  leaderboards, team bests, profiles or records until an admin clears it; then PR / WR / TEAM_BEST are
+  evaluated under the record lock. Laps flagged before V0.9.9 (`pending`) keep counting — no stored
+  record changes with the update. A late finding from the next lap holds only a lap that is being
+  uploaded, never one already stored. `revalidate_laps` reports how many laps hold a record and
+  holds only with `--apply --hold`; every change is audited.
+- Unknown sector times are shown, no longer a review reason (they say nothing about validity).
+- Synthetic laps used by older tests ramp their speed (the old instant 75→38 m/s jump was an
+  impossible deceleration).
+
+### P0 — reference set and measured error rates
+- `tests/helpers/trackcheck.py`: laps whose truth comes from geometry (FIA: all four wheels beyond
+  the white line), three tracks, two cars, LMU strict / lenient / silent, recorded like the client;
+  manipulations. `tests/helpers/trackcheck_cases.py`: 52 curated cases with expected result and
+  reason; exact rule limits; hypothesis properties (noise, removed signals, reordering).
+- `scripts/trackcheck_eval.py`: precision / recall / FPR / FNR with counts — curated 38 laps:
+  precision 100 %, recall 83.3 %, FPR 0 %; generated grid 480 laps: 100 % / 75.0 % / 0 %. All false
+  negatives are one kind (all four wheels on the kerb or a few cm beyond the line, LMU silent) —
+  documented as a limit. `--labels labels.csv` measures the same on REAL laps (not done yet).
+
+### P0 — protection of stored telemetry
+- Size, request id and a server MAC (`LMU_GARAGE_INTEGRITY_KEY`, rotatable; derived from the secret
+  key when not set) per lap; the original is read-only (0440). `server/integrity.py` checks size,
+  sha256 (cached per unchanged file ≤ 10 min) and MAC on every analysis access; failures quarantine
+  the lap (out of leaderboards, visible to owner/admin only), with an audit event carrying the
+  request id. Admin → Integrität: diagnosis and release after the file verifies again.
+- `scripts/integrity_check.py`: full sweep (dry run), `--apply` quarantine, `--backfill` signing of
+  laps stored before V0.9.9, `--resign` after a key rotation, `--release-verified`, `--audit`.
+- `consistency_check --deep` (and therefore every restore) also checks sizes, MACs and the audit
+  chain: a backup whose lap times or hashes were edited is refused.
+- Upload hardening: temp file `O_EXCL | O_NOFOLLOW` (0600), the storage folder must resolve inside the
+  root (a planted symlink is refused, 500 `STORAGE_UNAVAILABLE`), decoding limits before any column
+  is read (200,000 rows, 1,000 columns, 512 MiB uncompressed — upload, analysis, health).
+- `server/audit.py`: chained HMAC audit log (accepted, quarantined, released, reviewed, invalidated,
+  revalidated, backfilled, re-signed, sweeps, driver deleted, pruned), trigger against UPDATE,
+  365-day retention, head in every backup manifest. Driver deletion clears the driver id only.
+- Export: `lap_files` (sha256, size, request id per lap) and `audit_events`.
+
+### P1 — quality
+- Mutation targets for the decision, linking, integrity, quarantine, official laps, upload limits and
+  the audit chain (`scripts/mutation_check.py`); results in docs/QUALITY.md.
+- `release_check --verify-archive OUT.zip`: the gate again on a clean copy extracted from the archive,
+  after checking its sha256 and that its tree hash is the tested one. CI runs both.
+- `scripts/bench_compare.py`: the same performance measurements on V0.9.8 and V0.9.9.
+- New tests: `tests/test_v099_trackcheck_reference.py`, `tests/test_v099_decision.py`,
+  `tests/test_v099_decision_units.py`, `tests/test_v099_integrity.py` (incl. a process killed while
+  storing), `tests/test_v099_integrity_units.py`, `tests/test_v099_mutation_keys.py`, `tests/js/v099.test.mjs`.
+- Coverage floors for `server/lap_decision.py`, `integrity.py`, `audit.py`, `official.py`,
+  `request_context.py`.
+- A test helper's seed-dependent `hash()` salt made two catalog uploads byte-identical about once in
+  a thousand runs (present since before V0.9.8, reproduced with `PYTHONHASHSEED=695`): now a counter.
+- `certifi` 2026.7.22 → 2026.10.19 (`constraints.txt`): pip-audit reported PYSEC-2026-4320.
+
+### API (additive only)
+- New admin endpoints: `GET /admin/integrity`, `POST /admin/laps/{id}/integrity`, `GET /admin/audit`,
+  `GET /admin/audit/verify`; `GET /admin/review?status=` also accepts `held` / `quarantined`
+  (`pending` lists both waiting kinds); `POST /admin/laps/{id}/review` answers with `records`.
+- Export: `lap_files`, `audit_events`. Upload response unchanged.
+- A changed lap file answers the analysis with 422 and the text code `INTEGRITY_FAILED` (the status
+  it already used for unusable files); a missing one with 404 as before.
+
+### Known limits
+- No labelled real laps yet: every threshold is physically or V0.9.7-derived, not tuned on real data.
+- A client that forges a consistent file (every signal) cannot be detected; a hash only proves what
+  happened after the upload; whoever holds the integrity key and the database can rewrite the chain.
+- Performance measured in the build container, not on the NAS (docs/V0_9_9_PROTOKOLL.md).
+
+## V0.9.8 — Trustworthy operation: proxy trust, consistent backups, safe restores, a stricter gate
+
+Server `0.9.8`; desktop client unchanged (`0.9.4`). **No database migration.** Analysis results
+unchanged for normal laps; cache version 8 and per-lap figures version 5 because laps with a long
+speed gap are now measured correctly (below) — `consistency_check --recompute-figures` brings older
+stored figures up to date (optional; the analysis itself always computes fresh). Prompted by a review that set the P0 order: rate
+limits that cannot be bypassed, backups from one moment, restores that cannot leave a half-replaced
+system — then the release gate, operations and documentation.
+
+### P0.1 — the client address the rate limits count
+- `server/client_ip.py`: `X-Forwarded-For` is believed only from configured proxies
+  (`LMU_GARAGE_TRUSTED_PROXIES`, docker-compose: `private`) and read **from the right** — a header
+  the visitor writes himself can no longer change the address (before: its first entry was taken,
+  `X-Forwarded-For: 1.2.3.<n>` walked around every limit). Caddy trusts only private ranges.
+- Tests: every chain shape, spoofed headers on direct requests, and through the real Caddy with the
+  shipped Caddyfile for both variants (internet in front of Caddy; Cloudflare tunnel).
+
+### P0.2 — consistent backups
+- `server/write_lock.py`: changes to rows AND files (upload, driver deletion, removing orphans) hold a
+  shared lock in the telemetry volume; a backup announces itself and takes it exclusively — new
+  uploads get **503 `MAINTENANCE`** (the client keeps the lap and retries), running ones finish
+  first. Dump and archive are made inside that window. The lock gives up on its own after
+  `GARAGE16_BACKUP_LOCK_MAX_S` (1800 s); the server ignores a marker older than 2 h.
+- `scripts/backup.sh` and the `backup` profile (`docker/backup-loop.sh`) write one folder
+  `garage16_<stamp>/` (dump, archive, `manifest.json`: time, program version, schema revision, lap
+  count, sizes, SHA-256) — built as `.partial`, checked (gzip, pg_dump's completion line, archive
+  lists), published by one rename. An interrupted run publishes nothing.
+
+### P0.3 — restores that end in the backup or the state before
+- `scripts/restore.sh <backup-folder>`: check (manifest, hashes, schema known, no `../` paths) →
+  load into a NEW database and volume → validate there (`alembic upgrade head`,
+  `consistency_check --deep` with the stored paths mapped) → stop writers → swap the databases in
+  ONE transaction → swap the files (old ones kept in `.pre_restore_<stamp>/`) → start → verify the
+  running server. A failure in any step returns to the state before; a failing return says so (exit
+  3, with the names of everything). `--rollback <stamp>`, `--cleanup <stamp>`; pre-V0.9.8 backups
+  with `--allow-unverified`.
+- **The drill** (`tests/test_v098_backup_restore.py`): the shipped scripts against a real PostgreSQL
+  and real Alpine containers (chroots in mount namespaces, `tests/helpers/fake_docker.py`): uploads
+  running during a backup (the archive and the dump always match lap for lap, checked
+  independently), an interrupted and a killed backup, failing steps, the backup loop container, a
+  restore with rollback and cleanup, a fault injected into **each** of the eight restore steps, a
+  failing rollback, five kinds of damaged or foreign backups. 21 scenarios, all passing.
+
+### Operations
+- `/health/live` (process) and `/health/ready` (database + storage; 503 with what is missing; backup
+  running and low disk space as warnings). Docker's healthcheck uses readiness. `/health` no longer
+  shows database error texts (host, user) — they go to the log.
+- Every error answer carries the request id (`{"detail", "request_id"}` + `X-Request-ID`); an
+  unexpected error answers 500 without message or trace.
+- Upload log: the 30 days hold whatever the upload frequency — removed at start and at most hourly,
+  in batches of 5000. Operations view: filter by client version, uploads per hour, **drill-down by
+  request id**; reads at most 200 000 rows.
+- Consistency check: impossible metadata (lap time, sectors, hash, track/car), figures from a newer
+  server; deleting re-checks every file against the database right before; a copy of the storage
+  under another path (`--storage-dir`, `--stored-prefix`, what the restore validates); deleting asks
+  first (`--yes` to skip).
+- Key rotation without logging anybody out: `LMU_GARAGE_SECRET_KEY=<new>,<old>` and
+  `scripts/rotate_secret_key.py` (dry run, `--apply`, idempotent).
+- The data export holds everything the database has about the driver (e-mail, teams, sessions,
+  records, upload log), the upload log is deleted with the driver.
+
+### Release gate
+- New steps: linter (`ruff.toml`), static security analysis (bandit, medium + high — two justified
+  exceptions marked in place), known vulnerabilities of every pinned package (pip-audit — none),
+  line AND branch coverage with floors per critical module (`tests/coverage_floors.json`; total 88 %
+  lines / 77 % branches).
+- With `--zip` the gate runs in a staged copy of exactly the released files and the archive is built
+  from it (the tested tree is the published tree; `.zip.sha256` next to it).
+- `scripts/mutation_check.py`: deliberately breaks the critical decisions (client address, records,
+  distance axis, pedal crossings, write lock, rate limits) one change at a time — the tests must
+  notice each one. **The first run let 16 of 46 and then 80 of 134 mutants survive**: ties (no test
+  checked that a lap EQUAL to the current best is no new record), a team best of a driver in no
+  team, rate-limit window boundaries, untested fallback paths of the distance axis. Each gap got a test
+  (`tests/test_v098_mutation_gaps.py`, `tests/test_v098_axis_exact.py` with hand-computed exact
+  values); the remaining survivors are listed with the reason they cannot change behaviour
+  (`EQUIVALENT` in the script). Found on the way:
+  * a stretch between two `lap_dist` updates with more than 0.5 s without a speed counted the gap as
+    0 m/s, bunching the metres — such a stretch is now spread in time (also for infinite speeds);
+  * a branch of the distance axis that could never run was removed.
+- `tests/reference/openapi.json`: the reviewed API contract; any change fails until regenerated on
+  purpose; what the shipped client 0.9.4 calls is checked separately.
+- Concurrency: six uploads of one driver at once and two team members racing for the team best —
+  every record type stays a strictly improving sequence.
+- CI: a separate fast lint/security job; the drill runs in the gate (PostgreSQL service, Alpine
+  root file system with pinned SHA-256).
+
+### Documentation
+- `docs/ARCHITECTURE.md` (components, data, upload lifecycle, analysis pipeline, nine architecture
+  decisions), `docs/RUNBOOKS.md` (ten scenarios with diagnosis and safe steps), `docs/DATA_PROTECTION.md`
+  (what is stored, why, how long, what deletion covers, the limits), `docs/QUALITY.md` (the gate,
+  metric definitions with units and tolerances, coverage, **what is not proven yet**),
+  `docs/ROLLBACK.md` rewritten for the new restore.
+
+## V0.9.7 — Verifiable: release gate, reference laps, data quality, operations
+
+Server `0.9.7`; desktop client unchanged (`0.9.4`). **One additive database migration (0016,
+`upload_events`)**, runs on start. Analysis cache version 7 (corner points carry their resolution);
+stored per-lap figures unchanged (version 4) — nothing to recompute.
+
+Prompted by an external review of V0.9.6 whose test run could not start (pyarrow and jsdom were
+missing in the reviewer's environment). Re-run here in a clean Python 3.12 environment with the
+pinned versions (the Docker images' Python), tkinter, xvfb and caddy: **every test passes, none is
+skipped** except three documented opt-in PyInstaller builds. The 11 failures of earlier local runs
+were all `No module named 'tkinter'` — an environment gap that looked like test failures, exactly
+what the new gate turns into an explicit infrastructure error.
+
+### Release quality
+- `scripts/release_check.py`: environment check (exit 6 when incomplete — "nothing was tested"),
+  versions against `constraints.txt`, the whole suite with `GARAGE16_STRICT_TESTS=1` (a skip is a
+  failure; opt-in checks and explicitly allowed reasons are listed), `release/TEST_REPORT.md` +
+  JUnit XML + `environment.json` (versions, hash over the released files), `--zip` builds the archive
+  only when green, with the report inside.
+- `constraints.txt`: every package of the dependency tree pinned; used by both Docker images and CI
+  (checked: wheels for Python 3.12 on x86_64 and aarch64). `scripts/setup_test_env.sh`.
+- `.github/workflows/ci.yml`: the gate, the suite + migration chain on PostgreSQL 16, both Docker
+  images; `build-client.yml` builds no client before it passed.
+- `tests/test_v097_migrate_filled_db.py`: for EVERY older revision a database with a row in every
+  table (filled from the reflected schema of that revision) is migrated to head; no row lost, every
+  model of the current code reads every row.
+
+### Analysis, verified against known values
+- `tests/helpers/reference_lap.py` + `tests/test_v097_reference_laps.py`: laps simulated at 2 kHz
+  (the truth), recorded like LMU and the client do, written as parquet, analysed by `load_lap` /
+  `corner_analysis` / `lap_insights`. Pedal points and apex within one sample spacing, minimum speed
+  within deceleration × frame time, exit speed within acceleration × frame time, corner times and
+  the delta curve within 2 ms, the corners adding up to the lap-time difference — for five recording
+  variants. Faults: duplicate polls (identical result), timestamp jitter, gaps on a straight and in
+  a braking zone, NaN rows, a nonsense sample, a restart, a truncated file.
+- `tests/reference/v097_golden.json`: the results on the reference laps with
+  `ANALYSIS_CACHE_VERSION` / `INSIGHTS_VERSION` — results that change without a version bump fail.
+- **Fixed** (found by the reference laps): three NaN speed samples made `corner_analysis` find **no
+  corner at all** (the NaN spread through the smoothing) — detection now interpolates over the
+  samples that have a speed, and the distance axis bridges NaN gaps up to 0.5 s (the channel
+  itself stays as recorded). A **restart inside a file** (time jumping back) was silently cut to its
+  first part and analysed as the lap — now refused with a clear message.
+- **Fixed** (found by running the suite against a PostgreSQL whose time zone was Europe/Berlin):
+  aware UTC datetimes were converted to the server's zone before being stored in the
+  zone-less columns — an expired password-reset token was accepted. Sessions to PostgreSQL now run in
+  UTC (`server/database.py`), whatever the database server is set to (the official image defaults
+  to UTC, so the NAS was not affected).
+- **Measuring accuracy per point**: every braking / turn-in / apex / throttle point of a corner
+  carries `res` — the distance between the two recorded samples around it (normally speed / frame
+  rate, wider where samples are missing). The reference tests check that it covers the true error.
+
+### Data quality
+- `server/telemetry_health.py`, `GET /telemetry/analysis/laps/{id}/health` (same access rule as
+  every analysis endpoint, cached by file hash): channels (and blank ones), NaN share, frame rate and
+  repeated polls, gaps (where), time and lap distance only forward, `lap_dist` updates per second,
+  speed integral vs lap distance, recorded duration vs lap time, implausible values, resolution of a
+  braking point; each check ok / warn / bad with its numbers; the lap's validity next to it.
+- LapTime Analyzer: tile **"Data quality"** (both laps side by side), one line in the lap summary.
+
+### Hints and statistics
+- "Where to find time": a braking / throttle difference becomes a hint only when it is larger than
+  the threshold AND the measuring accuracy of both points; the hint shows it (± x m).
+- Corners tile: order **along the lap / biggest loss first**, each corner's share of the loss.
+- Stint Analyzer: Sen's 95 % range of every degradation slope, 95 % ranges (t distribution) of the
+  tyre and fuel effects of the separated model ("not distinguishable from zero" said when so),
+  **consistency with the trend removed** (robust spread around the Theil–Sen line).
+
+### Operations
+- `upload_events` (migration 0016): every upload attempt — accepted / duplicate / rejected / error,
+  status, reason (e.g. `UPDATE_REQUIRED`), request id (the client's `X-Request-ID` is kept when it
+  looks like one), lap id, client version, size, duration; 30 days; deleted with the driver.
+  JSON logs carry `request_id`, `lap_id`, `driver_id`, `outcome`, `duration_ms`.
+- `GET /admin/operations`, `GET /admin/consistency`; admin tab **"Operations"**.
+- `server/consistency.py` + `scripts/consistency_check.py`: missing / outside-storage / orphaned
+  files, stale upload temps, unreadable files and sha256 mismatches (`--deep`), laps without a
+  verdict, figures from an older analysis, rows pointing at nothing. Dry run by default; only
+  `--delete-orphans` and `--recompute-figures` change something. Run it after every restore.
+- `tests/test_v097_permissions.py`: from the app's OpenAPI description — everything but a documented
+  public list refuses anonymous calls; every admin call refuses drivers and wrong tokens; every team
+  call refuses outsiders, management refuses plain members; upload size and envelope limits.
+- `scripts/load_test.py` (read-only, stdlib) and an in-process run of it in the suite.
+
+## V0.9.6 — Clearer, simpler, faster: an overview & usability pass
+
+Server `0.9.6`; desktop client unchanged (`0.9.4`). **No database migration**, **no new Python or
+JS dependency** (two self-hosted fonts, SIL Open Font License). The analysis results are unchanged
+(cache version 6, per-lap figures version 4).
+
+Every page was checked in a browser (desktop 1440 px and phone 390 px) with a test data set
+(3 drivers, a team, 25 laps on two tracks); the findings and what was done:
+
+### Navigation & look
+- **Menu in groups**: My garage (Dashboard, Teams) · Analysis (LapTime Analyzer, Stint Analyzer) ·
+  Racing (Leaderboard, Circuits); Account and Download at the foot. On the phone the top bar stays
+  at the top while scrolling.
+- One name everywhere: **Garage16** (menu, phone bar, browser tab — was "LMU Garage").
+- **Fonts are served by Garage16 itself** (`web/fonts`: Oswald, IBM Plex Mono; SIL OFL 1.1) instead
+  of Google Fonts — no third-party request for visitors (DSGVO), works offline in the desktop app,
+  one connection less through the tunnel.
+- Headings have room above them; content may use up to 1120 px; wide tables scroll inside their
+  box on a phone and no page is wider than the screen (checked on every page at 390 px).
+
+### Faster
+- **Pages are loaded when they are opened** (`web/js/router.js`, dynamic `import()`): the start page
+  loads 9 JS files (~130 KB) instead of 50 (~580 KB); a page module is fetched once and cached.
+  The page is cleared only after its module arrived (no blank flash), a click on another page while
+  one loads wins.
+- Dashboard: profile, teams and laps in parallel, team records in parallel (were one after the other).
+- Team page: the five sections load in parallel into their places.
+- Dashboard lap list: filtered in the browser — one request instead of one per filter.
+- Caddy compresses with **zstd** (falls back to gzip).
+
+### Clearer
+- **Record feeds** (dashboard, driver profile, team page; new `web/js/activity.js`): one row per
+  lap with every record it set as a badge (a new Garage16 Best used to appear two or three times —
+  as Garage16 Best, team best and personal best), the car model instead of the livery name, and the
+  lap time opens the lap in the analysis. The API adds `lap_id` and `car_model` to
+  `/drivers/{id}/public` (`recent_activity`), `/teams/{id}/activity` and `/leaderboard/recent`.
+- **Dashboard**: quick actions (Analyse last lap · You vs. Garage16 Best · Stint Analyzer); your
+  best per track with the car and "vs. Garage16 Best"; your team next to it (or how to join one);
+  the lap list with a track menu and "valid laps only" instead of two free-text fields and a button.
+- **Leaderboard**: opens on the busiest track and its busiest class with the table already shown;
+  every change reloads at once (no "Search" button); the choice is kept in the address
+  (`#/leaderboard?track=…&class=…`) so a link opens the same table; new column: gap to P1;
+  sectors in seconds. The team leaderboard on the team page opens the same way.
+- **Team page**: one order — overview (members, team bests, PBs this week, then laps / PBs / active
+  drivers / new team bests for the chosen period: one card, was two with the same numbers), team
+  bests, team leaderboard, activity, members, invitations; **team settings folded** at the end.
+- **Account page**: who you are and **Sign out** at the top, then name, e-mail & password, Discord;
+  the desktop-client credentials with the browser sessions, and data export / deletion **folded**.
+- **Landing page**: the main button is what the visitor most likely wants (signed in: your garage;
+  otherwise: get Garage16); the duplicate link list is gone; car models instead of livery names.
+- **LapTime Analyzer**: the introduction text only while choosing laps; one compact toolbar. The
+  **lap picker** groups the laps per track (most recent first, open), marks the fastest valid lap,
+  a click on the row selects it, the "basic data" note only appears when such a lap is listed and
+  a single tab is not shown as a choice.
+- **Circuits**: tracks with laps as cards (busiest first), the tracks nobody drove yet as one
+  compact list instead of a dozen empty cards.
+
+## V0.9.5 — LapTime Analyzer on a grid; every channel at telemetry rate
+
+Server `0.9.5`; desktop client unchanged (`0.9.4`). **No database migration** (head stays `0015`),
+**no new dependency**. The analysis window of the "Client + analysis app" edition loads the page
+from the server and shows the new grid without a client update.
+
+### Grid layout of the LapTime Analyzer
+- "Customise view" turns the page into a **grid editor**: 12 columns, rows of 40 px; every tile has
+  a cell position and size (`x, y, w, h`). Layout format version 2 in `localStorage`; a version-1
+  layout (V0.9.1–V0.9.4) is migrated once, flowed in its old order (small 4 / medium 6 / large 12
+  columns).
+- **Move** a tile by its handle ⠿: a ghost shows the cells (green = free, amber = the tiles in the
+  way move down). **Resize** at the corner ◢. Keyboard: arrow keys move by one cell (↑/↓ swap with
+  the tile above/below), Shift + arrows resize. Tiles never overlap; gaps stay where the user
+  leaves them; **Close gaps** moves everything up.
+- **Tile picker** (side panel): *What for?* (lap time & delta, driver inputs, corners & line,
+  forces acting on the car, tyres & brakes, suspension & dampers, engine & energy, driver aids,
+  track & track limits, all values) → *Kind* (chart along the lap, histogram, map, special
+  diagram, table, analysis) → the tiles, with search. Clicking a tile opens a **preview of the
+  real tile with the open laps** and its ready-made sizes; then drag it onto the grid or place it
+  automatically. A tile can also be dragged straight from the list by its grip.
+- **Draw a box** on empty cells: the picker opens as an overlay with only the tiles that fit
+  that box (each type has a minimum size), shows the preview at exactly that size and puts it
+  there.
+- Charts, delta, track map, racing lines and histograms fill their tile's height. Phones
+  (≤ 700 px) stack the tiles in reading order.
+
+### Racing lines on the track
+- The racing-line map now shows the **track from above**: grass, asphalt between both edges, white
+  edge lines and red/white **kerbs**, with the lines of every lap on top and a faint **car-width
+  band around every lap** (before: Lap 1 only). Toggle "Track".
+- Rebuilt on the server (`server/track_surface.py`, `GET /telemetry/analysis/track-surface`) from
+  LMU's `path_lateral`, `track_edge` and the wheels' surface type of the laps on the map plus up to
+  6 recent valid laps of the same layout (only geometry is returned): centre path = position minus
+  `path_lateral`; each lap measures the edge on the side the car is on; kerbs from where wheels
+  touched them. The sign of `path_lateral` is decided from the data (the right sign gives a smooth
+  centre path), otherwise no surface. Gaps of one edge up to 300 m are interpolated between two
+  measurements; an edge no lap ever drove along mirrors the other side and is drawn dashed
+  ("estimated"). Laps from clients before 0.9.0 have no such data: the lines are shown as before.
+
+### Channel analysis: accuracy
+- **Distance axis at telemetry rate** (`server/distance_axis.py`, used by the analysis and the
+  per-lap figures): `lap_dist` is LMU's scoring value; in rFactor 2 scoring is refreshed ~5×/s,
+  telemetry ~50×/s. Up to V0.9.4 every sample whose `lap_dist` had not moved was dropped. Now
+  every sample is kept: rows where `lap_dist` advances are anchors (LMU's distance, exactly); the
+  rows between are placed by the integrated speed, scaled to meet the next anchor (linear in time
+  where speed and `lap_dist` disagree). On a synthetic lap with 5 Hz `lap_dist`: all 4500 samples
+  kept instead of 451, distance error ≤ 0.1 m, time-at-distance (delta) error 4 ms instead of
+  33 ms. If LMU refreshes `lap_dist` every frame, the axis is identical to before.
+  `orientation.<side>.distance_axis` in `/compare` reports rows / kept / anchors / duplicates /
+  filled.
+- **Repeated polls** of one telemetry frame (same game time; the client polls at 60 Hz) are
+  dropped — they double-weighted moments in histograms and flattened derivatives (damper speed).
+- **Corner metrics:** braking point, turn-in, back on throttle, 50 % and full throttle are
+  interpolated between the two samples around the threshold (samples are ~1.5 m apart at speed);
+  speed at braking at that point; peak deceleration = highest 0.1 s average (one kerb frame no
+  longer sets it); mean deceleration and acceleration after the apex are means over time.
+- Analysis cache version 6; per-lap figures version 4 (`scripts.revalidate_laps --apply` recomputes
+  them for stored laps, validity unchanged).
+
 ## V0.9.4 — Two dashboards: LapTime Analyzer and Stint Analyzer
 
 Server `0.9.4`; Desktop-Client `0.9.4`. **Database migration `0015`** (automatic at start,

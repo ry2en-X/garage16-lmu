@@ -259,14 +259,39 @@ Im Web:
 - **Schnellstart**: auf der Analysis-Startseite vergleichen die Knöpfe **Du vs. Garage16
   Best**, **Du vs. Team Best** und **Du vs. Meine Beste** deine letzte Strecke mit
   einem Klick.
+- **Neu in 0.9.7 — Zahlen, denen man trauen kann:** Im LapTime Analyzer gibt es die Kachel
+  **„Datenqualität“**: Sie zeigt für jede Runde, wie gut die Aufzeichnung ist (Lücken, Frames pro
+  Sekunde, wie genau ein Bremspunkt überhaupt bestimmbar ist). Die Tipps unter „Wo finde ich Zeit“
+  nennen ihre Messgenauigkeit (± m) und erscheinen nur noch, wenn der Unterschied größer ist; die
+  Kurven-Tabelle lässt sich nach Zeitverlust sortieren. Im Stint Analyzer stehen bei Reifenabbau und
+  Sprit-Effekt jetzt Bereiche in Klammern (95 %), und „Konstanz (ohne Trend)“ zeigt, wie gleichmäßig
+  du fährst — ohne dass nachlassende Reifen dir angerechnet werden. Am Client ändert sich nichts.
+- **Neu in 0.9.6 — alles etwas aufgeräumter:** Das Menü ist in Gruppen sortiert (Meine Garage ·
+  Analyse · Rennen). Im **Dashboard** startest du mit einem Klick die Analyse deiner letzten Runde
+  oder „Du vs. Garage16 Best“; deine Runden filterst du dort nach Strecke. Das **Leaderboard**
+  zeigt sofort eine Tabelle und lädt bei jeder Auswahl neu; den Link aus der Adresszeile kannst du
+  teilen. In den Aktivitäten steht jede Runde nur noch einmal, mit allen Rekorden, die sie
+  aufgestellt hat — ein Klick auf die Zeit öffnet sie in der Analyse.
 - **Ansicht anpassen** (unauffällig neben den Knöpfen): Du siehst zuerst immer das
-  Garage16-Standardlayout und musst nichts einstellen. Willst du es ändern, kannst du
-  Fenster am **Griff (⠿)** ziehen oder mit ↑ ↓ verschieben, die Größe wählen (klein,
-  mittel, groß), einem Fenster einen anderen Kanal geben, Fenster hinzufügen oder
-  entfernen und Farben für Runde 1, Runde 2 und Delta wählen. Das wird **nur in
+  Garage16-Standardlayout und musst nichts einstellen. Willst du es ändern, wird die Seite
+  zu einem **Raster** (ab 0.9.5): Jede Kachel liegt auf Rasterfeldern. Am **Griff (⠿)**
+  ziehst du sie an eine beliebige Stelle (grüner Rahmen = Platz frei, gelb = Kacheln im
+  Weg rutschen nach unten), an der **Ecke (◢)** änderst du ihre Größe, die Pfeiltasten
+  auf dem Griff verschieben sie um ein Feld (mit Umschalt: Größe). Neue Kacheln holst du
+  dir links aus **Kacheln**: erst **wofür** (z. B. „Wirkende Kräfte“), dann die **Art**
+  (z. B. „Diagramm über die Runde“), dann die Kachel — ein Klick zeigt eine **Vorschau mit
+  deinen Runden** und die fertigen Größen (z. B. 12 × 4 Felder); dann ins Raster ziehen
+  oder automatisch platzieren. Oder du ziehst auf **leeren Feldern** einen Kasten auf —
+  dann erscheinen nur die Kacheln, die dort hineinpassen. Einem Diagramm kannst du einen
+  anderen Kanal geben, Kacheln entfernen, **Lücken schließen** und Farben für Runde 1,
+  Runde 2 und Delta wählen. Das wird **nur in
   diesem Browser** gespeichert. **Standardlayout wiederherstellen** bringt alles
   zurück — deine Runden und dein Konto sind davon nie betroffen. Ein Diagramm lässt
   sich beim normalen Ziehen nicht versehentlich verschieben: dafür gibt es den Griff.
+- **Ideallinien** (ab 0.9.5): Deine Linien liegen auf der **Strecke aus der Vogelperspektive**
+  — Asphalt, Ränder und rot-weiße Kerbs, aus den Streckendaten mehrerer Runden zusammengesetzt
+  (ungefähr; ein gestrichelter Rand ist geschätzt). Um jede Runde liegt blass die
+  Fahrzeugbreite. „Strecke“ und „Fahrzeugbreite“ lassen sich abschalten.
 - **Delta und Sektoren**: unter dem Delta-Diagramm stehen die Stelle, an der du am
   meisten Zeit gewinnst, und die, an der du am meisten verlierst (jeweils auf einem
   Stück von etwa Kurvenlänge; ein Klick springt dorthin), und das Ergebnis der Runde.

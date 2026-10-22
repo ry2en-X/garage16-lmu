@@ -103,6 +103,9 @@ services:
       LMU_GARAGE_ADMIN_TOKEN: ${LMU_GARAGE_ADMIN_TOKEN:?set an admin token in .env}
       LMU_GARAGE_CORS_ORIGINS: ${LMU_GARAGE_CORS_ORIGINS:-https://garage16.de}
       LMU_GARAGE_REQUIRE_HTTPS: "1"
+      # V0.9.8 — believe X-Forwarded-For only from the reverse proxy (the app publishes no port,
+      # only containers on this network reach it); see server/client_ip.py
+      LMU_GARAGE_TRUSTED_PROXIES: ${LMU_GARAGE_TRUSTED_PROXIES:-private}
       LMU_GARAGE_LOG_FORMAT: json
       LMU_GARAGE_STORAGE_DIR: /data/telemetry
       LMU_GARAGE_MIN_CLIENT_VERSION: ${LMU_GARAGE_MIN_CLIENT_VERSION:-0.5.3}
@@ -130,6 +133,9 @@ services:
       # V0.9.3.1 — track-limits measurements that may invalidate a lap on their own
       # (comma separated, e.g. four_wheels_off). Empty = review only; see .env.example.
       LMU_GARAGE_TRACK_LIMITS_INVALIDATING: ${LMU_GARAGE_TRACK_LIMITS_INVALIDATING:-}
+      # V0.9.9 — integrity key (empty = derived from LMU_GARAGE_SECRET_KEY) and audit-log retention
+      LMU_GARAGE_INTEGRITY_KEY: ${LMU_GARAGE_INTEGRITY_KEY:-}
+      LMU_GARAGE_AUDIT_RETENTION_DAYS: ${LMU_GARAGE_AUDIT_RETENTION_DAYS:-365}
       # Uncomment these three (and set the matching four plain values just
       # above to non-empty PLACEHOLDERS, not blank — Compose's ${VAR:?...}
       # requires non-empty at parse time and can't see a secret file that
@@ -147,7 +153,10 @@ services:
       # Uses Python (already in the image) rather than curl/wget, which
       # aren't installed in python:3.12-slim by default — avoids adding a
       # package just for the healthcheck.
-      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health', timeout=3)"]
+      # V0.9.8: /health/ready answers 503 when the database or the telemetry storage is unusable
+      # (/health stays 200 with "degraded" for the clients' version check) — so Docker marks the
+      # server unhealthy then instead of reporting it fine
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health/ready', timeout=3)"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -269,8 +278,11 @@ services:
       # to have backups land somewhere durable outside Docker's own
       # storage. Same env var works on NAS and VPS.
       - ${BACKUP_HOST_PATH:-backup_data}:/backups
-      - telemetry_data:/data/telemetry:ro
+      # V0.9.8: read-write — the backup announces maintenance and takes the write lock in this
+      # volume (server/write_lock.py) so database and files are saved from the same moment
+      - telemetry_data:/data/telemetry
       - ./docker/backup-loop.sh:/backup-loop.sh:ro
+      - ./server/main.py:/garage16/main.py:ro      # the program version for the manifest
     entrypoint: ["/bin/sh", "/backup-loop.sh"]
 
 volumes:

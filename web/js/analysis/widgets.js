@@ -30,6 +30,13 @@ import { T } from "./strings.js";
 import { t } from "../i18n.js";
 const noop = () => {};
 const CHART_HEIGHT = { small: 80, medium: 110, large: 140 };
+// V0.9.5: a tile on the grid has a fixed height (widget.boxHeight, from grid.js); a chart fills
+// what is left of it after its head and x axis (and, for the delta, the controls around it).
+const CHART_CHROME_PX = 46;
+export function chartHeight(widget, reserved = 0, fallback = 110) {
+  if (Number.isFinite(widget.boxHeight)) return Math.max(Math.round(widget.boxHeight - CHART_CHROME_PX - reserved), 50);
+  return CHART_HEIGHT[widget.size] || fallback;
+}
 
 export const notice = (message, error = false) => el("div", { class: `notice${error ? " notice--error" : ""}` }, message);
 
@@ -102,6 +109,18 @@ export function renderSummary(widget, ctx) {
     // V0.9.4: Lap 3 / Lap 4
     ...EXTRA_SIDES.filter((side) => data.laps[side]).map((side) => lapCard(side, data.laps[side], data.recording && data.recording[side])),
   ]);
+  // V0.9.7: one line on how trustworthy the recordings are (details: the "Data quality" tile)
+  if (ctx.health) {
+    const sides = [["a", t("Lap 1")], ...(hasB && ctx.health.b ? [["b", t("Lap 2")]] : [])];
+    Promise.all(sides.map(([side]) => ctx.health[side].get().catch(() => null))).then((reports) => {
+      const labels = { good: t("good"), limited: t("limited"), unreliable: t("unreliable") };
+      const parts = reports.map((r, i) => (r ? `${sides[i][1]} ${labels[r.status] || r.status}` : null)).filter(Boolean);
+      if (parts.length) {
+        element.appendChild(el("div", { class: "subtitle analysis-summary__quality", title: t("Details: the 'Data quality' tile") },
+          `${t("Recording")}: ${parts.join(" · ")}`));
+      }
+    });
+  }
   return { element, destroy: noop };
 }
 
@@ -123,6 +142,8 @@ function timeSeries(data) {
   return ["a", "b", ...EXTRA_SIDES].filter((s) => data.time && data.time[s]).map((s) => ({ values: data.time[s], color: lapColor(s), dash: LAP_DASH[s], name: lapName(s), side: s }));
 }
 
+const DELTA_CONTROLS_PX = 120; // mode menu, gain/loss chips and caption around the delta chart
+
 export function renderDelta(widget, ctx) {
   const { data, state } = ctx;
   if (!data.delta) return { element: notice(T.deltaNeedsSecond), destroy: noop };
@@ -140,7 +161,7 @@ export function renderDelta(widget, ctx) {
     const current = state.data;
     if (mode === "time") {
       chart = createChart(state, {
-        key: "time", title: t("Elapsed time along the lap"), unit: "s", kind: "line", height: CHART_HEIGHT[widget.size] || 130, showXAxis: true,
+        key: "time", title: t("Elapsed time along the lap"), unit: "s", kind: "line", height: chartHeight(widget, DELTA_CONTROLS_PX, 130), showXAxis: true,
         series: timeSeries(current), rangeValues: timeSeries(base).map((s) => s.values), sectors: current.sectors.a,
         format: (v) => (v === null || v === undefined ? "—" : `${v.toFixed(2)} s`),
       });
@@ -148,7 +169,7 @@ export function renderDelta(widget, ctx) {
       const extra = extraDeltaSeries(current);
       const reference = current.extra_sides && current.extra_sides.length ? t(" · Lap 3/4 against Lap 2") : "";
       chart = createChart(state, {
-        key: "delta", title: `${t("Delta  (Lap 1 − Lap 2)")}${reference}`, unit: "s", kind: "delta", height: CHART_HEIGHT[widget.size] || 130, showXAxis: true,
+        key: "delta", title: `${t("Delta  (Lap 1 − Lap 2)")}${reference}`, unit: "s", kind: "delta", height: chartHeight(widget, DELTA_CONTROLS_PX, 130), showXAxis: true,
         series: [{ values: current.delta, color: LAP_COLORS.delta, name: "delta" }, ...extra],
         rangeValues: [base.delta],
         sectors: current.sectors.a,
@@ -196,6 +217,16 @@ function brakingText(a, b) {
 }
 const speedPair = (a, b) => `${a === null || a === undefined ? "—" : a.toFixed(1)} / ${b === null || b === undefined ? "—" : b.toFixed(1)}`;
 
+// V0.9.7: the corners by time lost — rank, the share of all the time Lap 1 loses in corners
+// it is slower in, and the bar for the list view. Pure (tested).
+export function rankCorners(corners) {
+  const lost = corners.reduce((sum, c) => sum + (c.delta > 0 ? c.delta : 0), 0);
+  return corners.slice().sort((x, y) => y.delta - x.delta || x.n - y.n)
+    .map((c, i) => ({ corner: c, rank: i + 1, share: c.delta > 0 && lost > 0 ? c.delta / lost : 0 }));
+}
+
+let cornerOrder = "lap";   // remembered while the page is open: "lap" | "loss"
+
 export function renderCorners(widget, ctx) {
   const base = ctx.baseData || ctx.data;
   if (!base.laps.b) return { element: el("div", { class: "card" }, [el("h2", {}, T.cornersTitle), notice(T.cornersNeedSecond)]), destroy: noop };
@@ -208,10 +239,12 @@ export function renderCorners(widget, ctx) {
     if (c.delta < 0 && (!least || c.delta < least.delta)) least = c;
   }
   const head = el("tr", {}, [
-    el("th", {}, "#"), el("th", {}, T.cornerAt), el("th", {}, "Δ"), el("th", {}, T.cornerBraking),
+    el("th", {}, "#"), el("th", {}, T.cornerAt), el("th", {}, "Δ"), el("th", { class: "corners__share" }, t("of the loss")), el("th", {}, T.cornerBraking),
     el("th", {}, `${T.cornerMinSpeed} (km/h)`), el("th", {}, `${T.cornerExitSpeed} (km/h)`),
   ]);
-  const rows = corners.map((c) => {
+  const ranking = rankCorners(corners);
+  const shareOf = new Map(ranking.map((r) => [r.corner.n, r]));
+  const rowFor = (c) => {
     const row = el("tr", {
       class: `corner-row${c === most ? " corner-row--loss" : ""}${c === least ? " corner-row--gain" : ""}`,
       "data-corner": String(c.n), tabindex: "0", title: T.cornerZoom,
@@ -219,6 +252,7 @@ export function renderCorners(widget, ctx) {
       el("td", {}, String(c.n)),
       el("td", {}, formatMetres(c.apex)),
       el("td", { class: tone(c.delta) }, `${formatDelta(c.delta)} s`),
+      el("td", { class: "corners__share" }, shareOf.get(c.n).share > 0 ? `${Math.round(shareOf.get(c.n).share * 100)} %` : "—"),
       el("td", {}, brakingText(c.a.brake, c.b.brake)),
       el("td", {}, speedPair(c.a.min, c.b.min)),
       el("td", {}, speedPair(c.a.exit, c.b.exit)),
@@ -239,14 +273,28 @@ export function renderCorners(widget, ctx) {
       }
     });
     return row;
-  });
+  };
   const total = corners.reduce((sum, c) => sum + c.delta, 0);
-  rows.push(el("tr", { class: "corner-row corner-row--total" }, [
-    el("td", { colspan: "2" }, T.sectorTotal), el("td", { class: tone(total) }, `${formatDelta(total)} s`), el("td", { colspan: "3" }, ""),
-  ]));
+  const tbody = el("tbody");
+  const fill = () => {
+    tbody.innerHTML = "";
+    const ordered = cornerOrder === "loss" ? ranking.map((r) => r.corner) : corners;
+    for (const c of ordered) tbody.appendChild(rowFor(c));
+    tbody.appendChild(el("tr", { class: "corner-row corner-row--total" }, [
+      el("td", { colspan: "2" }, T.sectorTotal), el("td", { class: tone(total) }, `${formatDelta(total)} s`), el("td", { colspan: "4" }, ""),
+    ]));
+  };
+  // V0.9.7: along the lap, or the biggest losses first (a click still zooms and selects)
+  const order = el("select", { class: "corners__order", "aria-label": t("Order") }, [
+    el("option", { value: "lap" }, t("Along the lap")),
+    el("option", { value: "loss" }, t("Biggest loss first")),
+  ]);
+  order.value = cornerOrder;
+  order.addEventListener("change", () => { cornerOrder = order.value; fill(); });
+  fill();
   const element = el("div", { class: "card corners" }, [
-    el("h2", {}, T.cornersTitle),
-    el("div", { class: "corners__wrap" }, el("table", { class: "corners__table" }, [el("thead", {}, head), el("tbody", {}, rows)])),
+    el("div", { class: "corners__head" }, [el("h2", {}, T.cornersTitle), order]),
+    el("div", { class: "corners__wrap" }, el("table", { class: "corners__table" }, [el("thead", {}, head), tbody])),
     el("div", { class: "subtitle corners__caption", style: "margin:8px 0 0;" }, T.cornersCaption),
   ]);
   return { element, destroy: noop };
@@ -277,7 +325,7 @@ export function renderChart(widget, ctx) {
     key: widget.channel, title: entry.label, unit: entry.unit, kind: "line", series,
     rangeValues: [baseEntry.a, ...(hasB && !entry.pair ? [baseEntry.b] : []), ...extras.map((s) => baseEntry[s])],
     range: entry.fixed_range || undefined, discrete: entry.discrete,
-    height: Math.max((CHART_HEIGHT[widget.size] || 110) - (entry.discrete ? 30 : 0), 60), showXAxis: true,
+    height: Number.isFinite(widget.boxHeight) ? chartHeight(widget) : Math.max((CHART_HEIGHT[widget.size] || 110) - (entry.discrete ? 30 : 0), 60), showXAxis: true,
     sectors: data.sectors.a,
     format: (v) => formatChannelValue(widget.channel, v, entry),
   });
@@ -301,6 +349,7 @@ export function renderTrackmap(widget, ctx) {
     ensureChannels: ctx.ensureChannels,
     onModeChange: ctx.onTrackmapMode,
     events: ctx.events, // V0.9.3: track-limits findings and lock-ups as markers
+    height: Number.isFinite(widget.boxHeight) ? Math.max(widget.boxHeight - 134, 160) : undefined,
   });
   return { element: el("div", { class: "card" }, [el("h2", {}, t("Track")), map.element]), destroy: () => map.destroy() };
 }

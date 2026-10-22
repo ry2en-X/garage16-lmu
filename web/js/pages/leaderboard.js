@@ -6,6 +6,11 @@
 //
 // V0.8.9: the track picker is a searchable venue list with all layouts (see below).
 //
+// V0.9.6: nothing to click before you see a table — the busiest track and its busiest class are
+// chosen and shown right away, every change of track / layout / class / car reloads the table at
+// once (no "Search" button), the choice is kept in the address (#/leaderboard?track=..&class=..)
+// so a link opens the same table, and the table shows each driver's gap to P1.
+//
 // V0.6.7: track/class/car are now dropdowns fed by the catalog endpoints
 // (real values discovered from actual uploads — see
 // server/routers/leaderboard.py) instead of free-text fields where a
@@ -49,8 +54,7 @@ export async function renderLeaderboard(container) {
   const carSelect = el("select", { id: "carSelect" }, [el("option", { value: "" }, t("Pick a track first"))]);
   const carField = el("div", { class: "field", style: "display:none;" }, [el("label", { for: "carSelect" }, t("Car")), carSelect]);
 
-  const searchBtn = el("button", { class: "btn" }, t("Search"));
-  [searchField, venueField, layoutField, classField, carField, searchBtn].forEach((node) => form.appendChild(node));
+  [searchField, venueField, layoutField, classField, carField].forEach((node) => form.appendChild(node));
   container.appendChild(form);
 
   const hintBox = el("div");
@@ -60,6 +64,12 @@ export async function renderLeaderboard(container) {
 
   let venues = [];
   let currentTrack = ""; // the exact track string LMU sent for the chosen layout
+  // what the address asks for (a shared link), used once
+  const wanted = (() => {
+    const q = new URLSearchParams((window.location.hash.split("?")[1]) || "");
+    return { track: q.get("track"), cls: q.get("class"), car: q.get("car") };
+  })();
+  let firstLoad = true;
 
   function lapsLabel(n) {
     return n ? tp("{0} lap", "{0} laps", n) : t("no laps yet");
@@ -82,6 +92,10 @@ export async function renderLeaderboard(container) {
     classSelect.disabled = false;
     classSelect.appendChild(el("option", { value: "" }, t("Choose…")));
     options.forEach((o) => classSelect.appendChild(el("option", { value: o.name }, `${o.name} · ${lapsLabel(o.lap_count)}`)));
+    // V0.9.6: the class asked for in the address, else the one with the most laps
+    const busiest = [...options].filter((o) => o.lap_count > 0).sort((a, b) => b.lap_count - a.lap_count)[0];
+    const fromUrl = firstLoad && wanted.cls && options.some((o) => o.name === wanted.cls) ? wanted.cls : null;
+    if (fromUrl || busiest) classSelect.value = fromUrl || busiest.name;
   }
 
   async function loadVenues(q) {
@@ -104,10 +118,17 @@ export async function renderLeaderboard(container) {
     venueSelect.disabled = false;
     venueSelect.appendChild(el("option", { value: "" }, t("Choose a track…")));
     venues.forEach((v) => venueSelect.appendChild(el("option", { value: v.venue }, `${v.venue} · ${lapsLabel(v.lap_count)}`)));
+    const urlVenue = firstLoad && wanted.track ? venues.find((v) => v.layouts.some((l) => l.track_name === wanted.track)) : null;
     if (previous && venues.some((v) => v.venue === previous)) {
       venueSelect.value = previous;
     } else if (q && venues.length === 1) {
       venueSelect.value = venues[0].venue; // one match: no need to make the user click it
+    } else if (!q && urlVenue) {
+      venueSelect.value = urlVenue.venue;          // V0.9.6: a shared link
+    } else if (!q && !previous) {
+      // V0.9.6: start with the busiest track instead of an empty page
+      const busiest = [...venues].filter((v) => v.lap_count > 0).sort((a, b) => b.lap_count - a.lap_count)[0];
+      if (busiest) venueSelect.value = busiest.venue;
     }
     await onVenueChange();
   }
@@ -140,6 +161,7 @@ export async function renderLeaderboard(container) {
         layoutSelect.appendChild(el("option", { value: l.track_name }, `${l.track_name} · ${lapsLabel(l.lap_count)}`))
       );
       layoutSelect.value = busiest.track_name; // the most-driven variant first
+      if (firstLoad && wanted.track && venue.layouts.some((l) => l.track_name === wanted.track)) layoutSelect.value = wanted.track;
       layoutField.style.display = "";
     }
     currentTrack = venue.layouts.length > 1 ? layoutSelect.value : venue.layouts[0].track_name;
@@ -151,10 +173,14 @@ export async function renderLeaderboard(container) {
       const [classOptions, cars] = await Promise.all([api.catalogClassOptions(currentTrack), api.catalogCars(currentTrack)]);
       fillClassOptions(classOptions);
       fillSelect(carSelect, cars, t("No cars at this track yet"));
+      if (cars.length) carSelect.value = firstLoad && wanted.car && cars.includes(wanted.car) ? wanted.car : cars[0];
+      if (firstLoad && wanted.car && cars.includes(wanted.car)) setMode("car");
     } catch (err) {
       fillSelect(classSelect, [], t("Couldn't load classes"));
       fillSelect(carSelect, [], t("Couldn't load cars"));
     }
+    firstLoad = false;
+    await runSearch();
   }
 
   let searchTimer = null;
@@ -167,6 +193,8 @@ export async function renderLeaderboard(container) {
     currentTrack = layoutSelect.value;
     await onTrackResolved();
   });
+  classSelect.addEventListener("change", () => runSearch());
+  carSelect.addEventListener("change", () => runSearch());
 
   function setMode(next) {
     mode = next;
@@ -177,8 +205,8 @@ export async function renderLeaderboard(container) {
   }
   setMode("class");
 
-  modeToggle.querySelector("#modeClassBtn").addEventListener("click", () => setMode("class"));
-  modeToggle.querySelector("#modeCarBtn").addEventListener("click", () => setMode("car"));
+  modeToggle.querySelector("#modeClassBtn").addEventListener("click", () => { setMode("class"); runSearch(); });
+  modeToggle.querySelector("#modeCarBtn").addEventListener("click", () => { setMode("car"); runSearch(); });
 
   async function runSearch() {
     const track = currentTrack;
@@ -186,25 +214,32 @@ export async function renderLeaderboard(container) {
     if (!track || !key) {
       resultsBox.innerHTML = "";
       resultsBox.appendChild(
-        el("div", { class: "notice" }, mode === "class" ? t("Pick both a track and a class to search.") : t("Pick both a track and a car to search."))
+        el("div", { class: "empty-state" }, mode === "class" ? t("Pick a track and class (or an exact car) to see the standings.") : t("Pick both a track and a car to search."))
       );
       return;
     }
-    searchBtn.disabled = true;
-    resultsBox.innerHTML = "";
+    const seq = ++searchSeq;
+    resultsBox.setAttribute("aria-busy", "true");
     try {
       const entries = mode === "class"
         ? await api.classLeaderboard(track, key, 20)
         : await api.carLeaderboard(track, key, 20);
+      if (seq !== searchSeq) return;   // a newer choice is already loading
+      resultsBox.innerHTML = "";
+      resultsBox.appendChild(el("h2", { class: "board-title" }, `${track} · ${key}`));
       resultsBox.appendChild(renderTable(entries));
+      // V0.9.6: keep the choice in the address (a link opens this table); no re-render
+      const params = new URLSearchParams({ track, [mode === "class" ? "class" : "car"]: key });
+      if (window.history && window.history.replaceState) window.history.replaceState(null, "", `#/leaderboard?${params.toString()}`);
     } catch (err) {
+      if (seq !== searchSeq) return;
+      resultsBox.innerHTML = "";
       resultsBox.appendChild(el("div", { class: "notice notice--error" }, err.message));
     } finally {
-      searchBtn.disabled = false;
+      if (seq === searchSeq) resultsBox.removeAttribute("aria-busy");
     }
   }
-
-  searchBtn.addEventListener("click", runSearch);
+  let searchSeq = 0;
 
   resultsBox.appendChild(
     el("div", { class: "empty-state" }, t("Pick a track and class (or an exact car) to see the standings."))
@@ -218,16 +253,19 @@ function renderTable(entries) {
     return el("div", { class: "empty-state" }, t("No valid laps recorded here yet."));
   }
 
+  const leader = entries[0].lap_time;
   const rows = entries.map((entry, i) => {
     const pos = i + 1;
     return el("tr", {}, [
       el("td", {}, el("span", { class: `pos-badge ${pos === 1 ? "p1" : ""}` }, String(pos))),
       el("td", {}, el("a", { href: `#/driver/${entry.driver_id}` }, entry.driver_name)),
       el("td", {}, el("span", { class: "lap-time" }, formatLapTime(entry.lap_time))),
+      // V0.9.6: the gap to P1, and the sectors in seconds (not "0:29.425")
+      el("td", { class: "lap-gap" }, pos === 1 ? "" : `+${(entry.lap_time - leader).toFixed(3)}`),
       el(
         "td",
-        {},
-        (entry.sector_times || []).map((s) => formatLapTime(s)).join(" / ")
+        { class: "sector-cells" },
+        (entry.sector_times || []).map((s) => (s > 0 ? s.toFixed(3) : "—")).join(" · ")
       ),
       el(
         "td",
@@ -241,7 +279,7 @@ function renderTable(entries) {
   });
 
   const table = el("table", { class: "timing-table" }, [
-    el("thead", {}, el("tr", {}, ["#", t("Driver"), t("Lap"), t("Sectors"), "", t("Set"), ""].map((h) => el("th", {}, h)))),
+    el("thead", {}, el("tr", {}, ["#", t("Driver"), t("Lap"), t("Gap"), t("Sectors"), "", t("Set"), ""].map((h) => el("th", {}, h)))),
     el("tbody", {}, rows),
   ]);
 

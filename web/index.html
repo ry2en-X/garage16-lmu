@@ -3,10 +3,12 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>LMU Garage</title>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<title>Garage16</title>
+<!-- V0.9.6: the fonts are served from here (web/fonts, SIL Open Font License) — no request to
+     Google: faster through the tunnel, works offline in the desktop app, no third-party
+     connection for the visitor (DSGVO). -->
+<link rel="preload" href="fonts/ibm-plex-mono-latin-400.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="fonts/oswald-latin-wght.woff2" as="font" type="font/woff2" crossorigin />
 <link rel="stylesheet" href="css/styles.css" />
 <!-- V0.9.4: the Garage16 icon — an angular "16" -->
 <link rel="icon" href="favicon.svg" type="image/svg+xml" />
@@ -18,19 +20,31 @@
   <div class="frame">
     <nav class="pitwall" id="pitwall">
       <a class="pitwall__brand" href="#/" style="text-decoration:none;">
-        <span class="pitwall__brand-mark">LMU</span>
-        <span class="pitwall__brand-name">GARAGE</span>
+        <span class="pitwall__brand-mark">GARAGE</span>
+        <span class="pitwall__brand-name">16</span>
       </a>
 
+      <!-- V0.9.6: grouped by what you want to do -->
       <div class="pitwall__links" id="navLinks">
-        <a href="#/leaderboard" data-route="leaderboard" data-i18n="Leaderboard">Leaderboard</a>
-        <a href="#/circuits" data-route="circuits" data-i18n="Circuits">Circuits</a>
-        <a href="#/analysis" data-route="analysis" data-i18n="LapTime Analyzer">LapTime Analyzer</a>
-        <a href="#/stints" data-route="stints" data-i18n="Stint Analyzer">Stint Analyzer</a>
-        <a href="#/dashboard" data-route="dashboard" data-i18n="Dashboard">Dashboard</a>
-        <a href="#/teams" data-route="teams" data-i18n="Teams">Teams</a>
-        <a href="#/account" data-route="account" data-i18n="Account">Account</a>
-        <a href="#/download" data-route="download" data-i18n="Download">Download</a>
+        <div class="nav-group">
+          <span class="nav-group__label" data-i18n="My garage">My garage</span>
+          <a href="#/dashboard" data-route="dashboard" data-i18n="Dashboard">Dashboard</a>
+          <a href="#/teams" data-route="teams" data-i18n="Teams">Teams</a>
+        </div>
+        <div class="nav-group">
+          <span class="nav-group__label" data-i18n="Analysis">Analysis</span>
+          <a href="#/analysis" data-route="analysis" data-i18n="LapTime Analyzer">LapTime Analyzer</a>
+          <a href="#/stints" data-route="stints" data-i18n="Stint Analyzer">Stint Analyzer</a>
+        </div>
+        <div class="nav-group">
+          <span class="nav-group__label" data-i18n="Racing">Racing</span>
+          <a href="#/leaderboard" data-route="leaderboard" data-i18n="Leaderboard">Leaderboard</a>
+          <a href="#/circuits" data-route="circuits" data-i18n="Circuits">Circuits</a>
+        </div>
+        <div class="nav-group nav-group--foot">
+          <a href="#/account" data-route="account" data-i18n="Account">Account</a>
+          <a href="#/download" data-route="download" data-i18n="Download">Download</a>
+        </div>
       </div>
 
       <div class="pitwall__lang" id="langSwitchSlot"></div>
@@ -42,7 +56,7 @@
     </nav>
 
     <div class="mobile-bar">
-      <div class="mobile-bar__brand">LMU GARAGE</div>
+      <a class="mobile-bar__brand" href="#/">GARAGE<span>16</span></a>
       <button class="mobile-bar__toggle" id="mobileToggle" aria-label="Toggle menu" data-i18n-aria-label="Toggle menu">☰</button>
     </div>
 

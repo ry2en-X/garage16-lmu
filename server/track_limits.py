@@ -79,13 +79,18 @@ from typing import Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
 
-TRACK_LIMITS_VERSION = 2
+TRACK_LIMITS_VERSION = 3
+# V0.9.9 (version 3): a lap without any track-limits signal is no longer "valid by default" — it
+# goes to review (not_verifiable), and server/lap_decision.py adds the findings of the decision
+# layer (signal coverage per client version, data quality, motion plausibility, a file uploaded by
+# another driver) as findings of tier "quality" in the same list.
 
 INVALID, REVIEW, INFO = "invalid", "review", "info"
 STATUS_VALID, STATUS_REVIEW, STATUS_INVALID = "valid", "review", "invalid"
 SEVERITY_ORDER = {INVALID: 0, REVIEW: 1, INFO: 2}
 
 TIER_LMU, TIER_RULE, TIER_HEURISTIC, TIER_SIGNAL = "lmu", "rule", "heuristic", "signal"
+TIER_QUALITY = "quality"   # V0.9.9: server/lap_decision.py
 
 WHEELS = ("fl", "fr", "rl", "rr")
 OFF_SURFACES = (2.0, 3.0, 4.0)       # grass, dirt, gravel (LMU's mSurfaceType)
@@ -133,7 +138,10 @@ RULES: Dict[str, Rule] = {
     "pit_lane": Rule(TIER_RULE, INVALID, True, "The car was in the pit lane during the lap (Garage16 rule: no pit laps in comparisons)."),
     # V0.9.4: review, not invalid — LMU writes the sector times a little late, so at the moment
     # the lap is finalised they can still be the previous lap's or missing, on laps LMU counts.
-    "sector_times_implausible": Rule(TIER_HEURISTIC, REVIEW, True,
+    # V0.9.9: shown, no effect. REVIEW now holds a lap out of the leaderboards; unknown sector times
+    # say nothing about whether the lap was valid (the lap time is LMU's, and sector times that
+    # contradict it are still rejected by the plausibility check, server/validation.py).
+    "sector_times_implausible": Rule(TIER_HEURISTIC, INFO, True,
                                      "LMU's sector times were missing or not increasing when the lap was finalised (LMU writes them late). The lap time is LMU's; only the sector split is unknown."),
     "client_invalid": Rule(TIER_RULE, INVALID, True,
                            "An older client rejected the lap without saying why (before 0.9.3: pit lane, no time or LMU's count flag)."),
@@ -155,11 +163,40 @@ RULES: Dict[str, Rule] = {
     "game_lap_time_changed": Rule(TIER_LMU, INFO, False, "LMU changed the finished lap's time after the line."),
     "wheels_off": Rule(TIER_HEURISTIC, INFO, False, "Two or three wheels off the track at the same time."),
     "signal_unreliable": Rule(TIER_SIGNAL, INFO, True, "A signal looked implausible and was ignored for this lap."),
-    "not_verifiable": Rule(TIER_SIGNAL, INFO, True, "The lap has no track-limits signals at all (old client)."),
+    # V0.9.9: REVIEW, not INFO — a lap that cannot be checked is not valid by default
+    "not_verifiable": Rule(TIER_SIGNAL, REVIEW, True,
+                           "The lap has no track-limits signals at all (old client, or the signals were removed). Not checkable, so not counted automatically."),
+    # --- V0.9.9: the decision layer (server/lap_decision.py). Review only: each of them says the
+    #     lap cannot be judged reliably, none of them proves an offence.
+    "signals_missing": Rule(TIER_QUALITY, REVIEW, True,
+                            "A signal every recording of this client version contains is missing, empty or unreadable. Removing a signal must not make a lap look cleaner."),
+    "insufficient_evidence": Rule(TIER_QUALITY, REVIEW, True,
+                                  "Only one independent track-limits signal could be checked."),
+    "coverage_gap": Rule(TIER_QUALITY, REVIEW, True,
+                         "No new telemetry frame for more than 1 s inside the lap: an excursion in that stretch could not be seen."),
+    "low_frame_rate": Rule(TIER_QUALITY, REVIEW, True,
+                           "Fewer than 10 telemetry frames per second: too coarse to check the track limits."),
+    "position_jump": Rule(TIER_QUALITY, REVIEW, False,
+                          "The lap distance jumped ahead much further than the car's speed allows (a jump of at least 50 m between two updates)."),
+    "speed_distance_mismatch": Rule(TIER_QUALITY, REVIEW, False,
+                                    "Distance from the speed trace and LMU's lap distance differ by more than 5 % over the lap (timestamps or distance altered?)."),
+    "implausible_acceleration": Rule(TIER_QUALITY, REVIEW, False,
+                                     "The speed changes faster than 8 G over 0.1 s — a measurement error, a crash or altered data."),
+    "frozen_samples": Rule(TIER_QUALITY, REVIEW, False,
+                           "For at least 0.5 s the time advanced while speed, revs, inputs and lap distance stayed exactly the same at speed — repeated samples, as if a stretch had been replaced."),
+    "telemetry_reused": Rule(TIER_QUALITY, REVIEW, True,
+                             "Exactly this file was already uploaded by another driver."),
+    "check_failed": Rule(TIER_QUALITY, REVIEW, True,
+                         "The track-limits check could not run on this file (an error inside the check)."),
+    "unsupported_inputs": Rule(TIER_QUALITY, REVIEW, True,
+                               "The stored check inputs come from a newer server version this one cannot interpret."),
 }
 
 # What the operator may let invalidate once real data confirmed it (and nothing else).
-PROMOTABLE = frozenset(code for code, rule in RULES.items() if rule.severity == REVIEW)
+# V0.9.9: never the decision layer's data-quality findings nor "not checkable" — they say the lap
+# cannot be judged, not that it broke a rule.
+PROMOTABLE = frozenset(code for code, rule in RULES.items()
+                       if rule.severity == REVIEW and rule.tier not in (TIER_SIGNAL, TIER_QUALITY))
 
 # Codes the client may report (client/telemetry/lap_verdict.py) and which file signal the
 # server checks itself for each (None: only the client can know it).
@@ -204,7 +241,18 @@ MESSAGES = {
     "penalty_added": "LMU gave a penalty during this lap",
     "wheels_off": "wheels off the track",
     "signal_unreliable": "a track-limits signal looked implausible and was ignored",
-    "not_verifiable": "this lap has no track-limits data (recorded by an older client)",
+    "not_verifiable": "this lap has no track-limits data (recorded by an older client or removed)",
+    "signals_missing": "expected track-limits signals are missing",
+    "insufficient_evidence": "too few track-limits signals to judge the lap",
+    "coverage_gap": "gap in the telemetry",
+    "low_frame_rate": "too few telemetry frames per second",
+    "position_jump": "the lap distance jumps ahead",
+    "speed_distance_mismatch": "speed and lap distance do not agree",
+    "implausible_acceleration": "implausible acceleration",
+    "frozen_samples": "repeated samples while the time advanced",
+    "telemetry_reused": "file already uploaded by another driver",
+    "check_failed": "the track-limits check failed",
+    "unsupported_inputs": "check inputs from a newer server",
 }
 
 
@@ -259,14 +307,24 @@ class Verdict:
     status: str
     findings: List[Finding]
     signals: List[str]
+    decision: Optional[dict] = None      # V0.9.9: server/lap_decision.py (sources, quality, evidence)
 
     def as_dict(self) -> dict:
-        return {
+        out = {
             "version": TRACK_LIMITS_VERSION,
             "status": self.status,
             "findings": [f.as_dict() for f in self.findings],
             "signals": list(self.signals),
         }
+        if self.decision:
+            out["decision"] = self.decision
+        return out
+
+    def add(self, findings: Iterable["Finding"]) -> "Verdict":
+        """V0.9.9: adds findings (the decision layer's) and recomputes the status and order."""
+        merged = _verdict(list(self.findings) + list(findings), self.signals)
+        self.status, self.findings = merged.status, merged.findings
+        return self
 
     @property
     def invalidating(self) -> List[Finding]:

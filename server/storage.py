@@ -27,7 +27,17 @@ def telemetry_storage_dir(driver_id: int, track_name: str, car_name: str) -> Pat
         / _slugify(car_name)
     )
     out_dir.mkdir(parents=True, exist_ok=True)
+    # V0.9.9: the names above are slugs (no "..", no separators), but a symlink planted inside the
+    # volume could still redirect the folder — the real location must lie inside the storage root
+    root = settings.telemetry_storage_dir.resolve()
+    real = out_dir.resolve()
+    if real != root and root not in real.parents:
+        raise StorageOutside(f"telemetry folder resolves outside the storage root: {out_dir}")
     return out_dir
+
+
+class StorageOutside(RuntimeError):
+    """A telemetry folder that resolves outside the storage root (a symlink inside the volume)."""
 
 
 def telemetry_storage_path(

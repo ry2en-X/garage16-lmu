@@ -35,49 +35,65 @@ Migrationslogik, der Unterschied ist nur die Port-Freigabe auf
    `--profile backup`-Zyklus abwarten oder manuell antriggern — siehe
    README.md "Backups").
 
-3. **Falls Daten beschädigt/inkonsistent sind: aus einem Backup wiederherstellen.**
+3. **Falls Daten beschädigt/inkonsistent sind: aus einem Backup wiederherstellen** (V0.9.8).
 
-   Mit dem Skript (empfohlen — es macht alles in der richtigen
-   Reihenfolge und fragt vorher nach):
+   Ein Backup ist seit V0.9.8 **ein Ordner** `garage16_<Zeitstempel>/` mit `db.sql.gz`,
+   `telemetry.tar.gz` und `manifest.json` (beide Wege — `scripts/backup.sh` und
+   `--profile backup` — legen genau das an; ein Ordner mit `.partial` am Ende ist ein abgebrochener
+   Lauf und kein Backup). Datenbank und Dateien stammen aus demselben Moment: während des Backups
+   werden neue Uploads kurz mit „Wartung“ (HTTP 503) abgewiesen und vom Client später wiederholt.
+
    ```
-   ./scripts/restore.sh <db.sql.gz> <telemetry.tar.gz>
+   ./scripts/restore.sh /pfad/zu/garage16_20261019_030000
    ```
-   Die beiden Dateien MÜSSEN aus demselben Backup-Lauf stammen (gleicher
-   Zeitstempel) — sonst zeigen `Lap.telemetry_path`-Einträge ins Leere
-   oder umgekehrt. Beide Backup-Arten funktionieren, man übergibt nur die
-   zwei Dateien:
-   - `scripts/backup.sh`: `<Backup-Ordner>/garage16_<Zeitstempel>/db.sql.gz`
-     und `.../telemetry.tar.gz`
-   - containerisiert (`--profile backup`):
-     `garage16_db_<Zeitstempel>.sql.gz` und
-     `garage16_telemetry_<Zeitstempel>.tar.gz` in `${BACKUP_HOST_PATH}`
 
-   Das Skript: prüft beide Dateien, verlangt die Eingabe von `RESTORE`,
-   stoppt `server` und `discord_bot`, legt eine Sicherheitskopie der
-   AKTUELLEN Datenbank neben dein Backup (`pre_restore_<Zeit>.sql.gz`),
-   löscht und erstellt die Datenbank neu, spielt den Dump ein, ersetzt die
-   Telemetrie-Dateien und startet `server` + `discord_bot` wieder.
+   Ablauf — und was bei einem Fehler in jedem Schritt passiert:
 
-   **Warum nicht einfach `psql < dump`?** Weil das gegen die bestehende,
-   gefüllte Datenbank scheitert (`relation "alembic_version" already
-   exists`, gegen ein echtes PostgreSQL 16 nachgestellt), und weil
-   `docker compose exec` einen LAUFENDEN db-Container braucht — ein
-   vorheriges `docker compose down` macht den Befehl unmöglich. (Beides
-   stand in früheren Versionen dieser Anleitung falsch.)
+   | Schritt | Was | Bei Fehler |
+   |---|---|---|
+   | 1 Prüfen | Manifest, SHA-256 und Größen, gzip, Dump vollständig, keine `../`-Pfade, Schema bekannt | nichts angefasst |
+   | 2–3 Bereitstellen | Dump in eine NEUE Datenbank `<db>_restore_<stamp>`, Dateien in ein NEUES Volume | beides wieder entfernt |
+   | 4 Prüfen der Kopie | `alembic upgrade head` + `consistency_check --deep` auf der Kopie | beides entfernt, Produktion unberührt |
+   | 5 Stoppen | server + discord_bot | wieder gestartet |
+   | 6 Datenbank tauschen | EINE Transaktion: live → `<db>_pre_restore_<stamp>`, Kopie → live | unverändert |
+   | 7 Dateien tauschen | aktuelle Dateien nach `.pre_restore_<stamp>/` im Volume, Kopie hinein | Dateien und Datenbank zurück |
+   | 8–9 Starten, prüfen | Health + Konsistenz des laufenden Servers | alles zurück, alter Stand läuft |
 
-   Von Hand (nur falls das Skript nicht nutzbar ist) — die DB muss laufen,
-   die Schreiber müssen aus sein:
+   Ergebnis ist **immer** entweder das geprüfte Backup oder der Stand davor. Scheitert sogar das
+   Zurückdrehen, bricht das Skript mit Exit-Code 3 und „MANUAL ATTENTION NEEDED“ ab und nennt, welche
+   Datenbank / welcher Ordner welchen Stand hält — nie stillschweigend.
+
+   Der alte Stand bleibt als Rückfallpunkt liegen:
+   ```
+   ./scripts/restore.sh --rollback 20261019_141500    # zurück zum Stand vor diesem Restore
+   ./scripts/restore.sh --cleanup  20261019_141500    # Rückfallpunkt löschen, wenn alles passt
+   ```
+   (den Zeitstempel nennt das Skript am Ende.)
+
+   **Backups von vor V0.9.8** (zwei lose Dateien, kein Manifest) gehen mit
+   `./scripts/restore.sh --allow-unverified <db.sql.gz> <telemetry.tar.gz>` — dieselbe sichere
+   Abfolge, nur ohne Prüfsummen-Vergleich; beide Dateien müssen vom selben Lauf stammen.
+
+   **Getestet:** `tests/test_v098_backup_restore.py` führt die ausgelieferten Skripte gegen ein
+   echtes PostgreSQL und echte Alpine-Umgebungen aus — Uploads während des Backups, abgebrochene und
+   gekillte Backups, ein Fehler in jedem einzelnen Restore-Schritt, ein scheiterndes Zurückdrehen,
+   beschädigte / fremde / manipulierte Backups.
+
+   ### Restore manuell zurückdrehen
+
+   Nur nötig, wenn das Skript mit Exit-Code 3 abbricht. Es nennt die Namen; der Normalfall:
    ```
    docker compose stop server discord_bot
-   docker compose up -d db
-   docker compose exec -T db psql -U garage16 -d postgres -v ON_ERROR_STOP=1 \
-       -c "DROP DATABASE IF EXISTS garage16 WITH (FORCE);" \
-       -c "CREATE DATABASE garage16 OWNER garage16;"
-   gunzip -c /pfad/zum/backup/db.sql.gz | docker compose exec -T db psql -U garage16 -d garage16 -q -v ON_ERROR_STOP=1
-   docker run --rm -v garage16_telemetry_data:/data -v /pfad/zum/backup:/backup:ro alpine \
-       sh -c "find /data -mindepth 1 -delete && tar xzf /backup/telemetry.tar.gz -C /data"
+   # Dateien: alles außer dem Rückfallordner weg, dessen Inhalt zurück
+   docker run --rm -v garage16_telemetry_data:/live alpine sh -c \
+     'cd /live && find . -mindepth 1 -maxdepth 1 ! -name ".pre_restore_<stamp>" -exec rm -rf {} + && mv .pre_restore_<stamp>/* .pre_restore_<stamp>/.[!.]* . 2>/dev/null; rmdir .pre_restore_<stamp>'
+   # Datenbank: in einer Transaktion zurückbenennen
+   docker compose exec -T db psql -U garage16 -d postgres -1 \
+     -c 'ALTER DATABASE garage16 RENAME TO garage16_failed_<stamp>;' \
+     -c 'ALTER DATABASE garage16_pre_restore_<stamp> RENAME TO garage16;'
    docker compose up -d server discord_bot
    ```
+   Danach `python -m scripts.consistency_check` im Server-Container (Befehl: ADMIN_GUIDE).
 
 ## Nach jedem Rollback
 
@@ -90,6 +106,10 @@ Migrationslogik, der Unterschied ist nur die Port-Freigabe auf
   als `healthy` zeigen, inklusive des Bots (Heartbeat-Datei, siehe
   README.md "Monitoring") — `unhealthy` dort ist ein zusätzliches, vom
   reinen Log-Grep unabhängiges Signal.
+- **Nach einem Restore (V0.9.7): Datenbank und Telemetrie-Volume gegeneinander prüfen** —
+  `python -m scripts.consistency_check --deep` im Server-Container (genauer Befehl:
+  `docs/ADMIN_GUIDE.md`, „Neu in V0.9.7“). Runden ohne Datei oder Dateien mit anderer Prüfsumme
+  heißen: DB- und Telemetrie-Backup stammen nicht vom selben Zeitpunkt.
 - Betroffene Fahrer informieren, falls Uploads in der Zwischenzeit
   verloren gingen (Client-Queue behält lokale Kopien — `--reconfigure`
   ist NICHT nötig, der Uploader versucht es beim nächsten Zyklus erneut,

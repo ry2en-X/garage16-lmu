@@ -9,7 +9,9 @@ then starts uvicorn without --reload, optionally with --workers N).
 from __future__ import annotations
 
 import json
+import contextlib
 import logging
+import os
 import time
 import uuid
 from typing import Optional
@@ -19,15 +21,19 @@ from fastapi import Query
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from starlette.concurrency import run_in_threadpool
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy import text
 
+from . import request_context
 from .config import settings
 from .database import Base, SessionLocal, engine
 from .routers import accounts, admin, analysis, drivers, leaderboard, stints, teams, telemetry
 from .routers.teams import invitations_router
 from .versioning import is_client_outdated
 
-VERSION = "0.9.4"
+VERSION = "0.9.9"
 
 
 def _configure_logging() -> None:
@@ -43,9 +49,11 @@ def _configure_logging() -> None:
                     "logger": record.name,
                     "message": record.getMessage(),
                 }
-                request_id = getattr(record, "request_id", None)
-                if request_id:
-                    payload["request_id"] = request_id
+                # V0.9.7: the ids that let one upload be followed end to end
+                for key in ("request_id", "lap_id", "driver_id", "outcome", "status", "duration_ms"):
+                    value = getattr(record, key, None)
+                    if value is not None:
+                        payload[key] = value
                 if record.exc_info:
                     payload["exc_info"] = self.formatException(record.exc_info)
                 return json.dumps(payload)
@@ -82,7 +90,21 @@ def _docs_urls(cfg) -> dict:
     }
 
 
-app = FastAPI(title="LMU Garage Backend", version=VERSION, **_docs_urls(settings))
+@contextlib.asynccontextmanager
+async def _lifespan(_app):
+    """V0.9.8: maintenance at start — the upload log's 30 days, whatever the upload frequency
+    (server/upload_log.py); a warning when several workers split the in-memory state."""
+    from .upload_log import maybe_prune
+
+    await run_in_threadpool(maybe_prune, True)
+    workers = int(os.environ.get("LMU_GARAGE_WORKERS", "1") or 1)
+    if workers > 1:
+        logger.warning("LMU_GARAGE_WORKERS=%d: rate limits and the analysis cache are per worker process "
+                       "(each worker allows the full limit) — see server/rate_limit.py", workers)
+    yield
+
+
+app = FastAPI(title="LMU Garage Backend", version=VERSION, lifespan=_lifespan, **_docs_urls(settings))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -137,13 +159,22 @@ async def request_id_and_timing(request: Request, call_next):
     enough to correlate a slow/failed request across proxy and app logs
     without pulling in a tracing stack."""
     request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
+    # V0.9.7: an incoming id is only reused when it looks like one (it ends up in logs and the DB)
+    if not (0 < len(request_id) <= 64 and all(c.isalnum() or c in "-_." for c in request_id)):
+        request_id = uuid.uuid4().hex[:12]
+    request.state.request_id = request_id
+    token = request_context.set_request_id(request_id)   # V0.9.9: for code without the Request
     start = time.monotonic()
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    finally:
+        request_context.reset(token)
     duration_ms = (time.monotonic() - start) * 1000
     response.headers["X-Request-ID"] = request_id
     logger.info(
         "%s %s -> %d (%.1fms) [%s]",
         request.method, request.url.path, response.status_code, duration_ms, request_id,
+        extra={"request_id": request_id, "status": response.status_code, "duration_ms": round(duration_ms, 1)},
     )
     return response
 
@@ -157,14 +188,17 @@ async def require_https(request: Request, call_next):
     Cloudflare Tunnel, ...) for anything beyond localhost, not to
     terminate TLS itself. When require_https is on, that proxy is expected
     to set X-Forwarded-Proto so this can tell a real HTTPS request from a
-    plaintext one reaching it directly. /health is exempt — it must stay
-    reachable over plain HTTP for the reverse proxy's / orchestrator's own
-    healthcheck, which typically hits the container directly, not through
-    itself.
+    plaintext one reaching it directly. /health, /health/live and /health/ready
+    are exempt — they must stay reachable over plain HTTP for the reverse
+    proxy's / orchestrator's own healthcheck, which hits the container
+    directly (docker-compose.yml probes /health/ready). V0.9.9.2: the two
+    V0.9.8 endpoints were missing here, so with LMU_GARAGE_REQUIRE_HTTPS=1
+    (the compose default) the healthcheck got 400 and the server never
+    became healthy.
     """
     if (
         settings.require_https
-        and request.url.path != "/health"
+        and request.url.path not in ("/health", "/health/live", "/health/ready")
         and request.headers.get("x-forwarded-proto", "http") != "https"
     ):
         return JSONResponse(
@@ -202,7 +236,9 @@ def health(client_version: Optional[str] = Query(default=None, max_length=32)) -
             db.close()
     except Exception as exc:  # noqa: BLE001 — healthcheck must never itself 500
         db_ok = False
-        db_error = str(exc)[:200]
+        # V0.9.8: the details (host, user, driver message) go to the log, not to anybody asking
+        logger.warning("Health check: database not reachable: %s", exc)
+        db_error = "database not reachable"
 
     return {
         "status": "ok" if db_ok else "degraded",
@@ -224,3 +260,91 @@ def health(client_version: Optional[str] = Query(default=None, max_length=32)) -
         # page offers both, and an outdated app-edition client points its user here.
         **({"client_app_download_url": settings.client_app_download_url} if settings.client_app_download_url else {}),
     }
+
+
+# ---------------------------------------------------------------------------
+# V0.9.8 — liveness / readiness, and a request id in every error response
+# ---------------------------------------------------------------------------
+
+DISK_WARN_FREE_BYTES = int(os.environ.get("LMU_GARAGE_DISK_WARN_FREE_MB", "2048")) * 1024 * 1024
+
+
+@app.get("/health/live")
+def health_live() -> dict:
+    """The process answers — nothing else checked (a restart is the only cure when this fails)."""
+    return {"status": "ok", "version": VERSION}
+
+
+@app.get("/health/ready")
+def health_ready() -> JSONResponse:
+    """Can this server do its job right now? 200 = yes, 503 = no (with which part is missing).
+
+    Required: the database answers, the telemetry storage exists and is writable. Reported but
+    NOT failing: a running backup (uploads wait a moment, reading works), little free disk space
+    (a warning below LMU_GARAGE_DISK_WARN_FREE_MB, default 2048), optional integrations."""
+    import shutil
+
+    from .write_lock import maintenance_active
+
+    checks: dict = {}
+    warnings: list = []
+    try:
+        with SessionLocal() as db:
+            db.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Readiness: database not reachable: %s", exc)
+        checks["database"] = "unreachable"
+    storage = settings.telemetry_storage_dir
+    try:
+        storage.mkdir(parents=True, exist_ok=True)
+        ok = os.access(storage, os.W_OK)
+        checks["storage"] = "ok" if ok else "not writable"
+        free = shutil.disk_usage(storage).free
+        if free < DISK_WARN_FREE_BYTES:
+            warnings.append({"code": "DISK_LOW", "free_mb": free // (1024 * 1024)})
+    except OSError as exc:
+        logger.warning("Readiness: storage problem: %s", exc)
+        checks["storage"] = "unavailable"
+    try:
+        if maintenance_active():
+            warnings.append({"code": "MAINTENANCE"})
+    except OSError:
+        pass
+    ready = all(v == "ok" for v in checks.values())
+    return JSONResponse({"status": "ready" if ready else "not_ready", "version": VERSION, "checks": checks,
+                         "warnings": warnings}, status_code=200 if ready else 503)
+
+
+def _rid(request: Request) -> Optional[str]:
+    return getattr(request.state, "request_id", None)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """Every error answer carries the request id (also in X-Request-ID) — the id a driver can read
+    out and an admin finds in the log and in Admin -> Operations."""
+    rid = _rid(request)
+    headers = dict(getattr(exc, "headers", None) or {})
+    if rid:
+        headers["X-Request-ID"] = rid
+    return JSONResponse({"detail": exc.detail, "request_id": rid}, status_code=exc.status_code, headers=headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    from fastapi.encoders import jsonable_encoder
+
+    rid = _rid(request)
+    return JSONResponse({"detail": jsonable_encoder(exc.errors()), "request_id": rid}, status_code=422,
+                        headers={"X-Request-ID": rid} if rid else None)
+
+
+@app.exception_handler(Exception)
+async def _unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+    """No stack trace, path or message leaves the server — only the id to find them in the log."""
+    rid = _rid(request)
+    logger.exception("Unhandled error [%s] %s %s", rid, request.method, request.url.path, extra={"request_id": rid})
+    return JSONResponse({"detail": "Internal server error", "request_id": rid}, status_code=500,
+                        headers={"X-Request-ID": rid} if rid else None)
+

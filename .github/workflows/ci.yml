@@ -1,0 +1,113 @@
+# The release gate in CI (V0.9.7; V0.9.8: + lint, security, coverage floors, the backup/restore drill): every push and pull request runs the WHOLE suite in a clean
+# environment built from the pinned versions (constraints.txt) — nothing may be skipped
+# (GARAGE16_STRICT_TESTS=1, see tests/conftest.py) — then the migration chain and the suite against
+# a real PostgreSQL, a migration of a database filled at an OLD schema to the current one, and the
+# Docker images. The report (release/TEST_REPORT.md + JUnit XML) is kept as a build artifact.
+#
+# A missing dependency fails the run as an INFRASTRUCTURE error (exit code 6), never as "tested".
+# build-client.yml calls this workflow first: no client is built from code that did not pass.
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  # V0.9.8: the fast checks on their own, so a lint or security finding shows within a minute
+  lint-security:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt -c constraints.txt
+      - name: Linter (ruff.toml)
+        run: ruff check --output-format github .
+      - name: Static security analysis (medium + high)
+        run: bandit -q -r server discord_bot client scripts -ll
+      - name: Known vulnerabilities in every pinned package
+        run: |
+          grep -v '^#' constraints.txt | grep . > /tmp/pins.txt
+          pip-audit -r /tmp/pins.txt --no-deps --disable-pip --progress-spinner off
+
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: garage16_test
+          POSTGRES_PASSWORD: test_password_123
+          POSTGRES_DB: garage16_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U garage16_test" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"        # the Python of the Docker images
+          cache: pip
+          cache-dependency-path: constraints.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tests/js/package-lock.json
+      - name: System tools the suite drives (window tests, reverse proxy)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb python3-tk postgresql-client util-linux
+          curl -fsSL -o /tmp/caddy.tgz https://github.com/caddyserver/caddy/releases/download/v2.10.2/caddy_2.10.2_linux_amd64.tar.gz
+          tar -xzf /tmp/caddy.tgz -C /tmp caddy
+          echo "CADDY_BIN=/tmp/caddy" >> "$GITHUB_ENV"
+      - name: Python packages (exact versions)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r server/requirements.txt -r discord_bot/requirements.txt -r client/requirements.txt -r requirements-dev.txt -c constraints.txt
+      - name: Frontend test packages (exact versions)
+        working-directory: tests/js
+        run: npm ci --no-audit --no-fund
+      - name: Alpine root file system for the backup/restore drill (pinned SHA-256)
+        run: |
+          mkdir -p tests/.cache
+          curl -fsSL -o tests/.cache/alpine-minirootfs-3.21.8-x86_64.tar.gz https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86_64/alpine-minirootfs-3.21.8-x86_64.tar.gz
+          echo "6ea461b0225faad280b7e13df878b30fdd6d969dde25ef05f85a1bcec9033348  tests/.cache/alpine-minirootfs-3.21.8-x86_64.tar.gz" | sha256sum -c -
+      - name: Release gate — whole suite, strict (incl. the real backup/restore drill), archive from the tested tree
+        env:
+          GARAGE16_TEST_PG_ADMIN_URL: postgresql://garage16_test:test_password_123@localhost:5432/postgres
+        run: python -m scripts.release_check --report-dir release --zip release-archive/Garage16_Lmu.zip --zip-prefix "Garage16 - LMU"
+      - name: Release gate again on a clean copy extracted from the archive (V0.9.9)
+        env:
+          GARAGE16_TEST_PG_ADMIN_URL: postgresql://garage16_test:test_password_123@localhost:5432/postgres
+        run: python -m scripts.release_check --verify-archive release-archive/Garage16_Lmu.zip --report-dir release-verify
+      - name: PostgreSQL — migration chain and suite
+        run: bash scripts/test_against_postgres.sh postgresql://garage16_test:test_password_123@localhost:5432/garage16_test
+      - name: Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: |
+            release/TEST_REPORT.md
+            release/test-results.xml
+            release/coverage.json
+            release/environment.json
+            release-verify/TEST_REPORT.md
+            release-archive/
+          if-no-files-found: warn
+
+  docker:
+    runs-on: ubuntu-24.04
+    needs: tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: The server and bot images build with the pinned versions
+        run: |
+          docker build -f docker/Dockerfile.server -t garage16-server:ci .
+          docker build -f docker/Dockerfile.discord_bot -t garage16-bot:ci .
+          docker run --rm --entrypoint python garage16-server:ci -c "import fastapi, numpy, pandas, pyarrow, server.telemetry_analysis; print('imports ok')"

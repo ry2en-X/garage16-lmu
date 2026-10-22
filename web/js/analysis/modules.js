@@ -2,18 +2,19 @@
 // window type; analysis.js and the layout editor read this instead of knowing the
 // types themselves, so a new window is one entry here plus its renderer.
 //
-//   id, title, description, type, supportedChannels ("*" = any catalog channel,
+//   id, title, description, type, supportedChannels, min / presets / defaultCells (grid cells, V0.9.5), ("*" = any catalog channel,
 //   [] = none), defaultSize, defaultPosition (index in the Garage16 standard layout,
 //   or null when the window is not part of it), renderer, mobileSupport.
 
 import { t } from "../i18n.js";
-import { defaultLayout } from "./layout.js";
+import { defaultLayout, tileSpec } from "./layout.js";
 import { renderChart, renderCorners, renderCursorTable, renderDelta, renderPhysics, renderSummary, renderTrackmap } from "./widgets.js";
 import { renderCoaching } from "./coaching.js";
 import { renderDamper, renderHistogram } from "./distribution.js";
 import { renderEvents } from "./events.js";
 import { renderTyres } from "./tyres.js";
 import { renderCornerDetail, renderLine, renderSectors } from "./corner_detail.js";
+import { renderHealth } from "./health.js";
 
 const standard = defaultLayout().widgets;
 const positionOf = (type) => {
@@ -40,6 +41,12 @@ export const MODULES = [
   { id: "line", title: t("Racing lines"), description: t("The driven lines of both laps on a zoomable map: braking, turn-in, apex and full-throttle points, the line distance at the cursor."), type: "line", supportedChannels: [], renderer: renderLine, mobileSupport: true },
   { id: "corner_detail", title: t("Corner in detail"), description: t("One corner: the time per phase (braking, turn-in, apex, exit), every measured value of both laps and the same corner on your earlier laps."), type: "corner_detail", supportedChannels: [], renderer: renderCornerDetail, mobileSupport: true },
   { id: "sectors", title: t("Sectors of the session"), description: t("Sector times of every lap of the session, the fastest driven sectors and this lap's potential."), type: "sectors", supportedChannels: [], renderer: renderSectors, mobileSupport: true },
-].map((m) => ({ ...m, defaultSize: sizeOf(m.type, "large"), defaultPosition: positionOf(m.type) }));
+  // V0.9.7
+  { id: "health", title: t("Data quality"), description: t("How trustworthy each lap's recording is: channels, samples, gaps, distance axis, speed vs distance, resolution — next to the lap's validity."), type: "health", supportedChannels: [], renderer: renderHealth, mobileSupport: true },
+].map((m) => ({
+  ...m, defaultSize: sizeOf(m.type, "large"), defaultPosition: positionOf(m.type),
+  // V0.9.5: sizes on the grid (cells) — the smallest readable, the ready-made ones, the default
+  min: tileSpec(m.type).min, presets: tileSpec(m.type).presets, defaultCells: tileSpec(m.type).def,
+}));
 
 export const moduleForType = (type) => MODULES.find((m) => m.type === type) || null;

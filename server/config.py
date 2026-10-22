@@ -11,6 +11,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+from .client_ip import parse_trusted
 
 
 @dataclass
@@ -83,6 +84,12 @@ class Settings:
     # a guessable default.
     admin_token: Optional[str] = field(
         default_factory=lambda: os.environ.get("LMU_GARAGE_ADMIN_TOKEN") or None
+    )
+    # V0.9.8: the proxies whose X-Forwarded-For is believed (server/client_ip.py). Comma-separated
+    # addresses / networks or "private"; empty = nobody (the socket address counts). docker-compose
+    # sets "private": the app publishes no port, only the reverse proxy on the Docker network reaches it.
+    trusted_proxies: list = field(
+        default_factory=lambda: parse_trusted(os.environ.get("LMU_GARAGE_TRUSTED_PROXIES", ""))
     )
     # {bucket_name: (max_requests, window_seconds)}. See rate_limit.py for
     # what "bucket" means and this module's multi-worker caveat.

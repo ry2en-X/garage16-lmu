@@ -17,8 +17,11 @@
 //   * at the cursor: "Lap 2 1.4 m further inside" — Lap 2's lateral distance from Lap 1's line,
 //     inside = towards the inside of the nearest corner (server/telemetry_analysis.py)
 //
-// The lines' positions come from LMU's world coordinates (accurate to centimetres in the game);
-// what is NOT known is the track edge: the map shows where the cars drove, not the track.
+// The lines' positions come from LMU's world coordinates (accurate to centimetres in the game).
+// V0.9.5: behind them the TRACK — asphalt between both edges, the kerbs red/white — rebuilt on
+// the server from LMU's path_lateral / track_edge / surface type of several laps
+// (server/track_surface.py; approximate, an edge no lap ever drove along is dashed = estimated),
+// and a faint band of the car's width around EVERY lap.
 
 import { el } from "../format.js";
 import { cssVar, onResize } from "./charts.js";
@@ -35,6 +38,39 @@ const MARKER_SPAN_M = 2500;     // markers only when less than this much track i
 const SIDES = ["a", "b", "c", "d"];
 
 // ------------------------------------------------------------------ pure helpers (tested)
+
+const v = (a, i) => (a && a[i] !== null && a[i] !== undefined ? a[i] : null);
+
+// The server's surface (centre path + normals + widths per 4 m) -> what is drawn, in world
+// coordinates: { left: [[x,y]|null…], right: […], leftEst: [bool], rightEst: [bool],
+// kerbs: [{ side, i, quad: [[x,y]×4] }] } — a kerb quad spans bin i to i+1.
+export function surfaceGeometry(surface) {
+  if (!surface || !Array.isArray(surface.cx)) return null;
+  const n = surface.count;
+  const at = (i, offset) => {
+    const cx = v(surface.cx, i); const cy = v(surface.cy, i); const nx = v(surface.nx, i); const ny = v(surface.ny, i);
+    if (cx === null || cy === null || nx === null || ny === null || offset === null) return null;
+    return [cx + nx * offset, cy + ny * offset];
+  };
+  const left = []; const right = [];
+  for (let i = 0; i < n; i++) {
+    const wl = v(surface.wl, i); const wr = v(surface.wr, i);
+    left.push(wl === null ? null : at(i, wl));
+    right.push(wr === null ? null : at(i, -wr));
+  }
+  const kerbs = [];
+  for (const [side, inK, outK, sign] of [["l", "kl_in", "kl_out", 1], ["r", "kr_in", "kr_out", -1]]) {
+    for (let i = 0; i + 1 < n; i++) {
+      const a0 = v(surface[inK], i); const a1 = v(surface[outK], i);
+      const b0 = v(surface[inK], i + 1); const b1 = v(surface[outK], i + 1);
+      if (a0 === null || a1 === null) continue;
+      // a single bin of kerb still gets drawn: the next bin takes the same offsets
+      const p = [at(i, sign * a0), at(i, sign * a1), at(i + 1, sign * (b1 ?? a1)), at(i + 1, sign * (b0 ?? a0))];
+      if (p.every(Boolean)) kerbs.push({ side, i, quad: p });
+    }
+  }
+  return { left, right, leftEst: (surface.wl_est || []).map(Boolean), rightEst: (surface.wr_est || []).map(Boolean), kerbs };
+}
 
 // A "nice" scale-bar length for `pxPerM` so the bar is 60..160 px long.
 export function scaleBar(pxPerM, minPx = 60, maxPx = 160) {
@@ -112,6 +148,7 @@ export function cornerStretch(c) {
  *   selection  shared corner selection { get(), set(n), subscribe(fn) }
  */
 export function createLineMap(state, opts = {}) {
+  const boxHeight = Number.isFinite(opts.height) ? opts.height : HEIGHT; // V0.9.5: fills its tile
   const data = state.data;
   const map = data.map || {};
   const sides = SIDES.filter((s) => map[`x_${s}`]);
@@ -133,6 +170,8 @@ export function createLineMap(state, opts = {}) {
   ]);
   const markersBox = el("input", { type: "checkbox", checked: "checked" });
   const bandBox = el("input", { type: "checkbox", checked: "checked" });
+  const trackBox = el("input", { type: "checkbox", checked: "checked" });
+  let surface = null;   // V0.9.5: surfaceGeometry() of the server's track surface, once loaded
   const btn = (label, title, fn) => {
     const b = el("button", { type: "button", class: "btn btn--ghost linemap__btn", title }, label);
     b.addEventListener("click", fn);
@@ -155,13 +194,14 @@ export function createLineMap(state, opts = {}) {
       btn(t("Whole lap"), t("Show the whole lap"), () => { camFit(); followSet("off"); }),
       el("label", { class: "linemap__opt" }, [follow]),
       el("label", { class: "linemap__opt", title: t("Braking point ▲, turn-in ◆ (estimated), apex ●, full throttle ▼") }, [markersBox, ` ${t("Markers")}`]),
-      el("label", { class: "linemap__opt", title: t("A band of {0} m (about a car's width) around Lap 1", [CAR_WIDTH_M]) }, [bandBox, ` ${t("Car width")}`]),
+      el("label", { class: "linemap__opt", title: t("A faint band of {0} m (about a car's width) around every lap", [CAR_WIDTH_M]) }, [bandBox, ` ${t("Car width")}`]),
+      el("label", { class: "linemap__opt", title: t("Asphalt, edges and kerbs, rebuilt from LMU's track data of several laps (approximate)") }, [trackBox, ` ${t("Track")}`]),
       el("span", { class: "linemap__opt" }, [t("Stretch"), " ", fromInput, " – ", toInput, " m"]),
     ]),
     corners.length ? chips : null,
     canvas,
     el("div", { class: "linemap__foot" }, [legend, info]),
-    el("div", { class: "subtitle linemap__caption" }, t("Where the cars drove, from LMU's positions — not the track edges. ▲ braking point · ◆ turn-in (estimated from the steering) · ● apex · ▼ full throttle. Inside = towards the inside of the nearest corner.")),
+    el("div", { class: "subtitle linemap__caption" }, t("Lines: where the cars drove, from LMU's positions. Track: edges and kerbs rebuilt from LMU's track data of several laps — approximate; a dashed edge is estimated. ▲ braking point · ◆ turn-in (estimated from the steering) · ● apex · ▼ full throttle. Inside = towards the inside of the nearest corner.")),
   ]);
 
   let width = 0;
@@ -187,10 +227,10 @@ export function createLineMap(state, opts = {}) {
     if (cam && w === width) return true;
     const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
     canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(HEIGHT * dpr);
-    canvas.style.height = `${HEIGHT}px`;
+    canvas.height = Math.round(boxHeight * dpr);
+    canvas.style.height = `${boxHeight}px`;
     if (!cam) {
-      cam = createCamera(w, HEIGHT);
+      cam = createCamera(w, boxHeight);
       if (overall) cam.fit(overall);
       homeScale = cam.scale;
     } else {
@@ -320,7 +360,7 @@ export function createLineMap(state, opts = {}) {
     const ctx = canvas.getContext ? canvas.getContext("2d") : null;
     if (!ctx) return;
     const dpr = (typeof window !== "undefined" && window.devicePixelRatio) || 1;
-    const key = `${cam.cx}|${cam.cy}|${cam.scale}|${cam.width}|${detailVersion}|${markersBox.checked}|${bandBox.checked}|${selected}`;
+    const key = `${cam.cx}|${cam.cy}|${cam.scale}|${cam.width}|${detailVersion}|${markersBox.checked}|${bandBox.checked}|${trackBox.checked}|${surface ? 1 : 0}|${selected}`;
     if (key !== layerKey || !layer) {
       if (!layer) layer = document.createElement("canvas");
       layer.width = canvas.width;
@@ -337,6 +377,68 @@ export function createLineMap(state, opts = {}) {
     drawCursor(ctx);
   }
 
+  function polyPath(ctx, points, from, to) {
+    let pen = false;
+    for (let i = from; i <= to; i++) {
+      const p = points[i];
+      if (!p) { pen = false; continue; }
+      const px = cam.toX(p[0]); const py = cam.toY(p[1]);
+      if (!pen) { ctx.moveTo(px, py); pen = true; } else ctx.lineTo(px, py);
+    }
+  }
+  function drawSurface(ctx) {
+    const { left, right, leftEst, rightEst, kerbs } = surface;
+    // grass / run-off everywhere, the asphalt on top
+    ctx.fillStyle = "#1b261d";
+    ctx.fillRect(0, 0, cam.width, cam.height);
+    ctx.fillStyle = "#33383d";
+    ctx.beginPath();
+    for (let i = 0; i + 1 < left.length; i++) {
+      const a = left[i]; const b = left[i + 1]; const c = right[i + 1]; const d = right[i];
+      if (!a || !b || !c || !d) continue;
+      ctx.moveTo(cam.toX(a[0]), cam.toY(a[1]));
+      ctx.lineTo(cam.toX(b[0]), cam.toY(b[1]));
+      ctx.lineTo(cam.toX(c[0]), cam.toY(c[1]));
+      ctx.lineTo(cam.toX(d[0]), cam.toY(d[1]));
+      ctx.closePath();
+    }
+    ctx.fill();
+    // kerbs: red / white every 4 m
+    if (cam.scale > 0.25) {
+      for (const [colour, parity] of [["#c8372d", 0], ["#e6e6e6", 1]]) {
+        ctx.fillStyle = colour;
+        ctx.beginPath();
+        for (const k of kerbs) {
+          if (k.i % 2 !== parity) continue;
+          const q = k.quad;
+          ctx.moveTo(cam.toX(q[0][0]), cam.toY(q[0][1]));
+          for (let j = 1; j < 4; j++) ctx.lineTo(cam.toX(q[j][0]), cam.toY(q[j][1]));
+          ctx.closePath();
+        }
+        ctx.fill();
+      }
+    }
+    // the edges: white lines; dashed where the edge is estimated (no lap drove along it)
+    ctx.strokeStyle = "#d9dcdf";
+    ctx.lineWidth = cam.scale > 2 ? 2 : 1;
+    ctx.globalAlpha = 0.85;
+    for (const [points, est] of [[left, leftEst], [right, rightEst]]) {
+      let i = 0;
+      while (i < points.length) {
+        const dashed = !!est[i];
+        let j = i;
+        while (j + 1 < points.length && !!est[j + 1] === dashed) j++;
+        if (ctx.setLineDash) ctx.setLineDash(dashed ? [6, 6] : []);
+        ctx.beginPath();
+        polyPath(ctx, points, Math.max(i - 1, 0), j);
+        ctx.stroke();
+        i = j + 1;
+      }
+    }
+    if (ctx.setLineDash) ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+  }
+
   function drawStatic(ctx) {
     ctx.clearRect(0, 0, cam.width, cam.height);
     ctx.lineCap = "round";
@@ -344,14 +446,25 @@ export function createLineMap(state, opts = {}) {
     const d = detail && detail.response;
     const lineFor = (s) => (d && d[`x_${s}`] ? [d[`x_${s}`], d[`y_${s}`]] : null);
 
-    // car-width band around Lap 1 (only where it is wider than ~3 px)
+    // V0.9.5: the track from above — grass, asphalt, edges, kerbs
+    if (surface && trackBox.checked) drawSurface(ctx);
+    // a faint band of the car's width around EVERY lap (only where it is wider than ~3 px)
     if (bandBox.checked && cam.scale * CAR_WIDTH_M >= 3) {
-      ctx.strokeStyle = lapColor(sides[0]);
-      ctx.globalAlpha = 0.14;
       ctx.lineWidth = cam.scale * CAR_WIDTH_M;
-      strokeLine(ctx, xs(sides[0]), ys(sides[0]));
-      const fine = lineFor(sides[0]);
-      if (fine) strokeLine(ctx, fine[0], fine[1]);
+      ctx.globalAlpha = surface && trackBox.checked ? 0.2 : (sides.length > 1 ? 0.11 : 0.14);
+      for (const s of [...sides].reverse()) {
+        ctx.strokeStyle = lapColor(s);
+        const fine = lineFor(s);
+        if (fine) {
+          const i0 = indexForDistance(grid, detail.start);
+          const i1 = indexForDistance(grid, detail.end);
+          strokeLine(ctx, xs(s), ys(s), 0, Math.max(i0, 0));
+          strokeLine(ctx, xs(s), ys(s), Math.min(i1, grid.count - 1), grid.count - 1);
+          strokeLine(ctx, fine[0], fine[1]);
+        } else {
+          strokeLine(ctx, xs(s), ys(s));
+        }
+      }
       ctx.globalAlpha = 1;
     }
     // the lines, all the same width (Lap 2 drawn first, Lap 1 on top; extra laps with their style);
@@ -592,6 +705,15 @@ export function createLineMap(state, opts = {}) {
   toInput.addEventListener("change", applyRange);
   markersBox.addEventListener("change", schedule);
   bandBox.addEventListener("change", schedule);
+  trackBox.addEventListener("change", schedule);
+  let alive = true;
+  if (opts.trackSurface) {
+    opts.trackSurface.get().then((res) => {
+      if (!alive || !res || !res.surface) return;
+      surface = surfaceGeometry(res.surface);
+      schedule();
+    }).catch(() => { /* no surface: the lines alone, as before */ });
+  }
   follow.addEventListener("change", () => { followNow(); });
 
   function followNow() {
@@ -630,7 +752,7 @@ export function createLineMap(state, opts = {}) {
   return {
     element,
     redraw: draw,
-    destroy() { unsubscribe(); unsubscribeView(); unsubscribeSel(); stopResize(); if (detailTimer) clearTimeout(detailTimer); },
+    destroy() { alive = false; unsubscribe(); unsubscribeView(); unsubscribeSel(); stopResize(); if (detailTimer) clearTimeout(detailTimer); },
     // for tests
     _camera: () => cam,
     _zoomToCorner: zoomToCorner,

@@ -327,8 +327,6 @@ def test_a_stored_lap_with_the_next_laps_start_validates_again(client):
     """The 0.9.2 file of such a lap: the first metres of the next lap at its end. The server
     now judges the lap without them — the dry run of revalidate_laps lists it as restorable."""
     import numpy as np
-    from server.lap_check import check_lap
-    from server.database import SessionLocal
 
     me = register(client, "Fuji")
     df = clean_lap(seed=7)
@@ -347,7 +345,9 @@ def test_unknown_sector_times_no_longer_reject_a_lap(client):
     body = upload_df(client, me, clean_lap(seed=8), lap_time=90.0, sector_times=[30.0, 0.0, 0.0],
                      lap_report={"reasons": ["sector_times_implausible"]})
     lap = lap_row(body["lap_id"])
-    assert lap.is_valid is True and lap.review_status == "pending"
+    # V0.9.9: the unknown split is shown on the lap, but it no longer sends the lap to review
+    assert lap.is_valid is True and lap.review_status is None
+    assert "sector_times_implausible" in [f["code"] for f in lap.validation["findings"]]
 
 
 def test_the_client_starts_the_next_lap_at_an_early_reset(ext_v094):
@@ -381,7 +381,6 @@ def test_the_client_waits_for_late_sector_times(ext_v094):
 
     parser = LapParser()
     # the lap time is right (20.0 s measured, LMU says 20.02) but sector 2 is not there yet
-    import types
     frames = []
     assert _drive_to_line(parser, last_lap_time=20.02) == [None, None, None]
     lap, i = None, 0

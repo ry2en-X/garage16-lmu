@@ -23,8 +23,19 @@ Nothing changes unless you ask for it:
 
     python -m scripts.revalidate_laps --apply
         Stores the new verdict (laps.validation), the figures (laps.lap_stats), the
-        recovered check inputs, and puts newly flagged laps into the review queue. Does NOT
-        change whether any lap counts.
+        recovered check inputs, and puts newly flagged laps into the review queue as "pending"
+        (they keep counting provisionally). Does NOT change whether any lap counts.
+
+    --apply --hold              V0.9.9: laps the current rules send to REVIEW are "held" instead —
+                                they leave leaderboards and records until an admin clears them.
+                                The dry run lists how many of them hold a current record.
+
+V0.9.9: every file is checked against its stored sha256 / size / MAC first (server/integrity.py).
+A lap whose file fails is never re-judged; with --apply it is quarantined. Every change made with
+--apply is written to the audit log (kind lap.revalidated, actor script) with the old and new state.
+Re-judging is reproducible: the same file, the same stored inputs and the same rules give the same
+verdict (tests/test_v099_decision.py); the one input that depends on other laps — the layout's
+usual distance — is stored in the verdict (decision.reference_distance_m).
 
     --apply --update-validity   additionally: valid -> invalid is applied
     --apply --restore           additionally: invalid -> valid ("restorable") is applied; such
@@ -50,9 +61,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
-from server import track_limits
+from server import audit, integrity, track_limits
 from server.config import settings
 from server.database import SessionLocal
+from server.official import HELD, official_filter
 from server.lap_check import (
     check_lap, inputs_for_lap, is_automatic_reason, link_neighbours, promoted_codes, stored_validation,
 )
@@ -64,6 +76,7 @@ T_KEPT = "invalid, would be valid, kept (not an automatic rejection)"
 T_REVIEW = "valid -> review"
 T_ADMIN = "admin decided, validity kept"
 T_SAME = "unchanged"
+T_INTEGRITY = "file failed its integrity check (not re-judged)"
 TRANSITIONS = (T_INVALIDATE, T_RESTORE, T_KEPT, T_REVIEW, T_ADMIN, T_SAME)
 
 
@@ -88,7 +101,7 @@ def _inside_storage(path: Path) -> bool:
 
 def transition(lap: Lap, check) -> str:
     """Which of TRANSITIONS applies (pure: decides nothing on its own)."""
-    if lap.review_status in ("cleared", "invalidated"):
+    if lap.review_status in ("cleared", "invalidated", "quarantined"):
         return T_ADMIN
     if lap.is_valid and not check.is_valid:
         return T_INVALIDATE
@@ -97,9 +110,25 @@ def transition(lap: Lap, check) -> str:
         if reasons and all(is_automatic_reason(r) for r in reasons):
             return T_RESTORE
         return T_KEPT
-    if lap.is_valid and check.review_status and not lap.review_status:
-        return T_REVIEW
+    if lap.is_valid and check.review_status:
+        # newly flagged; with --hold also a lap flagged before V0.9.9 ("pending", still counting)
+        if not lap.review_status or (lap.review_status == "pending" and _hold_requested):
+            return T_REVIEW
     return T_SAME
+
+
+_hold_requested = False
+
+
+def holds_record(db, lap: Lap) -> bool:
+    """Is this lap the current official best of its track and car model (a record that would
+    disappear from the leaderboard if the lap were held)?"""
+    from sqlalchemy import func
+
+    best = db.query(func.min(Lap.lap_time)).filter(
+        official_filter(), Lap.track_name == lap.track_name,
+        (Lap.car_model == lap.car_model) if lap.car_model is not None else Lap.car_name == lap.car_name).scalar()
+    return best is not None and lap.lap_time <= best
 
 
 def _codes(check, severity=None) -> list:
@@ -116,15 +145,21 @@ def main(argv=None) -> int:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--only-missing", action="store_true")
     parser.add_argument("--details", type=int, default=50)
+    parser.add_argument("--hold", action="store_true")
     args = parser.parse_args(argv)
-    if (args.update_validity or args.restore) and not args.apply:
-        parser.error("--update-validity / --restore need --apply")
+    if (args.update_validity or args.restore or args.hold) and not args.apply:
+        # the dry run reports the effect of --hold too; only applying needs --apply
+        if not (args.hold and not (args.update_validity or args.restore)):
+            parser.error("--update-validity / --restore need --apply")
+    global _hold_requested
+    _hold_requested = bool(args.hold)
 
     promote = promoted_codes()
     counts = Counter()
     reasons = defaultdict(Counter)
     shown = Counter()
     touched = []
+    touched_integrity = []
     now = datetime.now(timezone.utc).isoformat()
     print(f"Track-limits rules version {track_limits.TRACK_LIMITS_VERSION}; "
           f"heuristics allowed to invalidate: {', '.join(sorted(promote)) or 'none (review only)'}\n")
@@ -138,15 +173,34 @@ def main(argv=None) -> int:
             query = query.filter(Lap.validation.is_(None))
         if args.limit:
             query = query.limit(args.limit)
-        for lap in query.yield_per(50):
+        for lap in query.all():
             path = Path(lap.telemetry_path)
             if not _inside_storage(path) or not path.is_file():
                 counts["file missing"] += 1
+                if args.apply:
+                    integrity.quarantine(db, lap, integrity.verify(lap), actor="script")
+                    touched_integrity.append(lap.id)
+                continue
+            # V0.9.9: never re-judge a file that is not the one that was uploaded
+            checked = integrity.verify(lap)
+            if checked.quarantine:
+                counts[T_INTEGRITY] += 1
+                if shown[T_INTEGRITY] < args.details:
+                    shown[T_INTEGRITY] += 1
+                    print(f"[{T_INTEGRITY}] lap {lap.id:>6}  {checked.status} {checked.detail or ''}")
+                if args.apply:
+                    integrity.quarantine(db, lap, checked, actor="script")
+                    touched_integrity.append(lap.id)
                 continue
             inputs = inputs_for_lap(lap)
+            before = {"is_valid": bool(lap.is_valid), "review_status": lap.review_status,
+                      "status": (lap.validation or {}).get("status") if isinstance(lap.validation, dict) else None}
             check = check_lap(db, path, _metadata_for(lap), client_valid=bool(inputs.get("client_valid", True)),
-                              exclude_lap_id=lap.id, inputs=inputs, promote=promote)
+                              exclude_lap_id=lap.id, inputs=inputs, promote=promote,
+                              client_version=lap.client_version)
             kind = transition(lap, check)
+            if kind == T_REVIEW and holds_record(db, lap):
+                counts["   of which hold a current record"] += 1
             counts[kind] += 1
             if kind == T_INVALIDATE:
                 reasons[kind].update(_codes(check, track_limits.INVALID))
@@ -180,13 +234,19 @@ def main(argv=None) -> int:
                 lap.invalid_reason = None
                 lap.review_status = "pending"
             elif kind == T_REVIEW:
-                lap.review_status = "pending"
+                lap.review_status = HELD if args.hold else "pending"
             elif not lap.is_valid and not check.is_valid and lap.review_status not in ("cleared", "invalidated"):
                 old = lap.invalid_reason if isinstance(lap.invalid_reason, list) else [lap.invalid_reason]
                 if old and all(is_automatic_reason(r) for r in old):
                     lap.invalid_reason = check.invalid_reason()   # same decision, current wording
             db.add(lap)
             touched.append(lap.id)
+            after = {"is_valid": bool(lap.is_valid), "review_status": lap.review_status,
+                     "status": (lap.validation or {}).get("status")}
+            if after != before or kind != T_SAME:
+                audit.append(db, "lap.revalidated", actor="script", lap_id=lap.id, driver_id=lap.driver_id,
+                             detail={"transition": kind, "before": before, "after": after,
+                                     "validators": ((lap.validation or {}).get("decision") or {}).get("validators")})
         if args.apply:
             db.flush()
             linked = 0
@@ -197,14 +257,16 @@ def main(argv=None) -> int:
             db.commit()
 
     print("\nSummary:")
-    for key in (*TRANSITIONS, "file missing", "laps given a late track-limits finding by their next lap"):
+    for key in (*TRANSITIONS, "   of which hold a current record", T_INTEGRITY, "file missing",
+                "laps given a late track-limits finding by their next lap"):
         if counts.get(key):
             print(f"  {key:<62} {counts[key]}")
             for code, count in reasons.get(key, Counter()).most_common():
                 print(f"      {track_limits.MESSAGES.get(code, code):<58} {count}")
     if not args.apply:
         print("\nDry run — nothing changed. --apply stores verdicts and figures (validity unchanged); "
-              "add --update-validity and/or --restore to apply the transitions above.")
+              "add --update-validity and/or --restore to apply the transitions above, --hold to hold "
+              "the laps that need a review (they leave leaderboards until an admin clears them).")
     return 0
 
 

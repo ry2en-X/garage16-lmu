@@ -58,7 +58,7 @@ def find(verdict, code):
 
 def test_every_rule_has_a_tier_and_only_heuristics_and_unconfirmed_signals_can_be_promoted():
     for code, rule in tl.RULES.items():
-        assert rule.tier in (tl.TIER_LMU, tl.TIER_RULE, tl.TIER_HEURISTIC, tl.TIER_SIGNAL), code
+        assert rule.tier in (tl.TIER_LMU, tl.TIER_RULE, tl.TIER_HEURISTIC, tl.TIER_SIGNAL, tl.TIER_QUALITY), code
         assert rule.note, f"{code}: every rule says why it exists"
     assert {c for c, r in tl.RULES.items() if r.severity == tl.INVALID} == {
         "game_invalidated", "game_time_not_counted", "game_lap_not_counted",
@@ -67,6 +67,9 @@ def test_every_rule_has_a_tier_and_only_heuristics_and_unconfirmed_signals_can_b
     heuristics = {c for c, r in tl.RULES.items() if r.tier == tl.TIER_HEURISTIC}
     assert {c for c in heuristics if tl.RULES[c].severity == tl.REVIEW} <= tl.PROMOTABLE
     assert all(tl.RULES[c].severity == tl.REVIEW for c in tl.PROMOTABLE)
+    # V0.9.9: the decision layer's findings and "not checkable" say the lap cannot be judged — they
+    # can never be turned into an invalidation
+    assert not {c for c, r in tl.RULES.items() if r.tier in (tl.TIER_QUALITY, tl.TIER_SIGNAL)} & tl.PROMOTABLE
 
 
 def test_promotion_only_affects_promotable_codes():
@@ -242,8 +245,9 @@ def test_a_093_clients_steps_only_rejection_becomes_a_review():
 
 def test_a_093_clients_rejection_is_explained_from_its_summary_where_it_can_be():
     v = tl.assess(_columns(), client_valid=False, client_state={"count_lap_flag": 2}, sectors_ok=False)
-    # V0.9.4: unknown sector times explain the rejection, but only send the lap to review
-    assert codes(v, tl.INVALID) == [] and codes(v, tl.REVIEW) == ["sector_times_implausible"]
+    # V0.9.4: unknown sector times explain the rejection, but do not invalidate
+    # V0.9.9: and they are only shown (REVIEW now holds a lap; unknown sectors say nothing about validity)
+    assert codes(v, tl.INVALID) == [] and codes(v, tl.REVIEW) == [] and codes(v, tl.INFO) == ["sector_times_implausible"]
     cols = _columns()
     del cols["count_lap_flag"]
     v = tl.assess(cols, client_valid=False, client_state={"count_lap_flag": 1})
@@ -261,7 +265,9 @@ def test_client_and_server_use_the_same_rules():
     reportable = set(tl.CLIENT_REASON_SIGNAL)
     assert lap_verdict.INVALIDATING | lap_verdict.REVIEW_ONLY == reportable
     assert lap_verdict.INVALIDATING == {c for c in reportable if tl.RULES[c].severity == tl.INVALID}
-    assert lap_verdict.REVIEW_ONLY == {c for c in reportable if tl.RULES[c].severity == tl.REVIEW}
+    # V0.9.9: the server may treat a reason the 0.9.4 client reports for review more mildly (unknown
+    # sector times are only shown now) — but never more strictly: none of them invalidates
+    assert lap_verdict.REVIEW_ONLY == {c for c in reportable if tl.RULES[c].severity in (tl.REVIEW, tl.INFO)}
     assert lap_verdict.LATE_WINDOW_SECONDS == tl.LATE_WINDOW_SECONDS
     assert lap_verdict.EDGE_MARGIN_M == tl.EDGE_MARGIN_M and set(lap_verdict.OFF_SURFACES) == {int(s) for s in tl.OFF_SURFACES}
 

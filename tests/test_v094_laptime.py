@@ -50,7 +50,7 @@ def test_corner_details_are_measured_and_turn_in_is_marked_as_estimate(client):
         info = corner[side]
         for key in ("brake", "min", "apex", "exit", "throttle_on", "coast_m"):
             assert key in info, key
-    assert body["analysis_version"] == 5
+    assert body["analysis_version"] == 8   # V0.9.5: 6; V0.9.7: 7 (point resolution); V0.9.8: 8 (speed gaps on the axis)
 
 
 def test_line_offset_is_zero_for_the_same_line_and_signed_inside_positive():
@@ -169,7 +169,7 @@ def test_insights_measure_pit_lane_refuelling_and_tyre_change():
     wear[970:] = 1.0                               # new tyre fitted
     cols = _columns(n, speed=speed, in_pits=in_pits, fuel=fuel, wear_fl=wear, wear_fr=wear, wear_rl=wear, wear_rr=wear)
     stats = lap_insights.compute(cols, lap_time=100.0)
-    assert stats["version"] == 3
+    assert stats["version"] == 5   # V0.9.5: 4; V0.9.8: 5 (speed gaps on the distance axis)
     assert stats["pit"]["ends_in_pits"] is True and stats["pit"]["starts_in_pits"] is False
     assert stats["pit"]["stationary_s"] == pytest.approx(4.0, abs=0.3)
     assert stats["fuel_added_l"] == pytest.approx(40.0, abs=0.6)

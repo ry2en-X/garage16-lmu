@@ -22,7 +22,12 @@ on:
     tags: ["client-v*"]
 
 jobs:
+  # V0.9.7: the release gate first (ci.yml) — no client is built from code that did not pass
+  tests:
+    uses: ./.github/workflows/ci.yml
+
   windows:
+    needs: tests
     runs-on: windows-latest
     strategy:
       fail-fast: false

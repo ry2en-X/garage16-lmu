@@ -22,9 +22,13 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import car_identity, track_limits
+from .. import audit, car_identity, integrity, track_limits
+from ..official import HELD, QUARANTINED
+from ..records import evaluate_and_record
+from ..request_context import current_request_id
 from ..config import settings
-from ..database import get_db
+from ..write_lock import RETRY_AFTER_S, MaintenanceActive, writing
+from ..database import acquire_record_lock, get_db
 from ..driver_lifecycle import delete_driver_rows
 from ..models import CarAlias, Driver, Lap, LapReport, RaceRuleSet
 from ..schemas import (
@@ -139,6 +143,8 @@ def invalidate_lap(
     lap.is_valid = False
     lap.invalid_reason = [f"admin: {body.reason}"]
     db.add(lap)
+    audit.append(db, "lap.invalidated", actor="admin", lap_id=lap.id, driver_id=lap.driver_id,
+                 request_id=current_request_id(), detail={"reason": body.reason})
     db.commit()
     return {"status": "ok", "lap_id": lap_id}
 
@@ -147,15 +153,20 @@ def invalidate_lap(
 
 @router.get("/review", response_model=List[AdminLapSummary], dependencies=[Depends(require_admin)])
 def review_queue(
-    status_filter: str = Query(default="pending", alias="status", pattern="^(pending|cleared|invalidated)$"),
+    status_filter: str = Query(default="pending", alias="status",
+                               pattern="^(pending|held|quarantined|cleared|invalidated)$"),
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
 ) -> List[AdminLapSummary]:
-    """Laps the track-limits check (server/track_limits.py) flagged for a human look:
-    they count provisionally until an admin clears or invalidates them. Each entry
-    carries the verdict with every finding (what, where on the lap, which signal)."""
+    """Laps the check (server/track_limits.py, server/lap_decision.py) flagged for a human look.
+    Each entry carries the verdict with every finding (what, where on the lap, which signal).
+
+    V0.9.9: "pending" lists every lap waiting for a decision — "held" (REVIEW: not official until
+    cleared) and the older "pending" ones (counting provisionally, flagged before V0.9.9).
+    "held" / "quarantined" (integrity failures, see GET /admin/integrity) list only those."""
+    wanted = ("pending", HELD) if status_filter == "pending" else (status_filter,)
     laps = (
-        db.query(Lap).filter(Lap.review_status == status_filter)
+        db.query(Lap).filter(Lap.review_status.in_(wanted))
         .order_by(Lap.uploaded_at.desc()).limit(limit).all()
     )
     names = dict(db.query(Driver.id, Driver.display_name).filter(Driver.id.in_({lap.driver_id for lap in laps})).all()) if laps else {}
@@ -166,13 +177,27 @@ def review_queue(
 def review_lap(lap_id: int, body: AdminReviewDecision, db: Session = Depends(get_db)) -> dict:
     """clear: the lap stays valid and leaves the queue. invalidate: same effect as
     PATCH /laps/{id}/invalidate (leaderboards and records follow live), with the
-    review's findings as the reason."""
+    review's findings as the reason.
+
+    V0.9.9: clearing a HELD lap makes it official — its record events (PR / WR / TEAM_BEST,
+    Discord) are evaluated now, against the laps that count at this moment, under the same lock
+    as an upload. A quarantined lap cannot be cleared here: its file must verify first
+    (POST /admin/laps/{id}/integrity). Every decision is written to the audit log."""
     lap = db.query(Lap).filter(Lap.id == lap_id).one_or_none()
     if lap is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Lap not found.")
+    if lap.review_status == QUARANTINED:
+        raise HTTPException(status.HTTP_409_CONFLICT, {
+            "code": "QUARANTINED", "message": "The lap's file failed its integrity check — verify and release it first."})
     note = (body.note or "").strip()
+    previous = lap.review_status
+    records = []
     if body.decision == "clear":
         lap.review_status = "cleared"
+        if previous == HELD and lap.is_valid:
+            db.flush()
+            acquire_record_lock(db, lap.track_name, lap.car_model or lap.car_name)
+            records = evaluate_and_record(db, lap)
     else:
         lap.review_status = "invalidated"
         lap.is_valid = False
@@ -182,8 +207,81 @@ def review_lap(lap_id: int, body: AdminReviewDecision, db: Session = Depends(get
     verdict["review"] = {"decision": body.decision, "note": note or None, "at": datetime.now(timezone.utc).isoformat()}
     lap.validation = verdict
     db.add(lap)
+    audit.append(db, "lap.reviewed", actor="admin", lap_id=lap.id, driver_id=lap.driver_id,
+                 request_id=current_request_id(),
+                 detail={"decision": body.decision, "previous": previous, "note": note or None,
+                         "records": [e.record_type for e in records]})
     db.commit()
-    return {"status": "ok", "lap_id": lap_id, "review_status": lap.review_status}
+    return {"status": "ok", "lap_id": lap_id, "review_status": lap.review_status,
+            "records": [e.record_type for e in records]}
+
+
+# ---------------------------------------------------------------- V0.9.9: integrity + audit
+
+@router.get("/integrity", dependencies=[Depends(require_admin)])
+def integrity_overview(limit: int = Query(default=200, ge=1, le=1000), db: Session = Depends(get_db)) -> dict:
+    """Quarantined laps (what was found, when, with which request id), how many laps are signed
+    with the current key, and the audit chain head. A full check of every file:
+    scripts/integrity_check.py (docs/RUNBOOKS.md)."""
+    rows = (db.query(Lap).filter(Lap.review_status == QUARANTINED)
+            .order_by(Lap.id.desc()).limit(limit).all())
+    names = dict(db.query(Driver.id, Driver.display_name).filter(Driver.id.in_({r.driver_id for r in rows})).all()) if rows else {}
+    total = db.query(func.count(Lap.id)).scalar() or 0
+    unsigned = db.query(func.count(Lap.id)).filter(Lap.integrity_mac.is_(None)).scalar() or 0
+    return {
+        "quarantined": [{"lap_id": r.id, "driver_id": r.driver_id, "driver_name": names.get(r.driver_id),
+                         "track_name": r.track_name, "lap_time": r.lap_time,
+                         "quarantine": (r.validation or {}).get("quarantine")} for r in rows],
+        "laps": total, "unsigned": unsigned, "audit_head": audit.head(db),
+    }
+
+
+@router.post("/laps/{lap_id}/integrity", dependencies=[Depends(require_admin)])
+def verify_lap_integrity(lap_id: int, release: bool = Query(False), note: Optional[str] = Query(None, max_length=500),
+                         db: Session = Depends(get_db)) -> dict:
+    """Checks one lap's file now (full hash, no cache). A failure quarantines the lap (if it is
+    not yet); with release=true a quarantined lap whose file verifies again returns to the state it
+    had before (review status kept from then)."""
+    lap = db.query(Lap).filter(Lap.id == lap_id).one_or_none()
+    if lap is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Lap not found.")
+    result = integrity.verify(lap)
+    request_id = current_request_id()
+    released = False
+    if result.quarantine:
+        integrity.quarantine(db, lap, result, actor="admin", request_id=request_id)
+    elif release and lap.review_status == QUARANTINED and result.ok:
+        integrity.release(db, lap, actor="admin", note=note, request_id=request_id)
+        released = True
+    db.commit()
+    return {"lap_id": lap_id, "result": result.as_dict(), "review_status": lap.review_status, "released": released}
+
+
+@router.get("/audit", dependencies=[Depends(require_admin)])
+def audit_events(lap_id: Optional[int] = Query(None), kind: Optional[str] = Query(None, max_length=40),
+                 request_id: Optional[str] = Query(None, max_length=64),
+                 limit: int = Query(default=200, ge=1, le=2000), db: Session = Depends(get_db)) -> dict:
+    """The audit log, newest first, filtered by lap, kind or request id."""
+    from ..models import AuditEvent
+
+    query = db.query(AuditEvent)
+    if lap_id is not None:
+        query = query.filter(AuditEvent.lap_id == lap_id)
+    if kind:
+        query = query.filter(AuditEvent.kind == kind)
+    if request_id:
+        query = query.filter(AuditEvent.request_id == request_id)
+    rows = query.order_by(AuditEvent.id.desc()).limit(limit).all()
+    return {"events": [{"id": r.id, "at": r.created_at.isoformat() if r.created_at else None, "kind": r.kind,
+                        "actor": r.actor, "lap_id": r.lap_id, "driver_id": r.driver_id, "request_id": r.request_id,
+                        "detail": r.detail} for r in rows],
+            "head": audit.head(db)}
+
+
+@router.get("/audit/verify", dependencies=[Depends(require_admin)])
+def audit_verify(db: Session = Depends(get_db)) -> dict:
+    """Recomputes the whole audit chain (server/audit.py). ok=false names the first broken row."""
+    return audit.verify_db(db)
 
 
 @router.get("/track-limits/rules", dependencies=[Depends(require_admin)])
@@ -391,12 +489,58 @@ def delete_driver(
             f"auto-transfer ownership, or resolve manually first: {', '.join(t.name for t in exc.teams)}",
         ) from exc
 
-    telemetry_paths = delete_driver_rows(db, driver)
+    # V0.9.8: rows and files go together under the shared write lock (server/write_lock.py) —
+    # a backup running right now must not catch the rows deleted but the files still there
+    try:
+        with writing():
+            telemetry_paths = delete_driver_rows(db, driver)
 
-    for path_str in telemetry_paths:
-        try:
-            Path(path_str).unlink(missing_ok=True)
-        except OSError:
-            pass
+            for path_str in telemetry_paths:
+                try:
+                    Path(path_str).unlink(missing_ok=True)
+                except OSError:
+                    pass
+    except MaintenanceActive:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, {"code": "MAINTENANCE", "message": "A backup is running — try again in a few minutes."},
+                            headers={"Retry-After": str(RETRY_AFTER_S)})
 
     return {"status": "ok", "driver_id": driver_id}
+
+
+# ---------------------------------------------------------------------------
+# V0.9.7 — operations: upload outcomes and the database/file consistency
+# ---------------------------------------------------------------------------
+
+@router.get("/operations", dependencies=[Depends(require_admin)])
+def operations(hours: int = Query(24, ge=1, le=24 * 30),
+               client_version: Optional[str] = Query(None, max_length=32),
+               outcome: Optional[str] = Query(None, pattern="^(accepted|duplicate|rejected|error)$"),
+               request_id: Optional[str] = Query(None, max_length=64),
+               db: Session = Depends(get_db)) -> dict:
+    """Uploads of the last `hours`: per outcome, failure rate, the most common reasons, durations,
+    per client version, the latest failures (each with its request id — the same id is in the
+    server log and the client's X-Request-ID response header). Plus the analysis cache."""
+    from ..analysis_cache import ANALYSIS_CACHE_VERSION, analysis_cache
+    from ..lap_insights import INSIGHTS_VERSION
+    from ..main import VERSION
+    from ..upload_log import find, summary
+
+    stats = analysis_cache.stats()
+    return {
+        "server_version": VERSION,
+        # V0.9.8: drill-down by request id (the id in the client's error message / the log)
+        **({"request": find(db, request_id)} if request_id else {}),
+        "analysis_cache_version": ANALYSIS_CACHE_VERSION,
+        "insights_version": INSIGHTS_VERSION,
+        "uploads": summary(db, hours=hours, client_version=client_version, outcome=outcome),
+        "analysis_cache": {"entries": stats.entries, "bytes": stats.bytes, "hits": stats.hits, "misses": stats.misses},
+    }
+
+
+@router.get("/consistency", dependencies=[Depends(require_admin)])
+def consistency(deep: bool = Query(False), db: Session = Depends(get_db)) -> dict:
+    """Database vs telemetry files (server/consistency.py). Read-only: the repairs are
+    scripts/consistency_check.py's, behind explicit flags."""
+    from ..consistency import check
+
+    return check(db, deep=deep)

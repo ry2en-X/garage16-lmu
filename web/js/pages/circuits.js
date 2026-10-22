@@ -182,14 +182,21 @@ export async function renderCircuits(container) {
       list.appendChild(el("div", { class: "empty-state" }, q ? t("No track matches \"{0}\".", [q]) : t("No tracks yet.")));
       return;
     }
-    // Tracks with laps first, then the not-yet-driven ones.
-    venues.sort((x, y) => (y.lap_count > 0) - (x.lap_count > 0) || x.venue.localeCompare(y.venue));
-    for (const venue of venues) {
+    // Tracks with laps as cards (busiest first); V0.9.6: the not-yet-driven ones as one compact
+    // list underneath instead of a dozen empty cards.
+    const driven = venues.filter((v) => v.layouts.length).sort((x, y) => y.lap_count - x.lap_count || x.venue.localeCompare(y.venue));
+    const empty = venues.filter((v) => !v.layouts.length).sort((x, y) => x.venue.localeCompare(y.venue));
+    for (const venue of driven) {
       list.appendChild(el("div", { class: "card circuit" }, [
         el("h2", {}, venue.venue),
-        el("div", { class: "circuit__layouts" }, venue.layouts.length
-          ? venue.layouts.map((layout) => layoutBlock(layout, observer))
-          : el("div", { class: "subtitle", style: "margin:0;" }, t("No laps yet — be the first!"))),
+        el("div", { class: "circuit__layouts" }, venue.layouts.map((layout) => layoutBlock(layout, observer))),
+      ]));
+    }
+    if (empty.length) {
+      list.appendChild(el("div", { class: "card circuit circuit--undriven" }, [
+        el("h2", {}, t("Not driven yet")),
+        el("p", { class: "subtitle", style: "margin:0 0 8px;" }, t("No laps yet — be the first!")),
+        el("div", { class: "circuit__names" }, empty.map((v) => el("span", { class: "tag" }, v.venue))),
       ]));
     }
   }

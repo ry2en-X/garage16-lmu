@@ -1,0 +1,97 @@
+# constraints.txt — the exact versions Garage16 was tested with (V0.9.7, updated V0.9.8: + quality tools, V0.9.9: + hypothesis, certifi 2026.10.19 for PYSEC-2026-4320).
+#
+# The requirements files (server/, discord_bot/, client/, requirements-dev.txt) keep saying what the
+# code NEEDS (">=" ranges). This file says what was TESTED: every package of the dependency tree
+# pinned to one version. The Docker images and the CI pipeline install with it:
+#
+#     pip install -r server/requirements.txt -c constraints.txt
+#
+# so the NAS runs the same versions the release report (release/TEST_REPORT.md) lists, instead of
+# whatever happens to be newest on the day of the build. Checked to have wheels for Python 3.12
+# (the Docker image) on x86_64 and aarch64.
+#
+# Updating: install newer versions, run `python -m scripts.release_check` (everything green, nothing
+# skipped), then regenerate this list from that environment and bump the comment's version.
+aiohappyeyeballs==2.7.1
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.5
+aiosignal==1.4.0
+alembic==1.20.0
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+argon2-cffi==25.1.0
+argon2-cffi-bindings==26.1.0
+attrs==26.1.0
+bandit==1.9.4
+boolean-py==5.0
+cachecontrol==0.14.4
+certifi==2026.10.19
+cffi==2.1.1
+charset-normalizer==3.5.1
+click==8.5.0
+coverage==7.16.2
+cryptography==50.0.1
+cyclonedx-python-lib==11.12.0
+defusedxml==0.7.1
+discord-py==2.7.1
+fastapi==0.143.0
+filelock==4.2.4
+frozenlist==1.8.0
+h11==0.16.0
+httpcore==1.0.9
+httptools==0.9.0
+httpx==0.28.1
+hypothesis==6.135.33
+idna==3.20
+iniconfig==2.3.1
+license-expression==30.4.4
+mako==1.4.3
+markdown-it-py==4.2.0
+markupsafe==3.0.3
+mdurl==0.1.2
+msgpack==1.2.3
+multidict==7.1.0
+numpy==2.5.3
+opentelemetry-api==1.44.0
+packageurl-python==0.17.6
+packaging==26.3
+pandas==3.0.5
+pip-api==0.0.35
+pip-audit==2.10.1
+pip-requirements-parser==32.0.1
+platformdirs==4.13.5
+pluggy==1.6.0
+propcache==0.5.4
+psycopg==3.3.6
+psycopg-binary==3.3.6
+py-serializable==2.1.0
+pyarrow==26.0.0
+pycparser==3.0
+pydantic==2.13.5
+pydantic-core==2.46.5
+pygments==2.21.0
+pyparsing==3.3.3
+pytest==9.1.1
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.3
+python-multipart==0.0.32
+pyyaml==6.0.3
+requests==2.34.2
+rich==15.0.0
+ruff==0.17.1
+six==1.17.0
+sortedcontainers==2.4.0
+sqlalchemy==2.1.4
+starlette==1.6.0
+stevedore==5.9.1
+tomli==2.5.0
+tomli-w==1.2.0
+typing-extensions==4.16.0
+typing-inspection==0.4.4
+urllib3==2.8.0
+uvicorn==0.53.0
+uvloop==0.23.0
+watchfiles==1.3.0
+websockets==17.2
+yarl==1.25.1

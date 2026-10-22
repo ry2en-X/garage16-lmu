@@ -66,7 +66,7 @@ def test_client_build_defaults_to_the_domain_and_can_still_be_overridden():
     assert "if ($ServerUrl) { $env:GARAGE16_SERVER_URL = $ServerUrl }" in script      # "" still means: ask the friend
 
     workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "build-client.yml").read_text(encoding="utf-8"))
-    steps = [step.get("run", "") for job in workflow["jobs"].values() for step in job["steps"]]
+    steps = [step.get("run", "") for job in workflow["jobs"].values() for step in job.get("steps", [])]  # V0.9.7: a job may call a workflow
     build = next(run for run in steps if "build_windows.ps1" in run)
     assert "vars.GARAGE16_SERVER_URL" in build and DOMAIN in build                     # variable wins, domain is the fallback
 

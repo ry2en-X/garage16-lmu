@@ -1,0 +1,237 @@
+{
+ "analysis_cache_version": 8,
+ "insights_version": 5,
+ "result": {
+  "axis": {
+   "anchors": 344,
+   "duplicates": 686,
+   "filled": 3089,
+   "kept": 3433,
+   "rows": 4119
+  },
+  "corners": [
+   {
+    "a": {
+     "accel_exit": 0.52,
+     "apex": 949.6,
+     "brake": 813.0,
+     "brake_len": 129.6,
+     "coast_m": 5.9,
+     "decel_mean": 1.7,
+     "decel_peak": 1.89,
+     "exit": 100.4,
+     "min": 97.1,
+     "res": {
+      "apex": 0.54,
+      "brake": 1.44,
+      "brake_end": 0.54,
+      "throttle": 0.56,
+      "throttle_50": 0.54,
+      "throttle_on": 0.54
+     },
+     "throttle": 959.0,
+     "throttle_50": 954.0,
+     "throttle_on": 949.2,
+     "time": 31.799
+    },
+    "apex": 954.5,
+    "b": {
+     "accel_exit": 0.52,
+     "apex": 961.6,
+     "brake": 825.2,
+     "brake_len": 129.4,
+     "coast_m": 5.4,
+     "decel_mean": 1.7,
+     "decel_peak": 1.89,
+     "exit": 100.4,
+     "min": 97.1,
+     "res": {
+      "apex": 0.54,
+      "brake": 1.44,
+      "brake_end": 0.54,
+      "throttle": 0.56,
+      "throttle_50": 0.54,
+      "throttle_on": 0.54
+     },
+     "throttle": 971.2,
+     "throttle_50": 966.3,
+     "throttle_on": 961.4,
+     "time": 31.799
+    },
+    "delta": 0.0,
+    "end": 2026.5,
+    "phases": [
+     [
+      "braking",
+      0.062
+     ],
+     [
+      "entry",
+      0.187
+     ],
+     [
+      "apex",
+      0.011
+     ],
+     [
+      "exit",
+      -0.009
+     ],
+     [
+      "straight",
+      -0.252
+     ]
+    ],
+    "start": 0.5
+   },
+   {
+    "a": {
+     "accel_exit": 0.51,
+     "apex": 2150.6,
+     "brake": 2034.5,
+     "brake_len": 105.3,
+     "coast_m": 8.4,
+     "decel_mean": 1.63,
+     "decel_peak": 1.89,
+     "exit": 153.4,
+     "min": 150.2,
+     "res": {
+      "apex": 0.83,
+      "brake": 1.44,
+      "brake_end": 0.84,
+      "throttle": 0.85,
+      "throttle_50": 0.84,
+      "throttle_on": 0.83
+     },
+     "throttle": 2165.2,
+     "throttle_50": 2157.6,
+     "throttle_on": 2150.1,
+     "time": 19.321
+    },
+    "apex": 2152.5,
+    "b": {
+     "accel_exit": 0.51,
+     "apex": 2154.5,
+     "brake": 2041.8,
+     "brake_len": 101.4,
+     "coast_m": 9.6,
+     "decel_mean": 1.61,
+     "decel_peak": 1.89,
+     "exit": 160.4,
+     "min": 157.2,
+     "res": {
+      "apex": 0.87,
+      "brake": 1.44,
+      "brake_end": 0.88,
+      "throttle": 0.89,
+      "throttle_50": 0.88,
+      "throttle_on": 0.87
+     },
+     "throttle": 2169.6,
+     "throttle_50": 2161.7,
+     "throttle_on": 2153.8,
+     "time": 19.116
+    },
+    "delta": 0.205,
+    "end": 3292.5,
+    "phases": [
+     [
+      "braking",
+      0.028
+     ],
+     [
+      "entry",
+      0.051
+     ],
+     [
+      "apex",
+      0.023
+     ],
+     [
+      "exit",
+      0.004
+     ],
+     [
+      "straight",
+      0.098
+     ]
+    ],
+    "start": 2026.5
+   },
+   {
+    "a": {
+     "accel_exit": 0.53,
+     "apex": 3443.9,
+     "brake": 3301.8,
+     "brake_len": 137.0,
+     "coast_m": 4.0,
+     "decel_mean": 1.73,
+     "decel_peak": 1.89,
+     "exit": 74.4,
+     "min": 71.1,
+     "res": {
+      "apex": 0.4,
+      "brake": 1.44,
+      "brake_end": 0.4,
+      "throttle": 0.41,
+      "throttle_50": 0.4,
+      "throttle_on": 0.4
+     },
+     "throttle": 3451.0,
+     "throttle_50": 3447.3,
+     "throttle_on": 3443.8,
+     "time": 17.52
+    },
+    "apex": 3444.5,
+    "b": {
+     "accel_exit": 0.53,
+     "apex": 3444.0,
+     "brake": 3301.8,
+     "brake_len": 137.1,
+     "coast_m": 4.0,
+     "decel_mean": 1.73,
+     "decel_peak": 1.89,
+     "exit": 74.4,
+     "min": 71.1,
+     "res": {
+      "apex": 0.4,
+      "brake": 1.44,
+      "brake_end": 0.4,
+      "throttle": 0.41,
+      "throttle_50": 0.4,
+      "throttle_on": 0.4
+     },
+     "throttle": 3451.0,
+     "throttle_50": 3447.3,
+     "throttle_on": 3443.8,
+     "time": 17.52
+    },
+    "delta": 0.0,
+    "end": 4199.3,
+    "phases": [
+     [
+      "braking",
+      -0.0
+     ],
+     [
+      "entry",
+      -0.0
+     ],
+     [
+      "apex",
+      0.0
+     ],
+     [
+      "exit",
+      0.0
+     ],
+     [
+      "straight",
+      -0.0
+     ]
+    ],
+    "start": 3292.5
+   }
+  ]
+ }
+}

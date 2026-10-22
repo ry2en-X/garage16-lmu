@@ -9,8 +9,6 @@ parquet serialization itself.
 
 import json
 import tempfile
-import time
-from pathlib import Path
 from unittest.mock import patch
 
 from client.telemetry.parser import Lap, TelemetrySample

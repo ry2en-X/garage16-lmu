@@ -401,6 +401,32 @@ export const api = {
     return request(`/admin/laps/${lapId}/review`, { method: "POST", adminToken, body: { decision, note } });
   },
 
+  // V0.9.7 — upload outcomes and the database/file consistency
+  adminOperations(adminToken, hours = 24, { clientVersion, requestId } = {}) {
+    return request("/admin/operations", { adminToken, params: { hours, client_version: clientVersion || undefined, request_id: requestId || undefined } });
+  },
+
+  adminConsistency(adminToken, deep = false) {
+    return request("/admin/consistency", { adminToken, params: { deep: deep ? "true" : undefined } });
+  },
+
+  // V0.9.9 — integrity of the stored originals and the audit log
+  adminIntegrity(adminToken) {
+    return request("/admin/integrity", { adminToken });
+  },
+
+  adminVerifyLapIntegrity(adminToken, lapId, release = false, note = undefined) {
+    return request(`/admin/laps/${lapId}/integrity`, { method: "POST", adminToken, params: { release: release ? "true" : undefined, note } });
+  },
+
+  adminAudit(adminToken, { lapId, kind, requestId, limit = 100 } = {}) {
+    return request("/admin/audit", { adminToken, params: { lap_id: lapId || undefined, kind: kind || undefined, request_id: requestId || undefined, limit } });
+  },
+
+  adminAuditVerify(adminToken) {
+    return request("/admin/audit/verify", { adminToken });
+  },
+
   adminCarIdentity(adminToken) {
     return request("/admin/car-identity", { adminToken });
   },
@@ -455,6 +481,14 @@ export const api = {
     });
   },
 
+  // V0.9.5 — asphalt, edges and kerbs of the layout, in the map's coordinates
+  analysisTrackSurface({ lapA, lapB, extra }) {
+    return request("/telemetry/analysis/track-surface", {
+      auth: true,
+      params: { lap_a: lapA, lap_b: lapB, extra: extra && extra.length ? extra.join(",") : undefined },
+    });
+  },
+
   analysisCornerHistory(lapId, limit = 10) {
     return request("/telemetry/analysis/corner-history", { auth: true, params: { lap_id: lapId, limit } });
   },
@@ -471,6 +505,11 @@ export const api = {
   // "You vs ..." in one call; without `track` the track of my most recent lap.
   analysisQuick({ mode, track, carModel, scope }) {
     return request("/telemetry/analysis/quick", { auth: true, params: { mode, track_name: track, car_model: carModel, scope } });
+  },
+
+  // V0.9.7: how trustworthy the lap's recording is (server/telemetry_health.py)
+  analysisLapHealth(lapId) {
+    return request(`/telemetry/analysis/laps/${encodeURIComponent(lapId)}/health`, { auth: true });
   },
 
   analysisLap(lapId) {

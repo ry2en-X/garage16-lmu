@@ -11,6 +11,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from tests.helpers.lapfile import with_signals
+import itertools
+
+_UPLOAD_SEQ = itertools.count(1)  # every upload in the process gets its own bytes
 
 
 def _register(client, name):
@@ -41,8 +45,8 @@ def _upload(client, account, track, car_name, car_class, car_model, lap_time=90.
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
-        n = 50
-        salt = (hash((track, car_name, car_model, lap_time)) % 1000) / 10000.0
+        n = int(lap_time * 20) + 1  # V0.9.9: a checkable frame rate (server/lap_decision.py)
+        salt = (next(_UPLOAD_SEQ) % 1000) / 10000.0  # V0.9.9: a counter, not hash() (seed-dependent collisions)
         speed_ms = 50.0 + salt
         df = pd.DataFrame({
             "t": np.linspace(0, lap_time, n), "lap_dist": np.linspace(0, speed_ms * lap_time, n),
@@ -51,6 +55,7 @@ def _upload(client, account, track, car_name, car_class, car_model, lap_time=90.
             "rpm": np.full(n, 6000.0), "fuel": np.linspace(50, 48, n),
         })
         parquet_path = tmp_dir / "lap.parquet"
+        df = with_signals(df)  # V0.9.9: the track-limits signals a 0.9.4 client records
         df.to_parquet(parquet_path, index=False)
         meta_path = tmp_dir / "lap.json"
         meta_path.write_text(json.dumps({

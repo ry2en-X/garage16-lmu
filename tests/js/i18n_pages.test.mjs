@@ -43,6 +43,7 @@ globalThis.fetch = async (url) => {
   if (p === "/telemetry/laps") return json([]);
   if (p === "/teams/5/records") return json([]);
   if (p === "/leaderboard/catalog/venues") return json([{ venue: "Le Mans", lap_count: 3, layouts: [] }]);
+  if (p === "/leaderboard/catalog/class-options") return json([{ name: "Hypercar", lap_count: 3 }]);  // V0.9.6: a track is preselected
   if (p === "/telemetry/analysis/circuits") return json({ venues: [{ venue: "Le Mans", lap_count: 0, layouts: [] }] });
   if (p === "/telemetry/analysis/channels") return json({ channels: [], default: [] });
   if (p === "/health") return json({ status: "ok", version: "0.9.2", client_download_url: "https://dl.example/Garage16-Client-Setup.exe" });
@@ -62,7 +63,7 @@ const WORDS = {
   en: {
     // V0.9.2: "Download" added to the menu (the two client editions, pages/download.js)
     // V0.9.4: two dashboards — "LapTime Analyzer" (#/analysis) and "Stint Analyzer" (#/stints)
-    nav: ["Leaderboard", "Circuits", "LapTime Analyzer", "Stint Analyzer", "Dashboard", "Teams", "Account", "Download"], status: "signed in as Mika",
+    nav: ["Dashboard", "Teams", "LapTime Analyzer", "Stint Analyzer", "Leaderboard", "Circuits", "Account", "Download"], status: "signed in as Mika",
     pages: {
       "#/": ["Your LMU Data. Your Records. Your Team.", "Recent Activity", "Explore Leaderboards", "What Garage16 Does"],
       "#/teams": ["Your teams", "3 member(s) — admin", "invite: ABCD", "Create a team", "Join a team"],
@@ -77,7 +78,7 @@ const WORDS = {
     },
   },
   de: {
-    nav: ["Leaderboard", "Strecken", "LapTime Analyzer", "Stint Analyzer", "Dashboard", "Teams", "Konto", "Download"], status: "angemeldet als Mika",
+    nav: ["Dashboard", "Teams", "LapTime Analyzer", "Stint Analyzer", "Leaderboard", "Strecken", "Konto", "Download"], status: "angemeldet als Mika",
     pages: {
       "#/": ["Deine LMU-Daten. Deine Rekorde. Dein Team.", "Letzte Aktivität", "Leaderboards ansehen", "Was Garage16 kann"],
       "#/teams": ["Deine Teams", "3 Mitglied(er) — Admin", "Einladung: ABCD", "Team erstellen", "Einem Team beitreten"],

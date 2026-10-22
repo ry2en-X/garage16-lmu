@@ -533,6 +533,10 @@ class DriverActivityItem(BaseModel):
     lap_time: float
     previous_best: Optional[float] = None
     created_at: str
+    # V0.9.6: the lap behind the entry (link to the analysis, one row per lap) and the car model
+    lap_id: Optional[int] = None
+    car_model: Optional[str] = None
+
 
 
 class DriverTeamOut(BaseModel):
@@ -655,6 +659,10 @@ class TeamActivityItem(BaseModel):
     lap_time: float
     previous_best: Optional[float] = None
     created_at: str
+    # V0.9.6: the lap behind the entry (link to the analysis, one row per lap) and the car model
+    lap_id: Optional[int] = None
+    car_model: Optional[str] = None
+
 
 
 class TeamLeaderboardEntry(BaseModel):
@@ -700,6 +708,10 @@ class RecentActivityEntry(BaseModel):
     car_name: str
     lap_time: float
     uploaded_at: str
+    # V0.9.6: the lap behind the entry (link to the analysis, one row per lap) and the car model
+    lap_id: Optional[int] = None
+    car_model: Optional[str] = None
+
 
 
 class LinkCodeResponse(BaseModel):
@@ -808,6 +820,16 @@ class AccountExport(BaseModel):
     created_at: str
     discord_linked: bool
     laps: List[LapSummary]
+    # V0.9.8: everything else the database holds about the driver (docs/DATA_PROTECTION.md)
+    email: Optional[str] = None
+    email_verified: Optional[bool] = None
+    teams: List[dict] = []
+    sessions: List[dict] = []
+    records: List[dict] = []
+    upload_log: List[dict] = []
+    # V0.9.9: sha256 / size / request of every stored original, and the audit events of the driver
+    lap_files: List[dict] = []
+    audit_events: List[dict] = []
 
 
 class AdminReviewDecision(BaseModel):

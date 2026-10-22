@@ -61,3 +61,13 @@ dist-installer/
 .DS_Store
 Thumbs.db
 __MACOSX/
+
+# --- Release gate output (scripts/release_check.py) ---
+release/
+
+# --- Test downloads (scripts/setup_test_env.sh) ---
+tests/.cache/
+.ruff_cache/
+release-archive/
+release-verify/
+.hypothesis/

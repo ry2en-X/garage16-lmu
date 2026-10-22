@@ -48,8 +48,10 @@ export async function renderAdmin(container) {
   // V0.9.3: "Review" (laps the track-limits check left to a human) and "Cars" (what the
   // server learned about car models)
   // V0.9.4: "Race rules" — rule sets for the Stint Analyzer's strategy calculator
-  const tabs = ["Reports", "Review", "Drivers", "Cars", "Rules", "System"];
-  const tabLabels = { Reports: t("Reports"), Review: t("Track-limits review"), Drivers: t("Drivers"), Cars: t("Car models"), Rules: t("Race rules"), System: t("System") };
+  // V0.9.7: "Operations" — upload outcomes, failures with their request id, consistency
+  // V0.9.9: "Integrity" — quarantined laps, the audit log
+  const tabs = ["Reports", "Review", "Integrity", "Drivers", "Cars", "Rules", "Operations", "System"];
+  const tabLabels = { Reports: t("Reports"), Review: t("Track-limits review"), Integrity: t("Integrity"), Drivers: t("Drivers"), Cars: t("Car models"), Rules: t("Race rules"), Operations: t("Operations"), System: t("System") };
   let active = "Reports";
   const tabBar = el("div", { class: "inline-form" }, tabs.map((name) => el("button", { class: "btn btn--ghost", "data-tab": name }, tabLabels[name])));
   const body = el("div", { class: "section" });
@@ -62,9 +64,11 @@ export async function renderAdmin(container) {
     body.innerHTML = "";
     if (name === "Reports") body.appendChild(await renderReportsTab(token));
     else if (name === "Review") body.appendChild(await renderReviewTab(token));
+    else if (name === "Integrity") body.appendChild(await renderIntegrityTab(token));
     else if (name === "Drivers") body.appendChild(await renderDriversTab(token));
     else if (name === "Cars") body.appendChild(await renderCarsTab(token));
     else if (name === "Rules") body.appendChild(await renderRulesTab(token));
+    else if (name === "Operations") body.appendChild(await renderOperationsTab(token));
     else body.appendChild(await renderSystemTab());
   }
 
@@ -252,6 +256,156 @@ async function renderSystemTab() {
 }
 
 
+// ---------------------------------------------------------------- V0.9.7: operations
+
+const CONSISTENCY_LABELS = () => ({
+  missing_files: t("Laps whose telemetry file is missing"),
+  outside_storage: t("Laps whose path points outside the storage folder"),
+  unreadable_files: t("Files that cannot be read"),
+  hash_mismatch: t("Files whose content changed"),
+  dangling_rows: t("Rows pointing at something that no longer exists"),
+  orphaned_files: t("Files no lap points at"),
+  stale_uploads: t("Temp files of interrupted uploads"),
+  not_judged: t("Laps without a stored verdict"),
+  stale_figures: t("Laps whose figures are from an older analysis"),
+  bad_metadata: t("Laps with missing or impossible metadata"),
+  unsupported_figures: t("Laps whose figures a newer server wrote"),
+  size_mismatch: t("Files whose size differs from the upload"),
+  mac_invalid: t("Laps whose stored hash, size or lap time do not match the server's signature"),
+  quarantined: t("Laps set aside after an integrity failure"),
+  audit_chain: t("The audit log's chain is broken"),
+  audit_unverifiable: t("Audit rows signed with a key no longer configured"),
+});
+const SERIOUS = ["missing_files", "outside_storage", "unreadable_files", "hash_mismatch", "dangling_rows", "bad_metadata", "size_mismatch", "mac_invalid", "audit_chain"];
+
+async function renderOperationsTab(token) {
+  const box = el("div");
+  const hoursSelect = el("select", { "aria-label": t("Period") }, [
+    el("option", { value: "24" }, t("last 24 hours")), el("option", { value: "168" }, t("last 7 days")), el("option", { value: "720" }, t("last 30 days")),
+  ]);
+  const versionSelect = el("select", { "aria-label": t("Client version") }, [el("option", { value: "" }, t("all client versions"))]);
+  const ridInput = el("input", { type: "text", placeholder: t("Request id"), "aria-label": t("Request id"), maxlength: "64", style: "max-width:16em;" });
+  const ridButton = el("button", { class: "btn btn--ghost btn--sm", type: "button" }, t("Find"));
+  const found = el("div");
+  const uploads = el("div", { class: "card" });
+  const consistencyCard = el("div", { class: "card" });
+  box.append(el("div", { class: "inline-form ops__period", style: "margin:0 0 12px;" }, [
+    el("label", {}, [t("Period"), " ", hoursSelect]), el("label", {}, [t("Client"), " ", versionSelect]),
+    el("label", {}, [ridInput, " ", ridButton]),
+  ]), found, uploads, consistencyCard);
+
+  // V0.9.8: drill-down — everything recorded for one request id
+  async function findRequest() {
+    const rid = ridInput.value.trim();
+    found.innerHTML = "";
+    if (!rid) return;
+    try {
+      const data = await api.adminOperations(token, 720, { requestId: rid });
+      const rows = data.request || [];
+      found.appendChild(el("div", { class: "card" }, [
+        el("h2", {}, t("Request {0}", [rid])),
+        rows.length ? el("table", { class: "timing-table" }, [
+          el("thead", {}, el("tr", {}, [t("When"), t("Outcome"), t("Status"), t("Reason"), t("Lap"), t("Driver"), t("Client"), t("Duration")].map((h) => el("th", {}, h)))),
+          el("tbody", {}, rows.map((r) => el("tr", {}, [
+            el("td", {}, r.at ? formatDate(r.at) : "—"), el("td", {}, r.outcome), el("td", {}, String(r.status_code)), el("td", {}, r.reason || "—"),
+            el("td", {}, r.lap_id ? el("a", { href: `#/analysis?a=${r.lap_id}` }, String(r.lap_id)) : "—"), el("td", {}, String(r.driver_id ?? "—")),
+            el("td", {}, r.client_version || "—"), el("td", {}, r.duration_ms != null ? `${Math.round(r.duration_ms)} ms` : "—"),
+          ]))),
+        ]) : el("div", { class: "notice" }, t("No upload with this request id in the last 30 days.")),
+      ]));
+    } catch (err) {
+      found.appendChild(el("div", { class: "notice notice--error" }, err.message));
+    }
+  }
+  ridButton.addEventListener("click", findRequest);
+  ridInput.addEventListener("keydown", (e) => { if (e.key === "Enter") findRequest(); });
+
+  async function loadUploads() {
+    uploads.innerHTML = "";
+    uploads.appendChild(el("h2", {}, t("Uploads")));
+    try {
+      const data = await api.adminOperations(token, Number(hoursSelect.value), { clientVersion: versionSelect.value });
+      const u = data.uploads;
+      if (versionSelect.options.length === 1) {
+        for (const v of u.client_versions) versionSelect.appendChild(el("option", { value: v.version }, v.version));
+      }
+      const row = (label, value, tone) => el("div", { class: "card-row" }, [el("span", {}, label), el("span", { class: tone ? `tag ${tone}` : "" }, String(value))]);
+      uploads.append(
+        row(t("Attempts"), u.total),
+        row(t("Accepted"), u.counts.accepted),
+        row(t("Already uploaded (duplicate)"), u.counts.duplicate),
+        row(t("Rejected"), u.counts.rejected, u.counts.rejected ? "tag--invalid" : ""),
+        row(t("Server errors"), u.counts.error, u.counts.error ? "tag--invalid" : "tag--valid"),
+        row(t("Failure rate"), u.failure_rate === null ? "—" : `${(u.failure_rate * 100).toFixed(1)} %`),
+        row(t("Duration (median / 95 % / max)"), u.duration_ms.p50 === null ? "—" : `${Math.round(u.duration_ms.p50)} / ${Math.round(u.duration_ms.p95)} / ${Math.round(u.duration_ms.max)} ms`),
+        row(t("Server / analysis / figures version"), `${data.server_version} / ${data.analysis_cache_version} / ${data.insights_version}`),
+      );
+      // V0.9.8: uploads per hour (red = failed), the shape of a problem at a glance
+      if (u.timeline && u.timeline.length > 1) {
+        const peak = Math.max(...u.timeline.map((x) => x.uploads), 1);
+        uploads.appendChild(el("h3", {}, t("Per hour")));
+        uploads.appendChild(el("div", { class: "ops-timeline", role: "img", "aria-label": t("Uploads per hour, failed ones in red") },
+          u.timeline.map((x) => el("span", { class: "ops-timeline__bar", title: `${formatDate(x.hour)}: ${x.uploads} / ${x.failed}`,
+            style: `height:${Math.max(4, Math.round((x.uploads / peak) * 60))}px;` },
+          x.failed ? el("span", { class: "ops-timeline__failed", style: `height:${Math.round((x.failed / x.uploads) * 100)}%;` }) : null))));
+      }
+      if (u.reasons.length) {
+        uploads.appendChild(el("h3", {}, t("Why uploads failed")));
+        uploads.appendChild(el("table", { class: "timing-table" }, [
+          el("thead", {}, el("tr", {}, [el("th", {}, t("Reason")), el("th", {}, t("Count"))])),
+          el("tbody", {}, u.reasons.map((r) => el("tr", {}, [el("td", {}, r.reason), el("td", {}, String(r.count))]))),
+        ]));
+      }
+      if (u.recent_failures.length) {
+        uploads.appendChild(el("h3", {}, t("Latest failures")));
+        uploads.appendChild(el("div", { class: "timing-table-wrap" }, el("table", { class: "timing-table" }, [
+          el("thead", {}, el("tr", {}, [t("When"), t("Request id"), t("Driver"), t("Status"), t("Reason"), t("Client")].map((h) => el("th", {}, h)))),
+          el("tbody", {}, u.recent_failures.map((f) => el("tr", {}, [
+            el("td", {}, f.at ? formatDate(f.at) : "—"), el("td", {}, el("code", {}, f.request_id || "—")), el("td", {}, String(f.driver_id ?? "—")),
+            el("td", {}, String(f.status_code)), el("td", {}, f.reason || "—"), el("td", {}, f.client_version || "—"),
+          ]))),
+        ])));
+        uploads.appendChild(el("div", { class: "subtitle" }, t("The request id is in the server log line of the same upload (docker compose logs server | grep <id>).")));
+      }
+    } catch (err) {
+      uploads.appendChild(el("div", { class: "notice notice--error" }, err.message));
+    }
+  }
+
+  async function loadConsistency(deep = false) {
+    consistencyCard.innerHTML = "";
+    consistencyCard.appendChild(el("h2", {}, t("Database and telemetry files")));
+    consistencyCard.appendChild(el("div", { class: "notice" }, t("Checking…")));
+    try {
+      const report = await api.adminConsistency(token, deep);
+      consistencyCard.lastChild.remove();
+      const labels = CONSISTENCY_LABELS();
+      consistencyCard.appendChild(el("div", { class: "card-row" }, [
+        el("span", {}, t("{0} laps checked ({1})", [report.checked_laps, report.deep ? t("every file read") : t("quick")])),
+        el("span", { class: `tag ${report.ok ? "tag--valid" : "tag--invalid"}` }, report.ok ? t("consistent") : t("needs attention")),
+      ]));
+      for (const [kind, label] of Object.entries(labels)) {
+        const n = report.counts[kind] || 0;
+        consistencyCard.appendChild(el("div", { class: "card-row", "data-kind": kind }, [
+          el("span", {}, label), el("span", { class: n ? `tag ${SERIOUS.includes(kind) ? "tag--invalid" : "tag--basic"}` : "" }, String(n)),
+        ]));
+      }
+      const deepBtn = el("button", { class: "btn btn--ghost btn--sm" }, t("Read every file (slower)"));
+      deepBtn.addEventListener("click", () => loadConsistency(true));
+      consistencyCard.append(deepBtn, el("div", { class: "subtitle" }, t("Read-only. Repairs (removing unreferenced files, recomputing old figures) run with scripts/consistency_check.py — see the admin guide.")));
+    } catch (err) {
+      consistencyCard.lastChild.remove();
+      consistencyCard.appendChild(el("div", { class: "notice notice--error" }, err.message));
+    }
+  }
+
+  hoursSelect.addEventListener("change", loadUploads);
+  versionSelect.addEventListener("change", loadUploads);
+  await Promise.all([loadUploads(), loadConsistency(false)]);
+  return box;
+}
+
+
 // ---------------------------------------------------------------- V0.9.3: track-limits review
 
 function findingLine(f) {
@@ -292,7 +446,7 @@ function rulesBlock(token) {
 
 async function renderReviewTab(token) {
   const wrap = el("div");
-  wrap.appendChild(el("p", { class: "subtitle", style: "margin-top:16px;" }, t("Laps the automatic track-limits check could not decide on its own. They count until you decide. Every finding says what was seen, where on the lap and from which signal.")));
+  wrap.appendChild(el("p", { class: "subtitle", style: "margin-top:16px;" }, t("Laps the automatic check could not decide on its own. \"Waiting\": not counted until you decide (since V0.9.9). \"Counts provisionally\": flagged before V0.9.9. Every finding says what was seen, where on the lap and from which signal.")));
   wrap.appendChild(rulesBlock(token));
   const list = el("div");
   wrap.appendChild(list);
@@ -328,6 +482,7 @@ async function renderReviewTab(token) {
           el("div", {}, [
             el("strong", {}, `${lap.track_name} — ${lap.car_model || lap.car_name}`),
             el("div", { class: "subtitle", style: "margin:2px 0 0;" }, t("Driver: {0} — {1} — {2}", [lap.driver_name, formatLapTime(lap.lap_time), lap.is_valid ? t("currently valid") : t("already invalid")])),
+            el("span", { class: "tag", "data-review-status": lap.review_status }, lap.review_status === "held" ? t("waiting — not counted") : t("counts provisionally")),
           ]),
           el("span", { class: "tag" }, formatDate(lap.uploaded_at)),
         ]),
@@ -342,6 +497,95 @@ async function renderReviewTab(token) {
     });
   }
 
+  await refresh();
+  return wrap;
+}
+
+// ---------------------------------------------------------------- V0.9.9: integrity + audit
+
+const INTEGRITY_REASON = () => ({
+  missing: t("file missing"),
+  outside_storage: t("path outside the storage folder"),
+  not_a_regular_file: t("not a regular file (link?)"),
+  size_mismatch: t("size changed"),
+  hash_mismatch: t("content changed"),
+  mac_invalid: t("signature does not match (hash, size or lap time edited)"),
+  unreadable: t("cannot be read"),
+});
+
+export async function renderIntegrityTab(token) {
+  const wrap = el("div");
+  wrap.appendChild(el("p", { class: "subtitle", style: "margin-top:16px;" }, t("Laps whose stored file no longer matches what was uploaded are set aside: they leave leaderboards and records. Restore the file (backup), check it again, then release the lap. A full check of every file: scripts/integrity_check.py.")));
+  const quarantine = el("div", { class: "card" });
+  const auditCard = el("div", { class: "card" });
+  wrap.append(quarantine, auditCard);
+
+  async function refresh() {
+    quarantine.innerHTML = "";
+    let data;
+    try {
+      data = await api.adminIntegrity(token);
+    } catch (err) {
+      quarantine.appendChild(el("div", { class: "notice notice--error" }, err.message));
+      return;
+    }
+    quarantine.appendChild(el("h2", {}, t("Set aside ({0})", [data.quarantined.length])));
+    quarantine.appendChild(el("p", { class: "subtitle" }, t("{0} laps stored, {1} of them not signed yet (stored before V0.9.9 — run scripts/integrity_check.py --apply --backfill once).", [data.laps, data.unsigned])));
+    if (!data.quarantined.length) quarantine.appendChild(el("div", { class: "empty-state" }, t("Nothing set aside.")));
+    data.quarantined.forEach((q) => {
+      const out = el("div");
+      const reason = (q.quarantine && q.quarantine.reason) || "";
+      const verify = async (release) => {
+        try {
+          const res = await api.adminVerifyLapIntegrity(token, q.lap_id, release);
+          out.innerHTML = "";
+          out.appendChild(el("div", { class: `notice ${res.result.status === "ok" ? "" : "notice--error"}` },
+            res.released ? t("Released.") : t("Check: {0}", [INTEGRITY_REASON()[res.result.status] || res.result.status])));
+          if (res.released) await refresh();
+        } catch (err) {
+          out.appendChild(el("div", { class: "notice notice--error" }, err.message));
+        }
+      };
+      quarantine.appendChild(el("div", { class: "card-row", "data-quarantined": String(q.lap_id) }, [
+        el("div", {}, [
+          el("strong", {}, `${q.track_name} — ${formatLapTime(q.lap_time)}`),
+          el("div", { class: "subtitle", style: "margin:2px 0 0;" }, t("Lap {0} · {1} · {2} · request {3}", [q.lap_id, q.driver_name || "?", INTEGRITY_REASON()[reason] || reason, (q.quarantine && q.quarantine.request_id) || "–"])),
+        ]),
+        el("div", { class: "inline-form" }, [
+          el("button", { class: "btn btn--ghost btn--sm", onclick: () => verify(false) }, t("Check again")),
+          el("button", { class: "btn btn--sm", onclick: () => verify(true) }, t("Release if intact")),
+        ]),
+        out,
+      ]));
+    });
+
+    auditCard.innerHTML = "";
+    auditCard.appendChild(el("h2", {}, t("Audit log")));
+    const head = data.audit_head;
+    auditCard.appendChild(el("p", { class: "subtitle" }, head ? t("Chain head: row {0} — {1}. Keep a copy outside the server (every backup manifest records it).", [head.id, head.mac]) : t("No events yet.")));
+    const verifyOut = el("div");
+    auditCard.appendChild(el("button", { class: "btn btn--ghost btn--sm", onclick: async () => {
+      verifyOut.innerHTML = "";
+      try {
+        const r = await api.adminAuditVerify(token);
+        verifyOut.appendChild(el("div", { class: `notice ${r.ok ? "" : "notice--error"}` }, r.ok ? t("Chain intact ({0} rows).", [r.rows]) : t("Chain broken at row {0}: {1}", [r.first_broken, r.problem])));
+      } catch (err) {
+        verifyOut.appendChild(el("div", { class: "notice notice--error" }, err.message));
+      }
+    } }, t("Verify the chain")));
+    auditCard.appendChild(verifyOut);
+    try {
+      const events = (await api.adminAudit(token, { limit: 50 })).events;
+      auditCard.appendChild(el("div", { class: "table-scroll" }, el("table", { class: "timing-table" }, [
+        el("thead", {}, el("tr", {}, [t("Time"), t("Event"), t("Lap"), t("By"), t("Request id")].map((h) => el("th", {}, h)))),
+        el("tbody", {}, events.map((e) => el("tr", { "data-audit": e.kind }, [
+          el("td", {}, formatDate(e.at)), el("td", {}, e.kind), el("td", {}, e.lap_id != null ? String(e.lap_id) : "–"), el("td", {}, e.actor), el("td", {}, e.request_id || "–"),
+        ]))),
+      ])));
+    } catch (err) {
+      auditCard.appendChild(el("div", { class: "notice notice--error" }, err.message));
+    }
+  }
   await refresh();
   return wrap;
 }

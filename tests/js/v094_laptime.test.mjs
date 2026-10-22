@@ -33,7 +33,7 @@ const ctx2d = new Proxy({}, {
 dom.window.HTMLCanvasElement.prototype.getContext = function getContext() { return ctx2d; };
 dom.window.HTMLCanvasElement.prototype.getBoundingClientRect = function rect() { return { left: 0, top: 0, width: 600, height: 440, right: 600, bottom: 440 }; };
 
-const { scaleBar, createCamera, offsetText, cornerStretch, createLineMap, boundsOf } = await import("../../web/js/analysis/linemap.js");
+const { scaleBar, createCamera, offsetText, cornerStretch, createLineMap, boundsOf, surfaceGeometry } = await import("../../web/js/analysis/linemap.js");
 const { createSelection, createLazy, historyFor, historySentences, renderCornerDetail, renderSectors } = await import("../../web/js/analysis/corner_detail.js");
 const { cornerHints, hintsByPhase, renderCoaching } = await import("../../web/js/analysis/coaching.js");
 const { createViewState } = await import("../../web/js/analysis/model.js");
@@ -256,5 +256,24 @@ for (const type of ["line", "corner_detail", "sectors"]) {
 assert.ok(defaultLayout().widgets.some((w) => w.type === "line"), "the racing lines are in the standard layout");
 assert.deepEqual(parseAnalysisExtras("#/analysis?a=1&b=2&c=7&d=7").laps, [7]);
 assert.deepEqual(parseAnalysisExtras("#/analysis?a=1&c=x&d=9").laps, [9]);
+
+// ---- V0.9.5: the track surface behind the lines (server/track_surface.py -> surfaceGeometry)
+{
+  const n = 5;
+  const surface = {
+    bin: 4, start: 0, count: n,
+    cx: [0, 4, 8, 12, 16], cy: [0, 0, 0, 0, 0], nx: [0, 0, 0, 0, 0], ny: [1, 1, 1, 1, 1],   // straight along +x, left = +y
+    wl: [6, 6, null, 6, 6], wr: [5, 5, 5, 5, 5], wl_est: [0, 0, 0, 0, 0], wr_est: [1, 1, 1, 1, 1],
+    kl_in: [5, 5, null, null, null], kl_out: [7, 7, null, null, null], kr_in: [null, null, null, null, null], kr_out: [null, null, null, null, null],
+  };
+  const g = surfaceGeometry(surface);
+  assert.deepEqual(g.left[0], [0, 6], "left edge = centre + width along the left normal");
+  assert.deepEqual(g.right[1], [4, -5], "right edge on the other side");
+  assert.equal(g.left[2], null, "no width -> no edge point (a gap, never a guess)");
+  assert.deepEqual(g.rightEst, [true, true, true, true, true]);
+  assert.equal(g.kerbs.length, 2, "kerb quads where both bins have one, plus the last bin of a run");
+  assert.deepEqual(g.kerbs[0].quad, [[0, 5], [0, 7], [4, 7], [4, 5]]);
+  assert.equal(surfaceGeometry(null), null);
+}
 
 console.log("V094-LAPTIME-OK");

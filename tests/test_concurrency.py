@@ -21,10 +21,11 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from tests.helpers.lapfile import with_signals
 
 
 def _write_lap(tmp_dir: Path, lap_time: float, lap_number: int) -> Path:
-    n = 50
+    n = int(lap_time * 20) + 1  # V0.9.9: a checkable frame rate (server/lap_decision.py)
     df = pd.DataFrame({
         "t": np.linspace(0, lap_time, n),
         "lap_dist": np.linspace(0, 4500, n),
@@ -38,6 +39,7 @@ def _write_lap(tmp_dir: Path, lap_time: float, lap_number: int) -> Path:
         "fuel": np.linspace(50, 48, n),
     })
     parquet_path = tmp_dir / f"lap_{lap_number}.parquet"
+    df = with_signals(df)  # V0.9.9: the track-limits signals a 0.9.4 client records
     df.to_parquet(parquet_path, index=False)
     meta_path = tmp_dir / f"lap_{lap_number}.json"
     meta_path.write_text(json.dumps({

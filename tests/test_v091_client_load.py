@@ -146,9 +146,7 @@ def test_views_without_an_address_still_use_the_full_read():
 # ---------------------------------------------------------------- memory per sample
 
 def test_a_recorded_sample_keeps_its_extended_values_as_float32():
-    from client.lmu.structs import TelemInfoV01
     from client.telemetry.parser import LapParser
-    from client.telemetry.reader import Frame
 
     buf = _shared_memory()
     frame = _reader(buf).read()

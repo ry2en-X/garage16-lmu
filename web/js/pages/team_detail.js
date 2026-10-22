@@ -4,6 +4,7 @@
 
 import { api } from "../api.js";
 import { store } from "../state.js";
+import { renderActivityList } from "../activity.js";
 import { el, formatLapTime, formatDate, inviteStatusLabel, roleLabel } from "../format.js";
 import { renderSignInPrompt } from "./auth.js";
 
@@ -30,28 +31,26 @@ export async function renderTeamDetail(container, teamId) {
   container.appendChild(el("h1", {}, detail.name));
   if (detail.description) container.appendChild(el("p", { class: "subtitle" }, detail.description));
 
-  // --- Overview strip ---
-  const overview = el("div", { class: "card", style: "display:flex; gap:24px; flex-wrap:wrap;" }, [
-    _stat(detail.member_count, t("Members")),
-    _stat(detail.active_driver_count, t("Active drivers")),
-    _stat(detail.total_laps, t("Laps")),
-    _stat(detail.pbs_this_week, t("PBs this week")),
-    _stat(detail.team_best_count, t("Team bests")),
-  ]);
-  container.appendChild(overview);
+  // V0.9.6 — one order for everyone: what the team achieved first (overview, bests, leaderboard,
+  // activity), the people next, the settings last (folded away). The sections load in PARALLEL
+  // into their places (before: one after the other).
+  const section = (title, extra = null) => {
+    if (title) container.appendChild(el("h2", {}, title));
+    const slot = el("div", { class: "team-slot" }, el("div", { class: "subtitle" }, t("Loading…")));
+    container.appendChild(slot);
+    if (extra) container.appendChild(extra);
+    return slot;
+  };
+  const fill = (slot, promise) => promise.then((node) => slot.replaceChildren(node)).catch((err) => slot.replaceChildren(el("div", { class: "notice notice--error" }, err.message)));
 
-  // --- Time-windowed stats (V0.7.2 §9.4) ---
-  container.appendChild(await renderTeamStatsCard(teamId));
+  const overviewSlot = section(null);
+  const recordsSlot = section(t("Team bests"));
+  const boardSlot = section(t("Team leaderboard"));
+  const activitySlot = section(t("Recent activity"));
 
-  // --- Settings (owner/admin only) ---
-  if (canManage) {
-    container.appendChild(renderSettingsCard(teamId, detail, isOwner));
-  }
-
-  // --- Members ---
+  // --- Members (+ invitations for owner/admin) ---
   container.appendChild(el("h2", {}, t("Members")));
   container.appendChild(renderMembersTable(teamId, members, detail.my_role, myDriverId, isOwner, () => refreshMembers()));
-
   const membersBox = { current: container.lastChild };
   async function refreshMembers() {
     const fresh = await api.teamMembers(teamId);
@@ -59,24 +58,21 @@ export async function renderTeamDetail(container, teamId) {
     membersBox.current.replaceWith(rebuilt);
     membersBox.current = rebuilt;
   }
+  const invitesSlot = canManage ? section(t("Invitations")) : null;
 
-  // --- Invitations (owner/admin only, V0.7.2 §9.2) ---
+  // --- Settings (owner/admin only), folded: rarely needed, and holds "Delete team"
   if (canManage) {
-    container.appendChild(el("h2", {}, t("Invitations")));
-    container.appendChild(await renderInvitationsCard(teamId));
+    const settings = el("details", { class: "fold fold--single" }, [el("summary", {}, t("Team settings")), renderSettingsCard(teamId, detail, isOwner)]);
+    container.appendChild(settings);
   }
 
-  // --- Team leaderboard ---
-  container.appendChild(el("h2", {}, t("Team leaderboard")));
-  container.appendChild(await renderTeamLeaderboard(teamId));
-
-  // --- Team records ---
-  container.appendChild(el("h2", {}, t("Team bests")));
-  container.appendChild(await renderTeamRecords(teamId));
-
-  // --- Activity console ---
-  container.appendChild(el("h2", {}, t("Recent activity")));
-  container.appendChild(await renderActivity(teamId));
+  await Promise.all([
+    fill(overviewSlot, renderTeamStatsCard(teamId, detail)),
+    fill(recordsSlot, renderTeamRecords(teamId)),
+    fill(boardSlot, renderTeamLeaderboard(teamId)),
+    fill(activitySlot, renderActivity(teamId)),
+    invitesSlot ? fill(invitesSlot, renderInvitationsCard(teamId)) : null,
+  ]);
 }
 
 function _stat(value, label) {
@@ -216,13 +212,14 @@ async function renderTeamLeaderboard(teamId) {
       v.layouts.forEach((l) => group.appendChild(el("option", { value: l.track_name }, l.track_name)));
       trackSelect.appendChild(group);
     });
+    return withLaps;
   }
   let trackSearchTimer = null;
   trackSearch.addEventListener("input", () => {
     clearTimeout(trackSearchTimer);
     trackSearchTimer = setTimeout(() => loadTracks(trackSearch.value.trim()), 250);
   });
-  await loadTracks("");
+  const initial = await loadTracks("");
   const classSelect = el("select", {}, [el("option", { value: "" }, t("Pick a track first"))]);
   // V0.7.2 §9.5: third cascade level. "All cars in this class" keeps the
   // previous class-wide behavior as the default — picking a specific
@@ -267,6 +264,12 @@ async function renderTeamLeaderboard(teamId) {
     classes.forEach((c) =>
       classSelect.appendChild(el("option", { value: c.name }, `${c.name} · ${c.lap_count ? tp("{0} lap", "{0} laps", c.lap_count) : t("no laps yet")}`))
     );
+    // V0.9.6: the class with the most laps right away
+    const busiest = [...classes].filter((c) => c.lap_count > 0).sort((a, b) => b.lap_count - a.lap_count)[0];
+    if (busiest) {
+      classSelect.value = busiest.name;
+      classSelect.dispatchEvent(new Event("change"));
+    }
   });
 
   classSelect.addEventListener("change", async () => {
@@ -293,6 +296,12 @@ async function renderTeamLeaderboard(teamId) {
     el("div", { class: "field" }, [el("label", {}, t("Car")), carSelect]),
   ]));
   wrap.appendChild(resultsBox);
+  // V0.9.6: open on the busiest track instead of an empty form
+  const busiestLayout = initial.flatMap((v) => v.layouts).sort((a, b) => b.lap_count - a.lap_count)[0];
+  if (busiestLayout) {
+    trackSelect.value = busiestLayout.track_name;
+    trackSelect.dispatchEvent(new Event("change"));
+  }
   return wrap;
 }
 
@@ -303,9 +312,16 @@ const _STATS_WINDOWS = [
   ["all", t("All Time")],
 ];
 
-async function renderTeamStatsCard(teamId) {
-  const card = el("div", { class: "card" });
-  card.appendChild(el("h2", {}, t("Team Statistics")));
+// V0.9.6: the overview and the time-windowed statistics in ONE card (they were two, half the
+// numbers twice): members and team bests held, then laps / PBs / active drivers / new team bests
+// for the chosen period.
+async function renderTeamStatsCard(teamId, detail) {
+  const card = el("div", { class: "card team-overview" });
+  card.appendChild(el("div", { class: "team-overview__fixed" }, [
+    _stat(detail.member_count, t("Members")),
+    _stat(detail.team_best_count, t("Team bests")),
+    _stat(detail.pbs_this_week, t("PBs this week")),
+  ]));
 
   const toggle = el(
     "div",
@@ -324,7 +340,7 @@ async function renderTeamStatsCard(teamId) {
       statsBox.appendChild(_stat(stats.laps, t("Laps")));
       statsBox.appendChild(_stat(stats.pbs, t("PBs")));
       statsBox.appendChild(_stat(stats.active_drivers, t("Active drivers")));
-      statsBox.appendChild(_stat(stats.records, t("Team records")));
+      statsBox.appendChild(_stat(stats.records, t("New team bests")));
     } catch (err) {
       statsBox.appendChild(el("div", { class: "notice notice--error" }, err.message));
     }
@@ -390,18 +406,8 @@ async function renderTeamRecords(teamId) {
 async function renderActivity(teamId) {
   try {
     const activity = await api.teamActivity(teamId);
-    if (!activity.length) return el("div", { class: "empty-state" }, t("Nothing yet — go set some times."));
-    const lines = activity.map((a) => {
-      // WR = the fastest lap on this Garage16 instance ("Garage16 Best"), not a world record.
-      const icon = a.record_type === "WR" ? "🏆" : a.record_type === "TEAM_BEST" ? "🏁" : "⏱";
-      const label = a.record_type === "PR" ? t("new personal best") : a.record_type === "TEAM_BEST" ? t("new team best") : t("new Garage16 Best");
-      return el(
-        "div",
-        { class: "card-row" },
-        t("{0} {1} set a {2} at {3} ({4}): {5} — {6}", [icon, a.driver_name, label, a.track_name, a.car_name, formatLapTime(a.lap_time), formatDate(a.created_at)])
-      );
-    });
-    return el("div", { class: "card" }, lines);
+    // V0.9.6: one row per lap with all its records (activity.js) instead of one sentence per record
+    return renderActivityList(activity, { showDriver: true, limit: 15, emptyText: t("Nothing yet — go set some times.") });
   } catch (err) {
     return el("div", { class: "notice notice--error" }, err.message);
   }

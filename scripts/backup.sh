@@ -1,46 +1,59 @@
 #!/bin/bash
-# scripts/backup.sh — Backs up the PostgreSQL DB and telemetry storage
-# together, since a restore needs both consistent with each other (a Lap
-# row pointing at a telemetry_path that doesn't exist in the storage
-# backup is a data-integrity problem the app doesn't handle gracefully).
+# scripts/backup.sh — a CONSISTENT backup of Garage16: the PostgreSQL database and the telemetry
+# files from the same moment, checked, with a manifest (V0.9.8; first version V0.8.8).
 #
 # Usage (works from any directory; it changes into the project root itself):
 #   ./scripts/backup.sh /path/to/backup/dir
 #
-# Suggested cron (daily at 3am, keep last 14 days — adjust retention to
-# your actual requirements/storage budget):
-#   0 3 * * * cd /opt/garage16 && ./scripts/backup.sh /opt/garage16-backups >> /var/log/garage16-backup.log 2>&1
+# Result: <backup-dir>/garage16_<stamp>/{db.sql.gz, telemetry.tar.gz, manifest.json}
+# The folder only gets its final name once both files are written AND checked and the manifest
+# exists; until then it is garage16_<stamp>.partial (an interrupted run leaves nothing that looks
+# like a backup). scripts/restore.sh checks the manifest before it touches anything.
 #
-# This does NOT manage offsite replication — copy the resulting archive
-# to separate storage (another host, S3-compatible bucket, etc.)
-# yourself; a backup that lives on the same disk as the data it backs up
-# doesn't survive that disk failing.
+# How the two halves stay consistent (server/write_lock.py):
+#   1. A small helper container announces maintenance in the telemetry volume and takes the write
+#      lock EXCLUSIVELY. New uploads / driver deletions are refused with 503 from that moment (the
+#      desktop client keeps the lap and retries); the ones already running finish first.
+#   2. Database dump and telemetry archive are made while the lock is held — nothing can change
+#      rows and files in between. Reading (pages, analysis, leaderboards) keeps working.
+#   3. The lock is released. The helper gives up the lock on its own after
+#      GARAGE16_BACKUP_LOCK_MAX_S seconds (default 1800) even if this script is killed — uploads
+#      are never blocked for longer; a backup that took longer is discarded, not published.
+#
+# Checks before publishing: both files are valid gzip, the dump ends with pg_dump's completion
+# line (a truncated dump has none), the archive can be listed; the manifest records time, program
+# version, schema revision, sizes, SHA-256 of both files, the number of laps and files.
+#
+# Suggested schedule (Synology Task Scheduler / cron, daily 3:00):
+#   0 3 * * * /path/to/project/scripts/backup.sh /volumeUSB2/usbshare/garage16-backups
+#
+# Copy the backups to a second place yourself — a backup on the same disk does not survive it.
 
 set -euo pipefail
 
 BACKUP_DIR="${1:?Usage: backup.sh <backup-dir>}"
-
-# Always operate from the project root (where docker-compose.yml lives),
-# whatever directory this was started from — Synology's Task Scheduler and
-# cron start scripts in / or /root, where `docker compose exec` can't find
-# the project (V0.8.8).
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-WORK_DIR="${BACKUP_DIR}/garage16_${TIMESTAMP}"
+FINAL_DIR="${BACKUP_DIR}/garage16_${TIMESTAMP}"
+WORK_DIR="${FINAL_DIR}.partial"
 RETENTION_DAYS="${GARAGE16_BACKUP_RETENTION_DAYS:-14}"
+LOCK_MAX_S="${GARAGE16_BACKUP_LOCK_MAX_S:-1800}"
+LOCK_WAIT_S="${GARAGE16_BACKUP_LOCK_WAIT_S:-300}"
+PG_USER="${POSTGRES_USER:-garage16}"
+PG_DB="${POSTGRES_DB:-garage16}"
 
-# V0.8.8 FIX: the telemetry volume is named "<compose project>_telemetry_data".
-# docker-compose.yml pins `name: garage16`, so that is `garage16_telemetry_data`
-# — but this script used to derive the prefix from the CURRENT FOLDER's name
-# (`$(basename "$(pwd)")`). In a folder called "Garage16 - LMU" that produced
-# "Garage16 - LMU_telemetry_data": an invalid volume name, so the telemetry
-# step failed after the DB dump had already been written, and every backup was
-# incomplete. (Worse: for a folder whose name WAS a valid but different name,
-# `docker run -v` would silently create a brand-new EMPTY volume and back that
-# up — hence the explicit existence check below.)
+# The telemetry volume is "<compose project>_telemetry_data" — docker-compose.yml pins the project
+# name "garage16" (V0.8.8: never derive it from the folder name).
 PROJECT_NAME="${COMPOSE_PROJECT_NAME:-garage16}"
 TELEMETRY_VOLUME="${PROJECT_NAME}_telemetry_data"
+HELPER="garage16_backup_lock_${TIMESTAMP}_$$"
+LOCKFILE="/data/.garage16-write.lock"
+MARKER="/data/.garage16-maintenance"
+STATE="/data/.garage16-backup-${TIMESTAMP}-$$"
+
+log() { echo "[backup] $*"; }
+fail() { echo "[backup] ERROR: $*" >&2; exit 1; }
 
 if ! docker volume inspect "${TELEMETRY_VOLUME}" >/dev/null 2>&1; then
     echo "[backup] ERROR: Docker volume '${TELEMETRY_VOLUME}' does not exist." >&2
@@ -52,26 +65,128 @@ fi
 
 mkdir -p "${WORK_DIR}"
 
-echo "[backup] Dumping PostgreSQL..."
-docker compose exec -T db pg_dump -U "${POSTGRES_USER:-garage16}" "${POSTGRES_DB:-garage16}" \
-    | gzip > "${WORK_DIR}/db.sql.gz"
+cleanup() {
+    local code=$?
+    # always: let go of the lock and the maintenance marker, never leave uploads blocked
+    docker rm -f "${HELPER}" >/dev/null 2>&1 || true
+    docker run --rm -v "${TELEMETRY_VOLUME}:/data" alpine \
+        sh -c "rm -f '${MARKER}' '${STATE}.locked' '${STATE}.release' '${STATE}.expired'" >/dev/null 2>&1 || true
+    if [ "$code" -ne 0 ]; then
+        rm -rf "${WORK_DIR}"
+        echo "[backup] FAILED — nothing was published (exit ${code})." >&2
+    fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 
-# A dump that is only gzip's empty-input header means pg_dump produced nothing.
-if [ "$(gzip -dc "${WORK_DIR}/db.sql.gz" | wc -c)" -lt 100 ]; then
-    echo "[backup] ERROR: the database dump is empty — is the 'db' container running?" >&2
-    exit 1
+# --- 1. announce maintenance, wait for running writes, hold the lock --------------------------
+log "Taking the write lock (running uploads finish first, new ones are asked to retry)..."
+docker run -d --name "${HELPER}" -v "${TELEMETRY_VOLUME}:/data" alpine sh -c "
+    echo backup > '${MARKER}'
+    exec flock -x '${LOCKFILE}' sh -c '
+        touch \"${STATE}.locked\"
+        i=0
+        while [ ! -e \"${STATE}.release\" ]; do
+            i=\$((i + 1))
+            if [ \$i -gt \$((${LOCK_MAX_S} * 5)) ]; then touch \"${STATE}.expired\"; break; fi
+            sleep 0.2
+        done
+        rm -f \"${MARKER}\"
+    '
+" >/dev/null
+
+waited=0
+until docker exec "${HELPER}" test -e "${STATE}.locked" 2>/dev/null; do
+    sleep 1
+    waited=$((waited + 1))
+    if [ "$waited" -ge "$LOCK_WAIT_S" ]; then fail "running writes did not finish within ${LOCK_WAIT_S} s"; fi
+    if [ "$(docker inspect -f '{{.State.Running}}' "${HELPER}" 2>/dev/null || echo false)" != "true" ]; then
+        fail "the lock helper container stopped unexpectedly"
+    fi
+done
+log "Write lock held — database and files are frozen together."
+
+# --- 2. database dump + telemetry archive, inside the locked window ----------------------------
+log "Dumping PostgreSQL..."
+docker compose exec -T db pg_dump -U "${PG_USER}" "${PG_DB}" | gzip > "${WORK_DIR}/db.sql.gz"
+SCHEMA_REVISION=$(docker compose exec -T db psql -U "${PG_USER}" -d "${PG_DB}" -Atc "select version_num from alembic_version" | tr -d '[:space:]')
+LAP_COUNT=$(docker compose exec -T db psql -U "${PG_USER}" -d "${PG_DB}" -Atc "select count(*) from laps" | tr -d '[:space:]')
+# V0.9.9: the head of the audit chain (server/audit.py) — a copy of it outside the server is what
+# shows later whether the chain was rewritten as a whole. V0.9.9.1: read from the dump itself (the
+# highest id in its audit_events data), not with a second query: admin decisions and quarantines
+# append audit rows without the upload write lock, so a query after pg_dump could see a row the
+# dump does not contain — and scripts/restore.sh would then refuse a sound backup.
+audit_head_from_dump() {  # $1 = db.sql.gz -> "<id> <mac>" of the newest audit row, or nothing
+    gzip -dc "$1" | awk -F '\t' '
+        /^COPY public\.audit_events \(/ {
+            h = $0; sub(/^COPY public\.audit_events \(/, "", h); sub(/\) FROM stdin;.*$/, "", h)
+            n = split(h, c, ", "); ci = 0; cm = 0
+            for (i = 1; i <= n; i++) { if (c[i] == "id") ci = i; if (c[i] == "mac") cm = i }
+            inside = 1; next
+        }
+        inside && $0 == "\\." { inside = 0; next }
+        inside && ci && cm { if ($ci + 0 > best) { best = $ci + 0; mac = $cm } }
+        END { if (best > 0) print best " " mac }'
+}
+AUDIT_HEAD="null"
+HEAD_ROW=$(audit_head_from_dump "${WORK_DIR}/db.sql.gz")
+if [ -n "${HEAD_ROW}" ]; then
+    AUDIT_HEAD="{\"id\": ${HEAD_ROW%% *}, \"mac\": \"${HEAD_ROW#* }\"}"
 fi
 
-echo "[backup] Archiving telemetry storage volume (${TELEMETRY_VOLUME})..."
-docker run --rm \
-    -v "${TELEMETRY_VOLUME}:/data:ro" \
-    -v "${WORK_DIR}:/backup" \
-    alpine tar czf /backup/telemetry.tar.gz -C /data .
+log "Archiving telemetry storage volume (${TELEMETRY_VOLUME})..."
+docker run --rm -v "${TELEMETRY_VOLUME}:/data:ro" -v "${WORK_DIR}:/backup" alpine \
+    tar czf /backup/telemetry.tar.gz -C /data \
+        --exclude './.garage16-*' --exclude './.pre_restore_*' .
 
-echo "[backup] Done: ${WORK_DIR}"
+# --- 3. the lock must still have been ours the whole time, then let go -------------------------
+if docker exec "${HELPER}" test -e "${STATE}.expired" 2>/dev/null \
+        || [ "$(docker inspect -f '{{.State.Running}}' "${HELPER}" 2>/dev/null || echo false)" != "true" ]; then
+    fail "the write lock expired before the backup finished (GARAGE16_BACKUP_LOCK_MAX_S=${LOCK_MAX_S}) — discarded"
+fi
+docker exec "${HELPER}" touch "${STATE}.release"
+docker wait "${HELPER}" >/dev/null 2>&1 || true
+log "Write lock released — uploads are accepted again."
 
-echo "[backup] Pruning backups older than ${RETENTION_DAYS} days..."
-find "${BACKUP_DIR}" -maxdepth 1 -type d -name 'garage16_*' -mtime "+${RETENTION_DAYS}" -exec rm -rf {} \;
+# --- 4. check both files before calling it a backup --------------------------------------------
+log "Checking the backup..."
+gzip -t "${WORK_DIR}/db.sql.gz" || fail "the database dump is not valid gzip"
+if [ "$(gzip -dc "${WORK_DIR}/db.sql.gz" | wc -c)" -lt 100 ]; then
+    fail "the database dump is empty — is the 'db' container running?"
+fi
+gzip -dc "${WORK_DIR}/db.sql.gz" | tail -n 5 | grep -q "PostgreSQL database dump complete" \
+    || fail "the database dump is incomplete (no completion line)"
+gzip -t "${WORK_DIR}/telemetry.tar.gz" || fail "the telemetry archive is not valid gzip"
+FILE_COUNT=$(tar tzf "${WORK_DIR}/telemetry.tar.gz" | grep -vc '/$' || true)
+[ -n "${SCHEMA_REVISION}" ] || fail "could not read the schema revision"
 
-echo "[backup] Remaining backups:"
+sha() { sha256sum "$1" | cut -d' ' -f1; }
+size() { wc -c < "$1" | tr -d ' '; }
+PROGRAM_VERSION=$(sed -n 's/^VERSION = "\(.*\)"/\1/p' server/main.py)
+
+cat > "${WORK_DIR}/manifest.json.tmp" <<EOF
+{
+  "format": 1,
+  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "program_version": "${PROGRAM_VERSION}",
+  "schema_revision": "${SCHEMA_REVISION}",
+  "consistent": true,
+  "lap_count": ${LAP_COUNT:-0},
+  "audit_head": ${AUDIT_HEAD},
+  "database": {"file": "db.sql.gz", "bytes": $(size "${WORK_DIR}/db.sql.gz"), "sha256": "$(sha "${WORK_DIR}/db.sql.gz")"},
+  "telemetry": {"file": "telemetry.tar.gz", "bytes": $(size "${WORK_DIR}/telemetry.tar.gz"), "sha256": "$(sha "${WORK_DIR}/telemetry.tar.gz")", "files": ${FILE_COUNT:-0}}
+}
+EOF
+mv "${WORK_DIR}/manifest.json.tmp" "${WORK_DIR}/manifest.json"
+
+# --- 5. publish: one rename — the folder is complete or not there --------------------------------
+mv "${WORK_DIR}" "${FINAL_DIR}"
+log "Done: ${FINAL_DIR}  (schema ${SCHEMA_REVISION}, ${LAP_COUNT} laps, ${FILE_COUNT} files)"
+
+log "Pruning complete backups older than ${RETENTION_DAYS} days and leftovers of interrupted runs..."
+find "${BACKUP_DIR}" -maxdepth 1 -type d -name 'garage16_*' ! -name '*.partial' -mtime "+${RETENTION_DAYS}" \
+    -exec test -e '{}/manifest.json' ';' -exec rm -rf '{}' ';'
+find "${BACKUP_DIR}" -maxdepth 1 -type d -name 'garage16_*.partial' -mtime +1 -exec rm -rf '{}' ';'
+
+log "Remaining backups:"
 ls -la "${BACKUP_DIR}"

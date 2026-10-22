@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from server import car_identity as ci
-from tests.helpers.v093 import clean_lap, headers, lap_row, register, upload_df
+from tests.helpers.v093 import clean_lap, lap_row, register, upload_df
 
 ROOT = Path(__file__).resolve().parent.parent
 

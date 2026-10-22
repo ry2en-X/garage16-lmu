@@ -6,7 +6,7 @@ ownership guard). One implementation, not two copies that could drift.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List
 
 from sqlalchemy.orm import Session
 

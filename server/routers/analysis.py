@@ -32,7 +32,7 @@ import numpy as np
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from ..analysis_cache import ANALYSIS_CACHE_VERSION, AnalysisCache, analysis_cache
 from ..analysis_reference import LapContext, quick_pair, resolve_reference
@@ -43,7 +43,6 @@ from ..catalog import (
     venue_for,
     venue_matches_query,
 )
-from ..config import settings
 from ..database import get_db
 from ..models import Driver, Lap
 from ..rate_limit import rate_limit
@@ -83,6 +82,9 @@ from ..telemetry_analysis import (
     track_xy,
 )
 from ..versioning import data_level_for_client_version
+from .. import integrity
+from ..request_context import current_request_id
+from ..official import is_visible, official_filter, visible_filter
 from ..telemetry_channels import (
     CATALOG,
     DEFAULT_CHANNELS,
@@ -122,26 +124,44 @@ def _lap_for_viewer(db: Session, lap_id: int, viewer: Driver) -> Lap:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Lap {lap_id} not found.")
     if lap.driver_id == viewer.id:
         return lap
-    if not lap.is_valid:
-        # Same answer as a missing lap: no hint that an invalidated lap exists.
+    if not is_visible(lap):
+        # Same answer as a missing lap: no hint that an invalidated (V0.9.9: or quarantined) lap exists.
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Lap {lap_id} not found.")
     return lap
 
 
+INTEGRITY_MESSAGE = ("INTEGRITY_FAILED: the telemetry file of this lap no longer matches what was uploaded. "
+                     "The lap was set aside for an admin to check.")
+
+
 def _telemetry_file(lap: Lap) -> Path:
     """The lap's parquet file, only if it really lives under the telemetry
-    storage directory (the DB value is never trusted as a free-form path)."""
-    root = settings.telemetry_storage_dir.resolve()
-    try:
-        path = Path(lap.telemetry_path).resolve()
-    except (OSError, RuntimeError, ValueError):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Telemetry file is not available.")
-    if root != path and root not in path.parents:
-        logger.error("Lap %s has a telemetry_path outside the storage directory", lap.id)
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Telemetry file is not available.")
-    if not path.is_file():
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "The telemetry of this lap is no longer stored.")
-    return path
+    storage directory (the DB value is never trusted as a free-form path).
+
+    V0.9.9: and only if it is still exactly the file that was uploaded (server/integrity.py:
+    size, sha256 — cached per unchanged file — and the server's MAC). A file that is missing,
+    changed or swapped puts the lap into quarantine (it leaves leaderboards and records) and the
+    request fails without revealing paths: 404 for a missing file (as before), 422 with the code
+    INTEGRITY_FAILED for a changed one (the status the analysis already uses for unusable files)."""
+    result = integrity.verify(lap, use_cache=True)
+    if result.ok:
+        path, _ = integrity.resolve_inside_storage(lap.telemetry_path)
+        return path
+    request_id = current_request_id()
+    lap_id = lap.id
+    if result.status == integrity.OUTSIDE:
+        logger.error("Lap %s has a telemetry_path outside the storage directory", lap_id)
+    if result.quarantine:
+        # end this read-only request's transaction first (SQLite: BEGIN IMMEDIATE holds the write
+        # lock), then quarantine in a session of its own
+        session = object_session(lap)
+        if session is not None:
+            session.rollback()
+        integrity.quarantine_by_id(lap_id, result, request_id=request_id)
+    if result.status in (integrity.MISSING, integrity.OUTSIDE):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "The telemetry of this lap is no longer stored."
+                            if result.status == integrity.MISSING else "Telemetry file is not available.")
+    raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, INTEGRITY_MESSAGE)
 
 
 def _parse_channels(channels: Optional[str]) -> List[str]:
@@ -249,7 +269,7 @@ def driver_laps(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Driver not found.")
     stmt = select(Lap).where(Lap.driver_id == driver_id)
     if driver_id != viewer.id:
-        stmt = stmt.where(Lap.is_valid.is_(True))
+        stmt = stmt.where(visible_filter())
     if track_name:
         stmt = stmt.where(Lap.track_name == track_name)
     if car_model:
@@ -292,6 +312,34 @@ def lap_info(
         "available_channels": available,
         "recording": _recording(logical_columns(path), lap),
     }
+
+
+@router.get("/laps/{lap_id}/health")
+def lap_health(
+    lap_id: int,
+    request: Request,
+    viewer: Driver = Depends(get_current_driver),
+    db: Session = Depends(get_db),
+    _rl: None = Depends(rate_limit("analysis", per_driver=True)),
+) -> Response:
+    """V0.9.7 — how trustworthy this lap's recording is (server/telemetry_health.py): channels,
+    samples, gaps, time/distance only forward, distance-axis anchoring, speed vs lap distance,
+    duration vs lap time, implausible jumps, the resolution of a braking point — plus the lap's
+    validation verdict next to it. The file part is cached by the file's content hash."""
+    from ..telemetry_health import HEALTH_VERSION, report, safe_file_health
+
+    lap = _lap_for_viewer(db, lap_id, viewer)
+    path = _telemetry_file(lap)
+    key = AnalysisCache.make_key("health", HEALTH_VERSION, lap.telemetry_hash or str(lap.id), lap.lap_time)
+    cached = analysis_cache.get(key)
+    if cached is None:
+        part = safe_file_health(path, lap.lap_time)
+        analysis_cache.put(key, _compact_json(part))
+    else:
+        part = json.loads(cached)
+    body = _compact_json({"lap_id": lap.id, **report(part, lap)})
+    return Response(content=body, media_type="application/json",
+                    headers={"Cache-Control": PRIVATE_REVALIDATE, "Vary": VARY_AUTH})
 
 
 # ---------------------------------------------------------------------------
@@ -501,7 +549,6 @@ def _compute_comparison(
     for side, series, row in extras:
         laps[side] = series
         rows[side] = row
-    present = [side for side, series in laps.items() if series is not None]
 
     mirror, mirror_info = resolve_mirror(series_a, series_b)
     map_out: dict = {"mirrored": mirror, **mirror_info}
@@ -812,6 +859,72 @@ def racing_line(
     return Response(content=body, media_type="application/json", headers=headers)
 
 
+# V0.9.5: the track itself behind the lines (server/track_surface.py). Besides the laps on the
+# map, a few more recent valid laps of the same layout fill in the edges those laps never drove on.
+SURFACE_EXTRA_LAPS = 6
+
+
+@router.get("/track-surface")
+def track_surface(
+    request: Request,
+    lap_a: int = Query(ge=1),
+    lap_b: Optional[int] = Query(default=None, ge=1),
+    extra: Optional[str] = Query(default=None, max_length=40),
+    viewer: Driver = Depends(get_current_driver),
+    db: Session = Depends(get_db),
+    _rl: None = Depends(rate_limit("analysis", per_driver=True)),
+) -> Response:
+    """V0.9.5 — asphalt, both edges and the kerbs of the layout, in the map's coordinates.
+
+    Built from LMU's path_lateral / track_edge / surface type of the laps on the map plus up to
+    SURFACE_EXTRA_LAPS recent valid laps of the same layout (only geometry is returned — nothing
+    about those laps or their drivers). -> {"surface": {...} | null, "mirrored"}; null when the
+    laps were recorded without these fields (client < 0.9) or the data cannot be read reliably."""
+    from ..track_surface import SURFACE_COLUMNS_KEYS, build_surface
+
+    extra_ids = _parse_extra(extra, lap_a, lap_b)
+    lap_a_row, path_a, _ = _open_lap(db, lap_a, viewer)
+    rows = [(lap_a, lap_a_row, path_a)]
+    for lap_id in ([lap_b] if lap_b is not None else []) + extra_ids:
+        row, path, _n = _open_lap(db, lap_id, viewer)
+        if row.track_name != lap_a_row.track_name:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Lap {lap_id} is from a different track.")
+        rows.append((lap_id, row, path))
+    seen = {lap_id for lap_id, _r, _p in rows}
+    others = db.execute(
+        select(Lap).where(Lap.track_name == lap_a_row.track_name, visible_filter(), Lap.id.not_in(seen))
+        .order_by(Lap.id.desc()).limit(SURFACE_EXTRA_LAPS * 3)
+    ).scalars().all()
+    for row in others:
+        if len(rows) >= len(seen) + SURFACE_EXTRA_LAPS:
+            break
+        try:
+            rows.append((row.id, row, _telemetry_file(row)))
+        except HTTPException:
+            continue          # file gone: just one lap fewer
+    cache_key = AnalysisCache.make_key("surface", tuple(sorted(r.telemetry_hash or str(i) for i, r, _p in rows)), rows[0][1].telemetry_hash,
+                                       rows[1][1].telemetry_hash if lap_b is not None else None)
+    etag = AnalysisCache.etag_for(cache_key, "")
+    headers = {"ETag": etag, "Cache-Control": PRIVATE_REVALIDATE, "Vary": VARY_AUTH}
+    if _etag_matches(request, etag):
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+    body = analysis_cache.get(cache_key)
+    if body is None:
+        loaded: Dict[int, LapSeries] = {}
+        for lap_id, _row, path in rows:
+            try:
+                loaded[lap_id] = load_lap(path, list(SURFACE_COLUMNS_KEYS))
+            except AnalysisError:
+                if lap_id == lap_a:
+                    raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Lap {lap_id} cannot be analysed.")
+        # the same mirror decision as /compare and /line, so the surface lies under the lines
+        mirror, _info = resolve_mirror(loaded[lap_a], loaded.get(lap_b) if lap_b is not None else None)
+        surface = build_surface(list(loaded.values()), mirror)
+        body = _compact_json({"surface": surface, "mirrored": mirror})
+        analysis_cache.put(cache_key, body)
+    return Response(content=body, media_type="application/json", headers=headers)
+
+
 # ---------------------------------------------------------------------------
 # Circuit library
 # ---------------------------------------------------------------------------
@@ -829,7 +942,7 @@ def circuits(q: Optional[str] = Query(default=None, max_length=100), db: Session
             Lap.driver_id,
             func.row_number().over(partition_by=Lap.track_name, order_by=(Lap.lap_time.asc(), Lap.id.asc())).label("rn"),
         )
-        .where(Lap.is_valid.is_(True))
+        .where(official_filter())
         .subquery()
     )
     fastest_rows = db.execute(
@@ -844,12 +957,12 @@ def circuits(q: Optional[str] = Query(default=None, max_length=100), db: Session
         track: (laps, drivers)
         for track, laps, drivers in db.execute(
             select(Lap.track_name, func.count(Lap.id), func.count(func.distinct(Lap.driver_id)))
-            .where(Lap.is_valid.is_(True)).group_by(Lap.track_name)
+            .where(official_filter()).group_by(Lap.track_name)
         ).all()
     }
     classes: Dict[str, set] = {}
     for track, car_class in db.execute(
-        select(Lap.track_name, Lap.car_class).where(Lap.is_valid.is_(True), Lap.car_class.is_not(None)).distinct()
+        select(Lap.track_name, Lap.car_class).where(official_filter(), Lap.car_class.is_not(None)).distinct()
     ).all():
         classes.setdefault(track, set()).add(canonical_class(car_class))
 
@@ -924,7 +1037,7 @@ def circuit_outline(
     data (no stored track files to maintain; a layout nobody has driven has no
     outline). Includes the lap length and, when known, the sector boundaries."""
     candidates = db.execute(
-        select(Lap).where(Lap.is_valid.is_(True), Lap.track_name == track_name)
+        select(Lap).where(visible_filter(), Lap.track_name == track_name)
         .order_by(Lap.lap_time.asc(), Lap.id.asc()).limit(OUTLINE_CANDIDATES)
     ).scalars().all()
     if not candidates:
@@ -1077,7 +1190,7 @@ def _driver_laps_for(db: Session, driver_id: int, track_name: str, car_model: Op
     if car_model:
         stmt = stmt.where(Lap.car_model == car_model)
     if valid_only:
-        stmt = stmt.where(Lap.is_valid.is_(True))
+        stmt = stmt.where(visible_filter())
     return db.execute(stmt.order_by(Lap.id.asc()).limit(2000)).scalars().all()
 
 
@@ -1198,7 +1311,7 @@ def corner_history(
     lap = _lap_for_viewer(db, lap_id, viewer)
     stmt = (
         select(Lap).where(Lap.driver_id == lap.driver_id, Lap.track_name == lap.track_name,
-                          Lap.car_model == lap.car_model, Lap.is_valid.is_(True), Lap.id != lap.id,
+                          Lap.car_model == lap.car_model, visible_filter(), Lap.id != lap.id,
                           Lap.lap_stats.is_not(None))
         .where((Lap.recorded_at < lap.recorded_at) | ((Lap.recorded_at == lap.recorded_at) & (Lap.id < lap.id)))
         .order_by(Lap.recorded_at.desc(), Lap.id.desc()).limit(limit * 3)
@@ -1247,7 +1360,7 @@ def lap_sectors(
     stmt = select(Lap).where(Lap.driver_id == lap.driver_id, Lap.track_name == lap.track_name,
                              Lap.car_model == lap.car_model)
     if lap.driver_id != viewer.id:
-        stmt = stmt.where(Lap.is_valid.is_(True))
+        stmt = stmt.where(visible_filter())
     laps = db.execute(stmt.order_by(Lap.id.desc()).limit(1500)).scalars().all()
     by_id = {row.id: row for row in laps}
     sessions = group_sessions([

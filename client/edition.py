@@ -89,7 +89,7 @@ def webview2_runtime_version() -> Optional[str]:
                 value, _ = winreg.QueryValueEx(key, "pv")
         except OSError:
             continue
-        if isinstance(value, str) and value and value != "0.0.0.0":
+        if isinstance(value, str) and value and value != "0.0.0.0":  # nosec B104 — a version string ("not installed"), not an address
             return value
     return None
 

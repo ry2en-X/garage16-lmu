@@ -26,14 +26,17 @@ from __future__ import annotations
 
 import math
 import statistics
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from .distance_axis import distance_axis
 from .telemetry_channels import G, _to_celsius, _to_kpa
 
-INSIGHTS_VERSION = 3   # 2: track conditions per lap (wet share), V0.9.3.1; 3: corners, fuel per
-#                         sector, energy left, pit lane, traffic, engine map (V0.9.4)
+INSIGHTS_VERSION = 5   # 2: track conditions per lap (wet share), V0.9.3.1; 3: corners, fuel per
+#                         sector, energy left, pit lane, traffic, engine map (V0.9.4); 4: profile and
+#                         corners on the telemetry-rate distance axis, pedal points interpolated (V0.9.5)
+#                         5: V0.9.8 — the distance axis spreads a stretch with a long speed gap in time
 PROFILE_STEP_M = 50.0
 PROFILE_MAX_START_M = PROFILE_STEP_M / 2   # a lap must begin near the line to have a profile
 WHEELS = ("fl", "fr", "rl", "rr")
@@ -100,15 +103,26 @@ def monotonic(lap_dist: np.ndarray, t: np.ndarray) -> np.ndarray:
     return finite & advances & (running > -np.inf)
 
 
-def time_profile(t: np.ndarray, lap_dist: np.ndarray, lap_time: float, step: float = PROFILE_STEP_M) -> Optional[dict]:
+def axis(lap_dist: np.ndarray, t: np.ndarray, speed: Optional[np.ndarray] = None) -> Tuple[np.ndarray, np.ndarray]:
+    """(keep mask, distance of the kept rows) — V0.9.5: the analysis' telemetry-rate axis
+    (distance_axis.py) when the speed is known, else the plain strictly-increasing lap_dist."""
+    if speed is not None and len(speed) == len(t):
+        keep, dist, _ = distance_axis(lap_dist, t, speed)
+        return keep, dist
+    keep = monotonic(lap_dist, t)
+    return keep, np.maximum.accumulate(lap_dist[keep])
+
+
+def time_profile(t: np.ndarray, lap_dist: np.ndarray, lap_time: float, step: float = PROFILE_STEP_M,
+                 speed: Optional[np.ndarray] = None) -> Optional[dict]:
     """Lap time at every `step` metres: {"step", "start", "end", "cum": [t at step, 2*step, ...]}.
 
     None when the lap cannot be split reliably (starts too far from the line, too short,
     or its recorded duration does not fit its lap time)."""
-    keep = monotonic(lap_dist, t)
+    keep, dist = axis(lap_dist, t, speed)
     if keep.sum() < 10:
         return None
-    dist, tt = np.maximum.accumulate(lap_dist[keep]), t[keep]
+    tt = t[keep]
     start, end = float(dist[0]), float(dist[-1])
     if start > PROFILE_MAX_START_M or end - start < 4 * step or not (lap_time > 0):
         return None
@@ -324,9 +338,8 @@ def compute(columns: Dict[str, np.ndarray], *, lap_time: float, tail_samples: in
     if speed is not None:
         from .telemetry_analysis import lap_corners  # local: telemetry_analysis imports this module's neighbours
 
-        keep_c = monotonic(lap_dist, t)
+        keep_c, dist_c = axis(lap_dist, t, speed)
         if keep_c.sum() > 20:
-            dist_c = np.maximum.accumulate(lap_dist[keep_c])
             corners = lap_corners(
                 dist_c, t[keep_c], speed[keep_c] * 3.6,
                 brake[keep_c] * 100.0 if brake is not None else None,
@@ -335,7 +348,7 @@ def compute(columns: Dict[str, np.ndarray], *, lap_time: float, tail_samples: in
             if corners:
                 out["corners"] = corners
 
-    profile = time_profile(t, lap_dist, lap_time)
+    profile = time_profile(t, lap_dist, lap_time, speed=speed)
     if profile:
         out["profile"] = profile
     return {k: v for k, v in out.items() if v is not None}

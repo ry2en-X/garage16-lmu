@@ -1,0 +1,12 @@
+# V0.9.8 — the linter of the release gate (CI job "lint"): errors that are bugs, not style.
+#   E9   syntax errors, F   pyflakes (undefined names, unused imports/variables, redefinitions)
+# Production code must be clean. Tests may bind a value only for its side effect (`joined = …`)
+# and import pytest fixtures by name, which pyflakes reads as a redefinition.
+target-version = "py312"
+extend-exclude = ["tests/js/node_modules", "tests/.cache", "release"]
+
+[lint]
+select = ["E9", "F"]
+
+[lint.per-file-ignores]
+"tests/**" = ["F841", "F811"]

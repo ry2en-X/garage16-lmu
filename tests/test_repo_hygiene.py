@@ -47,7 +47,8 @@ def test_the_release_packager_excludes_the_same_build_output():
 def test_no_private_lan_addresses_or_real_tunnel_hostnames_in_shipped_files():
     """Things that identify one person's home network don't belong in a
     published repository. (example/placeholder hosts are fine.)"""
-    lan = re.compile(r"\b192\.168\.\d{1,3}\.\d{1,3}\b")
+    # a network in CIDR notation (192.168.0.0/16 — server/client_ip.py's private ranges) is no host
+    lan = re.compile(r"\b192\.168\.\d{1,3}\.\d{1,3}\b(?!/)")
     quick_tunnel = re.compile(r"[a-z0-9-]+\.trycloudflare\.com")
     offenders = []
     for path in _shipped_text_files():
@@ -70,7 +71,10 @@ def test_operational_docs_point_at_the_restore_script_and_the_correct_procedure(
     rollback = (ROOT / "docs" / "ROLLBACK.md").read_text(encoding="utf-8")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "scripts/restore.sh" in rollback and "scripts/restore.sh" in readme
-    assert "DROP DATABASE IF EXISTS garage16 WITH (FORCE)" in rollback   # the manual fallback drops first
+    # V0.9.8: no DROP any more — the restore stages, validates and switches by renaming; the manual
+    # way back renames the databases in ONE transaction
+    assert "DROP DATABASE" not in rollback
+    assert "ALTER DATABASE garage16_pre_restore_<stamp> RENAME TO garage16" in rollback and "--rollback" in rollback
     assert (ROOT / "scripts" / "restore.sh").exists() and (ROOT / "scripts" / "backup.sh").exists()
     # the old, wrong sequence: stop everything, THEN exec into the stopped db container
     assert "docker compose down\n\n   **Wiederherstellen" not in rollback

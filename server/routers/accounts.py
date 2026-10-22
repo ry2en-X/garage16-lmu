@@ -26,14 +26,16 @@ from typing import List, Optional
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request, Response, status
 from sqlalchemy.orm import Session
 
+from ..audit import for_driver as audit_for_driver
 from ..auth import get_current_driver
 from ..config import settings
+from ..write_lock import RETRY_AFTER_S, MaintenanceActive, writing
 from ..crypto import encrypt_secret
 from ..database import get_db
 from ..email_provider import get_email_provider
 from .. import discord_link
 from ..driver_lifecycle import delete_driver_rows
-from ..models import Driver, EmailVerificationToken, Lap, PasswordResetToken
+from ..models import Driver, EmailVerificationToken, Lap, PasswordResetToken, RecordEvent, Team, TeamMembership, UploadEvent
 from ..models import Session as SessionModel
 from ..rate_limit import rate_limit
 from ..sessions import (
@@ -791,7 +793,34 @@ def export_my_data(
             )
             for lap in laps
         ],
+        email=driver.email,
+        email_verified=bool(driver.email_verified),
+        teams=_export_teams(db, driver.id),
+        sessions=[{"created_at": _iso(s.created_at), "last_used_at": _iso(s.last_used_at), "expires_at": _iso(s.expires_at),
+                   "revoked_at": _iso(s.revoked_at), "user_agent": s.user_agent}
+                  for s in db.query(SessionModel).filter(SessionModel.driver_id == driver.id).order_by(SessionModel.id)],
+        records=[{"type": e.record_type, "lap_id": e.lap_id, "track_name": e.track_name, "car_name": e.car_name,
+                  "lap_time": e.lap_time, "created_at": _iso(e.created_at)}
+                 for e in db.query(RecordEvent).filter(RecordEvent.driver_id == driver.id).order_by(RecordEvent.id)],
+        upload_log=[{"at": _iso(u.created_at), "outcome": u.outcome, "status_code": u.status_code, "reason": u.reason,
+                     "lap_id": u.lap_id, "client_version": u.client_version, "request_id": u.request_id}
+                    for u in db.query(UploadEvent).filter(UploadEvent.driver_id == driver.id).order_by(UploadEvent.id)],
+        # V0.9.9: what the server stored of each received original, and the audit events about them
+        lap_files=[{"lap_id": lap.id, "sha256": lap.telemetry_hash, "bytes": lap.telemetry_bytes,
+                    "uploaded_at": _iso(lap.uploaded_at), "request_id": lap.upload_request_id,
+                    "review_status": lap.review_status} for lap in laps],
+        audit_events=audit_for_driver(db, driver.id),
     )
+
+
+def _iso(value):
+    return value.isoformat() if value else None
+
+
+def _export_teams(db: Session, driver_id: int) -> list:
+    rows = (db.query(TeamMembership, Team).join(Team, Team.id == TeamMembership.team_id)
+            .filter(TeamMembership.driver_id == driver_id).all())
+    return [{"team": t.name, "role": m.role, "joined_at": _iso(m.joined_at)} for m, t in rows]
 
 
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
@@ -826,13 +855,20 @@ def delete_my_account(
             f"delete the team before deleting your account: {', '.join(t.name for t in exc.teams)}",
         ) from exc
 
-    telemetry_paths = delete_driver_rows(db, driver)
+    # V0.9.8: rows and files go together under the shared write lock (server/write_lock.py) —
+    # a backup running right now must not catch the rows deleted but the files still there
+    try:
+        with writing():
+            telemetry_paths = delete_driver_rows(db, driver)
 
-    # Best-effort file cleanup — DB deletion above is the source of truth;
-    # a leftover file after a crash here is an orphan (P2 cleanup concern,
-    # not a correctness one), not a driver whose data wasn't deleted.
-    for path_str in telemetry_paths:
-        try:
-            Path(path_str).unlink(missing_ok=True)
-        except OSError:
-            pass
+            # Best-effort file cleanup — DB deletion above is the source of truth;
+            # a leftover file after a crash here is an orphan (P2 cleanup concern,
+            # not a correctness one), not a driver whose data wasn't deleted.
+            for path_str in telemetry_paths:
+                try:
+                    Path(path_str).unlink(missing_ok=True)
+                except OSError:
+                    pass
+    except MaintenanceActive:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, {"code": "MAINTENANCE", "message": "A backup is running — try again in a few minutes."},
+                            headers={"Retry-After": str(RETRY_AFTER_S)})

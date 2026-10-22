@@ -43,6 +43,7 @@ from .models import (
     Session as WebSession,
     TeamInvitation,
     TeamMembership,
+    UploadEvent,
 )
 
 # Every (table, column) with a foreign key to drivers.id. Keep in sync with
@@ -87,8 +88,16 @@ def delete_driver_rows(db: Session, driver: Driver) -> List[str]:
     db.query(PasswordResetToken).filter(PasswordResetToken.driver_id == driver_id).delete(synchronize_session=False)
     db.query(EmailVerificationToken).filter(EmailVerificationToken.driver_id == driver_id).delete(synchronize_session=False)
     db.query(LinkCode).filter(LinkCode.driver_id == driver_id).delete(synchronize_session=False)
+    # V0.9.7: the upload log of this driver (no FK — it is a log — but it is their data)
+    db.query(UploadEvent).filter(UploadEvent.driver_id == driver_id).delete(synchronize_session=False)
     # No FK here (registered_by is a plain string) but it's the driver's data.
     db.query(DiscordChannel).filter(DiscordChannel.registered_by == str(driver_id)).delete(synchronize_session=False)
+    # V0.9.9: the audit log keeps its events (they are the history of the laps), but no longer the
+    # driver's id — and records the deletion itself, with counts only (server/audit.py)
+    from . import audit
+
+    audit.clear_driver(db, driver_id)
     db.delete(driver)
+    audit.append(db, "driver.deleted", actor="system", detail={"laps": len(lap_ids)})
     db.commit()
     return telemetry_paths

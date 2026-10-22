@@ -16,6 +16,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -77,14 +78,62 @@ def test_file_without_a_distance_axis_is_rejected(tmp_path):
 def test_distance_axis_survives_jitter_and_standing_frames(tmp_path):
     df = make_lap(n=800, with_extended=False)
     d = df["lap_dist"].to_numpy().copy()
-    d[100:110] = d[100]              # car standing still
     d[300] -= 2.0                    # sensor jitter, below the validator's 5 m limit
     df["lap_dist"] = d
+    # the car stands still for 10 samples after row 100 (V0.9.5: really standing — the time runs
+    # on, lap_dist and the speed say it does not move)
+    stand = pd.concat([df.iloc[[100]]] * 10, ignore_index=True)
+    dt = float(df["t"].iloc[1] - df["t"].iloc[0])
+    stand["t"] = df["t"].iloc[100] + dt * np.arange(1, 11)
+    stand["speed"] = 0.0
+    later = df.iloc[101:].copy()
+    later["t"] = later["t"] + 10 * dt
+    df = pd.concat([df.iloc[:101], stand, later], ignore_index=True)
     path = tmp_path / "jitter.parquet"
     df.to_parquet(path, index=False)
     series = load_lap(path, ["speed"])
     assert np.all(np.diff(series.dist) > 0)
-    assert len(series.dist) < 800
+    # 810 rows: the standing rows add no distance and go (the first one still rolls in from the
+    # last moving sample), the jittered one stays — placed by speed
+    assert len(series.dist) <= 801
+    assert series.axis["anchors"] < series.axis["kept"], "the jittered sample is placed by speed, not dropped"
+
+
+def test_distance_axis_at_telemetry_rate_when_lap_dist_updates_slowly(tmp_path):
+    """V0.9.5: lap_dist is LMU's scoring value; if the game refreshes it only ~5 times a second
+    (rFactor 2 does), every sample in between used to be DROPPED. Now they are placed by the
+    integrated speed between two lap_dist updates — exact at every update, sub-metre between."""
+    df = make_lap(n=4500, lap_time=90.0, with_extended=False)
+    t = df["t"].to_numpy()
+    true = df["lap_dist"].to_numpy().copy()
+    step = np.floor(t / 0.2).astype(int)              # 5 Hz scoring
+    first = {}
+    for i, k in enumerate(step):
+        first.setdefault(k, i)
+    df["lap_dist"] = [true[first[k]] for k in step]
+    path = tmp_path / "slow_scoring.parquet"
+    df.to_parquet(path, index=False)
+    series = load_lap(path, ["speed"])
+    assert len(series.dist) == 4500, "no sample is thrown away"
+    assert series.axis["anchors"] == 451 and series.axis["filled"] == 4500 - 451
+    error = series.dist - true
+    assert np.max(np.abs(error)) < 0.25, f"max {np.max(np.abs(error)):.3f} m off the true distance"
+    grid = np.arange(20.0, true[-1] - 20.0, 0.5)
+    t_err = np.interp(grid, series.dist, series.raw["t"]) - np.interp(grid, true, t)
+    assert np.max(np.abs(t_err)) < 0.006, "time at a given metre (the delta) within a few ms"
+
+
+def test_repeated_polls_of_one_telemetry_frame_are_dropped(tmp_path):
+    """The client polls at 60 Hz; a frame the game had not advanced yet is recorded twice with the
+    same game time. Such a row adds nothing (it would only double-weight that moment)."""
+    df = make_lap(n=600, with_extended=False)
+    df = df.iloc[sorted(list(range(600)) + [200, 201, 202])].reset_index(drop=True)   # rows 200-202 twice
+    path = tmp_path / "dups.parquet"
+    df.to_parquet(path, index=False)
+    series = load_lap(path, ["speed"])
+    assert series.axis["duplicates"] == 3
+    assert len(series.dist) == 600
+    assert np.all(np.diff(series.raw["t"]) > 0)
 
 
 # ---------------------------------------------------------------------------
@@ -564,6 +613,13 @@ def test_old_client_laps_are_accepted_and_labelled_basic_everywhere(client):
     assert old["status"] == "ok" and old["duplicate"] is False          # the old wire format is still accepted
     assert _lap_row(old["lap_id"]).is_valid is True                      # ... and validated like before
     assert _lap_row(old["lap_id"]).client_version == "0.8.6"
+    # V0.9.9: but a lap without any track-limits signal cannot be checked — it is held until an
+    # admin clears it, then it counts like every other lap
+    assert _lap_row(old["lap_id"]).review_status == "held"
+    assert "OldClient" not in {row["driver_name"] for row in client.get("/leaderboard/class/Le%20Mans/Hypercar").json()}
+    cleared = client.post(f"/admin/laps/{old['lap_id']}/review", json={"decision": "clear"},
+                          headers={"X-Admin-Token": "test-admin-token"})
+    assert cleared.status_code == 200 and cleared.json()["records"] == ["PR", "WR"]
 
     mine = client.get("/telemetry/laps", headers=_headers(old_driver)).json()
     assert mine[0]["data_level"] == "basic"

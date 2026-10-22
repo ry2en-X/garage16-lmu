@@ -121,14 +121,51 @@ def test_corners_are_found_where_they_are_and_measured_from_the_raw_samples():
     assert [c["n"] for c in corners] == [1, 2]
     c1, c2 = corners
     assert abs(c1["apex"] - 960.0) <= 4 and abs(c2["apex"] - 2320.0) <= 4, (c1["apex"], c2["apex"])
-    # braking points: the first sample with ≥10 % brake, exact to the sample spacing
-    assert c1["a"]["brake"] == 800.0 and c1["b"]["brake"] == 820.0
+    # braking points: where the pedal crosses 10 %, exact to the sample spacing (V0.9.5: between
+    # the two samples around the crossing, interpolated — here a step from 0 to 80 % in one sample)
+    assert c1["a"]["brake"] == pytest.approx(800.0, abs=STEP_M) and c1["b"]["brake"] == pytest.approx(820.0, abs=STEP_M)
+    assert c1["b"]["brake"] - c1["a"]["brake"] == pytest.approx(20.0, abs=0.01)
     assert c1["a"]["min"] == pytest.approx(100.0, abs=0.1) and c1["b"]["min"] == pytest.approx(104.0, abs=0.1)
     assert c1["a"]["throttle"] == pytest.approx(1100.0, abs=STEP_M) and c2["a"]["throttle"] == pytest.approx(2400.0, abs=STEP_M)
     assert c1["a"]["entry"] == pytest.approx(260.0, abs=0.5)
     # corner 2 is identical in both laps: no time difference, same numbers
     assert c2["delta"] == pytest.approx(0.0, abs=0.001)
-    assert c2["a"]["brake"] == c2["b"]["brake"] == 2200.0
+    assert c2["a"]["brake"] == c2["b"]["brake"] == pytest.approx(2200.0, abs=STEP_M)
+
+
+def test_pedal_points_are_interpolated_between_samples():
+    """V0.9.5: a braking point / throttle point is where the pedal CROSSES the threshold, not the
+    next sample after it. With samples 2 m apart (≈ 50 Hz at 360 km/h) and a pedal that ramps in
+    over 10 m from 800 m, 10 % brake is reached at exactly 801 m — the old rule said 802."""
+    from server.telemetry_analysis import _corner_lap
+    d = np.arange(0.0, 2000.0, 2.0)
+    v = np.where(d < 800.0, 250.0, np.maximum(250.0 - (d - 800.0) * 0.8, 90.0))
+    v = np.where(d > 1000.0, np.minimum(90.0 + (d - 1000.0) * 0.5, 250.0), v)
+    brake = np.clip((d - 800.0) / 10.0, 0.0, 1.0) * 100.0
+    brake[d > 990.0] = 0.0
+    throttle = np.where(d > 1000.0, np.clip((d - 1001.0) / 20.0, 0.0, 1.0) * 100.0, 0.0)
+    throttle[d < 790.0] = 100.0
+    t = np.concatenate(([0.0], np.cumsum(np.diff(d) / ((v[1:] + v[:-1]) / 2 / 3.6))))
+    lap = {"dist": d, "t": t, "speed": v, "brake": brake, "throttle": throttle, "steering": None,
+           "long_g": None, "long_g_smooth": None, "brake_pressure": None}
+    m = _corner_lap(lap, 600.0, 600.0, 1600.0)
+    assert m["brake"] == pytest.approx(801.0, abs=0.06)
+    assert m["throttle_on"] == pytest.approx(1002.0, abs=0.06)     # 5 % of a 20 m ramp from 1001 m
+    assert m["throttle_50"] == pytest.approx(1011.0, abs=0.06)
+    assert m["throttle"] == pytest.approx(1020.0, abs=0.06)        # 95 %
+
+
+def test_peak_deceleration_ignores_a_single_frame_spike():
+    """V0.9.5: the peak deceleration is the highest 0.1 s average — a kerb strike or a bump that
+    shows up in ONE physics frame no longer sets it."""
+    from server.telemetry_analysis import _window_mean
+    t = np.arange(0.0, 3.0, 1 / 60)
+    decel = np.full_like(t, 2.0)
+    decel[90] = 6.0                 # one frame: a kerb
+    smooth = _window_mean(decel, t, 0.10)
+    assert float(np.max(decel)) == 6.0
+    assert float(np.max(smooth)) < 3.0, "one frame cannot be the peak"
+    assert float(np.median(smooth)) == pytest.approx(2.0), "a sustained deceleration is kept as it is"
 
 
 def test_corner_time_differences_are_the_true_ones_and_add_up_to_the_delta():
@@ -256,7 +293,7 @@ def test_the_response_uses_per_channel_precision(client):
     assert all(isinstance(x, int) for x in body["channels"]["rpm"]["a"] if x is not None)
     assert decimals(body["channels"]["lat_g"]["a"]) <= 3
     assert decimals(body["delta"]) <= 3 and decimals(body["time"]["a"]) <= 3
-    assert body["analysis_version"] == ANALYSIS_CACHE_VERSION == 5  # V0.9.4: corner phases, line offset
+    assert body["analysis_version"] == ANALYSIS_CACHE_VERSION == 8  # V0.9.5: 6 (telemetry-rate axis); V0.9.7: 7 (point resolution); V0.9.8: 8 (speed gaps)
     assert isinstance(body["corners"], list)
     assert set(body["delta_facts"]) == {"window", "gain", "loss", "net"}
 

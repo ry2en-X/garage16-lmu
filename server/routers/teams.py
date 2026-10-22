@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import List, Sequence
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import ColumnElement, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from ..auth import get_current_driver
@@ -15,8 +15,8 @@ from ..leaderboard_ranking import ranked_leaderboard
 from ..models import Driver, Lap, RecordEvent, Team, TeamInvitation, TeamMembership
 from ..rate_limit import rate_limit
 from ..team_lifecycle import delete_team_cascade
+from ..official import official_filter
 from ..schemas import (
-    DriverLookupOut,
     LinkCodeResponse,
     TeamActivityItem,
     TeamCreateRequest,
@@ -188,7 +188,7 @@ def team_detail(team_id: int, driver: Driver = Depends(get_current_driver), db: 
     ).scalar_one()
     distinct_track_car = (
         select(Lap.track_name, Lap.car_model)
-        .where(Lap.driver_id.in_(driver_ids), Lap.is_valid.is_(True), Lap.car_model.is_not(None))
+        .where(Lap.driver_id.in_(driver_ids), official_filter(), Lap.car_model.is_not(None))
         .distinct()
         .subquery()
     )
@@ -231,7 +231,7 @@ def team_stats(
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     window_start = now - timedelta(days=_WINDOW_DAYS[window]) if window in _WINDOW_DAYS else None
 
-    lap_filter = [Lap.driver_id.in_(driver_ids), Lap.is_valid.is_(True)]
+    lap_filter = [Lap.driver_id.in_(driver_ids), official_filter()]
     pr_filter = [RecordEvent.driver_id.in_(driver_ids), RecordEvent.record_type == "PR"]
     team_best_filter = [RecordEvent.team_id == team_id, RecordEvent.record_type == "TEAM_BEST"]
     if window_start is not None:
@@ -443,7 +443,7 @@ def create_invitation(
     driver: Driver = Depends(get_current_driver), db: Session = Depends(get_db),
     _rl: None = Depends(rate_limit("team_invite", per_driver=True)),
 ) -> TeamInvitationOut:
-    team = _get_team_or_404(db, team_id)
+    _get_team_or_404(db, team_id)          # 404 for a team that does not exist
     membership = _get_membership(db, team_id, driver.id)
     _require_role(membership, "owner", "admin")
 
@@ -698,7 +698,7 @@ def team_records(team_id: int, driver: Driver = Depends(get_current_driver), db:
             .over(partition_by=[Lap.track_name, Lap.car_model], order_by=Lap.lap_time.asc())
             .label("rank"),
         )
-        .where(Lap.driver_id.in_(driver_ids), Lap.is_valid.is_(True), Lap.car_model.is_not(None))
+        .where(Lap.driver_id.in_(driver_ids), official_filter(), Lap.car_model.is_not(None))
         .subquery()
     )
     stmt = (
@@ -719,7 +719,7 @@ def team_records(team_id: int, driver: Driver = Depends(get_current_driver), db:
         (t, m): lt
         for t, m, lt in db.execute(
             select(Lap.track_name, Lap.car_model, func.min(Lap.lap_time)).where(
-                Lap.driver_id == driver.id, Lap.is_valid.is_(True), Lap.car_model.is_not(None)
+                Lap.driver_id == driver.id, official_filter(), Lap.car_model.is_not(None)
             ).group_by(Lap.track_name, Lap.car_model)
         ).all()
     }
@@ -748,8 +748,9 @@ def team_activity(team_id: int, limit: int = 30, driver: Driver = Depends(get_cu
     driver_ids = _team_driver_ids(db, team_id)
 
     stmt = (
-        select(RecordEvent, Driver.display_name)
+        select(RecordEvent, Driver.display_name, Lap.car_model)
         .join(Driver, Driver.id == RecordEvent.driver_id)
+        .outerjoin(Lap, Lap.id == RecordEvent.lap_id)
         .where(RecordEvent.driver_id.in_(driver_ids))
         .order_by(RecordEvent.created_at.desc())
         .limit(min(limit, 100))
@@ -759,6 +760,7 @@ def team_activity(team_id: int, limit: int = 30, driver: Driver = Depends(get_cu
         TeamActivityItem(
             record_type=ev.record_type, driver_name=name, track_name=ev.track_name, car_name=ev.car_name,
             lap_time=ev.lap_time, previous_best=ev.previous_best, created_at=ev.created_at.isoformat(),
+            lap_id=ev.lap_id, car_model=car_model,
         )
-        for ev, name in rows
+        for ev, name, car_model in rows
     ]

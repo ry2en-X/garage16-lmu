@@ -26,7 +26,10 @@ import { openCompareDialog, referenceMessage } from "./analysis_compare.js";
 import { createEditorPanel } from "../analysis/editor.js";
 import { renderGrid } from "../analysis/grid.js";
 import { chooseMaxPoints } from "../analysis/insights.js";
-import { createLayoutStore, requiredChannels, setTrackmapMode } from "../analysis/layout.js";
+import { addWidget, createLayoutStore, requiredChannels, setTrackmapMode } from "../analysis/layout.js";
+import { moduleForType } from "../analysis/modules.js";
+import { buildTileCatalog } from "../analysis/tile_catalog.js";
+import { createTilePicker } from "../analysis/tile_picker.js";
 import { createEventsStore } from "../analysis/events.js";
 import { applyColors, basicDataNotice, createViewState, distanceAt, EXTRA_SIDES, indexForDistance, lapColor, lapName } from "../analysis/model.js";
 import { createLazy, createSelection } from "../analysis/corner_detail.js";
@@ -103,10 +106,10 @@ export async function renderAnalysis(container) {
     return;
   }
   container.appendChild(el("h1", {}, t("LapTime Analyzer")));
-  container.appendChild(el("p", { class: "subtitle" }, t("Compare two laps channel by channel — against anyone's valid lap, e.g. the leaderboard's number one.")));
-
   const { a, b } = parseAnalysisQuery();
   const extras = parseAnalysisExtras();
+  // V0.9.6: the introduction only while choosing laps — with laps open, the space is theirs
+  if (!a || !b) container.appendChild(el("p", { class: "subtitle" }, t("Compare two laps channel by channel — against anyone's valid lap, e.g. the leaderboard's number one.")));
 
   // --- "You vs ...": the server pairs my lap with the right reference
   if (!a && !b && extras.quick) {
@@ -276,6 +279,9 @@ function renderResult(container, baseData, catalog, ids, env) {
   const selection = createSelection();
   const history = createLazy(() => api.analysisCornerHistory(ids.a));
   const lapSectors = createLazy(() => api.analysisLapSectors(ids.a));
+  // V0.9.7: the data-quality report of each lap, loaded when a tile asks for it
+  const health = { a: createLazy(() => api.analysisLapHealth(ids.a)), b: ids.b ? createLazy(() => api.analysisLapHealth(ids.b)) : null };
+  const trackSurface = createLazy(() => api.analysisTrackSurface({ lapA: ids.a, lapB: ids.b || undefined, extra: ids.extra || [] }));
   // V0.9.3: track-limits findings + lock-ups/wheelspin of both laps, loaded once (small)
   const events = createEventsStore(() => api.analysisEvents({ lapA: ids.a, lapB: ids.b || undefined }));
   container._analysis = { state, layoutStore, events }; // read by tests/js/*.test.mjs
@@ -340,17 +346,20 @@ function renderResult(container, baseData, catalog, ids, env) {
     });
     pickerSlot.scrollIntoView && pickerSlot.scrollIntoView({ behavior: "smooth", block: "nearest" });
   };
-  const customizeButton = el("button", { type: "button", class: "btn btn--ghost analysis-customize", "aria-pressed": "false", onclick: () => setEditing(!editing) }, T.customize);
-  container.appendChild(el("div", { class: "inline-form section analysis-toolbar" }, [
-    el("button", { type: "button", class: "btn analysis-compare-open", onclick: () => openCompareDialog({
+  const customizeButton = el("button", { type: "button", class: "btn btn--ghost btn--sm analysis-customize", "aria-pressed": "false", onclick: () => setEditing(!editing) }, T.customize);
+  // V0.9.6: one compact row — the main action, the lap actions as a group, the view on the right
+  container.appendChild(el("div", { class: "analysis-toolbar" }, [
+    el("button", { type: "button", class: "btn btn--sm analysis-compare-open", onclick: () => openCompareDialog({
       lapA: baseData.laps.a,
       onCompare: (lapB, note) => go(ids.a, lapB, note ? { note } : {}),
     }) }, T.compareButton),
-    el("button", { class: "btn btn--ghost", onclick: () => showPicker("a") }, t("Change Lap 1")),
-    el("button", { class: "btn btn--ghost", onclick: () => showPicker("b") }, hasB ? t("Change Lap 2") : t("Compare with…")),
-    hasB ? el("button", { class: "btn btn--ghost", onclick: () => go(ids.b, ids.a, keep()) }, t("Swap laps")) : null,
-    hasB ? el("button", { class: "btn btn--ghost", onclick: () => go(ids.a, null) }, t("Remove Lap 2")) : null,
-    hasB && extraIds.length < 2 ? el("button", { class: "btn btn--ghost analysis-add-lap", onclick: () => showPicker("extra") }, t("+ Lap 3/4 over it")) : null,
+    el("div", { class: "btn-group", role: "group", "aria-label": t("Laps") }, [
+      el("button", { class: "btn btn--ghost btn--sm", onclick: () => showPicker("a") }, t("Change Lap 1")),
+      el("button", { class: "btn btn--ghost btn--sm", onclick: () => showPicker("b") }, hasB ? t("Change Lap 2") : t("Compare with…")),
+      hasB ? el("button", { class: "btn btn--ghost btn--sm", title: t("Swap laps"), onclick: () => go(ids.b, ids.a, keep()) }, `⇄ ${t("Swap laps")}`) : null,
+      hasB ? el("button", { class: "btn btn--ghost btn--sm", title: t("Remove Lap 2"), onclick: () => go(ids.a, null) }, t("Remove Lap 2")) : null,
+      hasB && extraIds.length < 2 ? el("button", { class: "btn btn--ghost btn--sm analysis-add-lap", onclick: () => showPicker("extra") }, t("+ Lap 3/4 over it")) : null,
+    ]),
     customizeButton,
   ]));
   // V0.9.4: the extra laps, each with its colour, line style and a way to remove it
@@ -395,11 +404,16 @@ function renderResult(container, baseData, catalog, ids, env) {
     renderNotices();
   }
 
-  // --- windows
+  // --- tiles
   const gridSlot = el("div", { class: "analysis-grid-slot" });
+  const tileSlot = el("div", { class: "analysis-picker-slot" });
+  const workspace = el("div", { class: "analysis-workspace" }, [tileSlot, gridSlot]);
   const editorSlot = el("div");
   let editing = false;
   let grid = null;
+  let picker = null;
+  const tiles = buildTileCatalog(catalog);
+  const validChannels = new Set(catalog.channels.map((c) => c.key));
 
   const windowContext = () => {
     const scoped = scopedState();
@@ -417,6 +431,9 @@ function renderResult(container, baseData, catalog, ids, env) {
       history,
       lapSectors,
       fetchLine: (opts) => api.analysisLine({ lapA: ids.a, lapB: ids.b || undefined, extra: extraIds, ...opts }),
+      // V0.9.5: the track behind the lines — loaded once per page, shared by every rebuild
+      trackSurface,
+      health,
       fetchDistribution: (opts) => api.analysisDistribution({ lapA: ids.a, lapB: ids.b || undefined, ...opts }),
       onTrackmapMode: (mode) => {
         const map = layoutStore.get().widgets.find((w) => w.type === "trackmap");
@@ -435,16 +452,43 @@ function renderResult(container, baseData, catalog, ids, env) {
     };
   };
 
+  // V0.9.5: the picker's preview is the real tile with the open laps (a chart's channel is
+  // loaded first — the same request placing it would make anyway)
+  async function renderPreview(widget) {
+    if (widget.type === "chart" && widget.channel && !baseData.channels[widget.channel]) await ensureChannels([widget.channel]);
+    const module = moduleForType(widget.type);
+    if (!module) throw new Error("unknown tile");
+    return module.renderer(widget, windowContext());
+  }
+
   function rebuild() {
     if (grid) grid.destroy();
     releaseSubscriptions();
-    grid = renderGrid(gridSlot, layoutStore.get(), windowContext(), { catalog, editing, onLayoutChange: applyLayout });
+    workspace.classList.toggle("analysis-workspace--editing", editing);
+    grid = renderGrid(gridSlot, layoutStore.get(), windowContext(), {
+      catalog, editing, onLayoutChange: applyLayout,
+      onDraw: (box) => picker && picker.chooseFor(box),
+    });
     editorSlot.innerHTML = "";
     if (editing) {
       editorSlot.appendChild(createEditorPanel({
         layout: layoutStore.get(), catalog, persisted: layoutStore.isPersisted(),
         onChange: applyLayout, onReset: resetLayout, onDone: () => setEditing(false),
       }).element);
+      if (!picker) {
+        picker = createTilePicker({
+          tiles, validChannels, renderPreview,
+          getLayout: () => layoutStore.get(),
+          getGrid: () => grid,
+          onAdd: (spec) => applyLayout(addWidget(layoutStore.get(), spec, validChannels)),
+        });
+        tileSlot.appendChild(picker.element);
+      } else {
+        picker.update();
+      }
+    } else if (picker) {
+      picker.destroy();
+      picker = null;
     }
     customizeButton.setAttribute("aria-pressed", editing ? "true" : "false");
     customizeButton.textContent = editing ? T.customizeDone : T.customize;
@@ -484,7 +528,7 @@ function renderResult(container, baseData, catalog, ids, env) {
 
   container.appendChild(statusSlot);
   container.appendChild(editorSlot);
-  container.appendChild(gridSlot);
+  container.appendChild(workspace);
   container.appendChild(el("p", { class: "subtitle" },
     t("Hover a chart to read exact values · click to pin the position (click again to release) · mouse wheel zooms · drag pans · double-click resets · ← → step along the lap. Touch: drag sideways to scrub, tap to place the cursor, hold to pin, pinch to zoom, double-tap resets.")));
   loadThenRebuild();

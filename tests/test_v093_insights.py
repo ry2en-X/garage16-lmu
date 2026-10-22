@@ -8,13 +8,12 @@ locked on purpose in the data is found where it was put."""
 from __future__ import annotations
 
 import numpy as np
-import pandas as pd
 import pytest
 
 from server import lap_insights as li
 from server.telemetry_analysis import distribution, histogram_edges, load_lap, wheel_events, channel_values
 from tests.helpers.synthetic_lap import make_lap
-from tests.helpers.v093 import clean_lap, headers, lap_row, register, upload_df
+from tests.helpers.v093 import clean_lap, headers, register, upload_df
 
 
 def _cols(df):

@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from ..auth import get_current_driver
 from ..database import get_db
 from ..models import Driver, Lap, RecordEvent, TeamMembership
+from ..official import official_filter
 from ..schemas import (
     DriverActivityItem,
     DriverLookupOut,
@@ -66,16 +67,16 @@ def driver_public_profile(driver_id: int, db: Session = Depends(get_db)) -> Driv
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Driver not found.")
 
     total_laps = db.execute(
-        select(func.count()).select_from(Lap).where(Lap.driver_id == driver_id, Lap.is_valid.is_(True))
+        select(func.count()).select_from(Lap).where(Lap.driver_id == driver_id, official_filter())
     ).scalar_one()
     tracks_driven = db.execute(
         select(func.count(func.distinct(Lap.track_name))).where(
-            Lap.driver_id == driver_id, Lap.is_valid.is_(True)
+            Lap.driver_id == driver_id, official_filter()
         )
     ).scalar_one()
     cars_driven = db.execute(
         select(func.count(func.distinct(Lap.car_model))).where(
-            Lap.driver_id == driver_id, Lap.is_valid.is_(True), Lap.car_model.is_not(None)
+            Lap.driver_id == driver_id, official_filter(), Lap.car_model.is_not(None)
         )
     ).scalar_one()
 
@@ -91,7 +92,7 @@ def driver_public_profile(driver_id: int, db: Session = Depends(get_db)) -> Driv
             .over(partition_by=(Lap.track_name, Lap.car_model), order_by=(Lap.lap_time.asc(), Lap.id.asc()))
             .label("rank"),
         )
-        .where(Lap.driver_id == driver_id, Lap.is_valid.is_(True), Lap.car_model.is_not(None))
+        .where(Lap.driver_id == driver_id, official_filter(), Lap.car_model.is_not(None))
         .subquery()
     )
     pr_rows = db.execute(
@@ -107,17 +108,19 @@ def driver_public_profile(driver_id: int, db: Session = Depends(get_db)) -> Driv
     ]
 
     activity_rows = db.execute(
-        select(RecordEvent)
+        select(RecordEvent, Lap.car_model)
+        .outerjoin(Lap, Lap.id == RecordEvent.lap_id)
         .where(RecordEvent.driver_id == driver_id)
         .order_by(RecordEvent.created_at.desc())
         .limit(30)
-    ).scalars().all()
+    ).all()
     recent_activity = [
         DriverActivityItem(
             record_type=ev.record_type, track_name=ev.track_name, car_name=ev.car_name,
             lap_time=ev.lap_time, previous_best=ev.previous_best, created_at=ev.created_at.isoformat(),
+            lap_id=ev.lap_id, car_model=car_model,
         )
-        for ev in activity_rows
+        for ev, car_model in activity_rows
     ]
 
     memberships = (

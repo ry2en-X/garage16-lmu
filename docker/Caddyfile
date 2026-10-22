@@ -30,6 +30,19 @@
 # HTTPS (:443, plus an automatic :80 redirect) — so a request reaching
 # these handlers is HTTPS-aware either way.
 
+# V0.9.8 — whose X-Forwarded-For Caddy believes. Only the private ranges: in variant A the request
+# arrives from cloudflared on the Docker network (it carries Cloudflare's X-Forwarded-For, which ends
+# with the visitor's real address), in variant B straight from the internet — then Caddy discards
+# whatever X-Forwarded-For the visitor sent and writes the real peer address itself. Either way the
+# app (server/client_ip.py, LMU_GARAGE_TRUSTED_PROXIES=private) reads the chain from the right and
+# stops at the first address that is not one of ours: a made-up header can no longer change the
+# address the rate limits count.
+{
+    servers {
+        trusted_proxies static private_ranges
+    }
+}
+
 {$CADDY_SITE_ADDRESS:80} {
     # API routes go to the FastAPI server. Adjust the path prefixes here
     # if the frontend and API don't share the same domain in your setup
@@ -84,7 +97,7 @@
         max_size 55MB
     }
 
-    encode gzip
+    encode zstd gzip
 
     log {
         output file /data/access.log {

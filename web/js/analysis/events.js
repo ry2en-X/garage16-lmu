@@ -78,6 +78,8 @@ function statusBadge(verdict) {
   if (!verdict || !verdict.status) return el("span", { class: "tl-badge tl-badge--none" }, t("Not checked (lap from before V0.9.3)"));
   let text = STATUS_TEXT()[verdict.status] || verdict.status;
   if (verdict.review === "cleared") text = t("Reviewed: counts");
+  if (verdict.review === "held") text = t("Under review — not counted yet");
+  if (verdict.review === "quarantined") text = t("Set aside: integrity check failed");
   if (verdict.review === "invalidated") text = t("Reviewed: invalid");
   return el("span", { class: `tl-badge tl-badge--${verdict.status}`, "data-status": verdict.status }, text);
 }

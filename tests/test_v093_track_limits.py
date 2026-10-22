@@ -173,10 +173,11 @@ def test_the_clients_own_rejection_still_counts():
     assert codes(v, tl.INVALID) == ["client_invalid"]
 
 
-def test_a_lap_from_an_old_client_relies_on_the_client_and_says_so():
+def test_a_lap_from_an_old_client_is_not_valid_by_default_and_says_why():
     cols = {"t": np.linspace(0, 10, N), "lap_dist": np.linspace(0, 1000, N), "speed": np.full(N, 60.0)}
     v = tl.assess(cols, client_valid=True)
-    assert v.status == tl.STATUS_VALID and "not_verifiable" in codes(v, tl.INFO)
+    # V0.9.9: without any track-limits signal the lap cannot be checked — REVIEW, not VALID
+    assert v.status == tl.STATUS_REVIEW and "not_verifiable" in codes(v, tl.REVIEW)
     assert tl.assess(cols, client_valid=False).status == tl.STATUS_INVALID
 
 
@@ -254,12 +255,12 @@ def test_upload_with_four_wheels_off_goes_to_review(client):
         col[1000:1010] = 2.0
         df[f"surface_type_{w}"] = col
     lap = lap_row(upload_df(client, me, df)["lap_id"])
-    # V0.9.3.1: counts, and an admin looks at it
-    assert lap.is_valid is True and lap.review_status == "pending"
+    # V0.9.3.1: an admin looks at it; V0.9.9: until then it is held (stored, not official)
+    assert lap.is_valid is True and lap.review_status == "held"
     assert [f["code"] for f in lap.validation["findings"] if f["severity"] == "review"] == ["four_wheels_off"]
 
 
-def test_review_laps_count_until_an_admin_decides(client):
+def test_review_laps_are_held_until_an_admin_decides(client):
     me = register(client, "Edge")
     df = clean_lap(seed=5)
     lateral = np.zeros(len(df), dtype=np.float32)
@@ -267,8 +268,10 @@ def test_review_laps_count_until_an_admin_decides(client):
     df["path_lateral"] = lateral
     lap_id = upload_df(client, me, df)["lap_id"]
     lap = lap_row(lap_id)
-    assert lap.is_valid is True and lap.review_status == "pending"
+    assert lap.is_valid is True and lap.review_status == "held"
     assert lap.validation["status"] == "review"
+    # V0.9.9: a held lap is not on the leaderboard (of its own car model) until it is decided
+    assert client.get(f"/leaderboard/car/Le%20Mans/{lap.car_model}").json() == []
 
     admin = {"X-Admin-Token": "test-admin-token"}
     queue = client.get("/admin/review", headers=admin).json()
@@ -313,7 +316,10 @@ def test_an_old_clients_lap_keeps_working_and_says_it_could_not_be_verified(clie
     df = clean_lap(seed=8, with_extended=False)
     lap = lap_row(upload_df(client, me, df, client_version=None)["lap_id"])
     assert lap.is_valid is True
-    assert [f["code"] for f in lap.validation["findings"]] == ["not_verifiable"]
+    # V0.9.9: not checkable -> held for an admin; and since the upload claims client 0.9.4, the
+    # signals that version always records are reported missing as well
+    assert lap.review_status == "held"
+    assert sorted(f["code"] for f in lap.validation["findings"]) == ["not_verifiable", "signals_missing"]
 
 
 # ---------------------------------------------------------------- re-checking stored laps

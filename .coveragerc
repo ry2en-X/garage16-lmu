@@ -1,0 +1,10 @@
+# V0.9.8 — coverage of the server and the desktop client (CI job "coverage"; floors per critical
+# module in tests/coverage_floors.json, checked by scripts/coverage_check.py)
+[run]
+branch = True
+source = server, client, discord_bot
+data_file = release/.coverage
+concurrency = thread
+
+[report]
+skip_empty = True

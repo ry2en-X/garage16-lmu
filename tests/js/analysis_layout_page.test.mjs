@@ -34,7 +34,9 @@ const ctx = new Proxy({}, {
 });
 dom.window.HTMLCanvasElement.prototype.getContext = function getContext() { return ctx; };
 dom.window.HTMLElement.prototype.getBoundingClientRect = function rect() {
-  // windows are stacked 100px apart in layout order (for drag-and-drop hit tests); everything else is 600x120
+  // V0.9.5: the grid is 732 px wide at (0, 0): 12 columns of 50 px + 11 gaps of 12 px, so cell
+  // (x, y) starts at (62 x, 52 y) — rows are 40 px + 12 px gap. Windows: as before.
+  if (this.classList && this.classList.contains("awin-grid")) return { left: 0, top: 0, right: 732, bottom: 20000, width: 732, height: 20000 };
   if (this.classList && this.classList.contains("awin")) {
     const top = Number(this.getAttribute("data-index")) * 100;
     return { left: 0, right: 600, top, bottom: top + 90, width: 600, height: 90 };
@@ -219,10 +221,17 @@ assert.equal(bestRow.querySelector(".sector-row__badge--gain"), null);
 // ================================================================ corner analysis (V0.9.1 review)
 const cornerRows = [...app.querySelectorAll(".corners__table tbody tr")];
 assert.equal(cornerRows.length, 3, "two corners and a total");
-assert.deepEqual([...cornerRows[0].cells].map((c) => c.textContent), ["1", "620 m", "+0.412 s", "12 m earlier", "98.2 / 101.5", "151.0 / 155.4"]);
+assert.deepEqual([...cornerRows[0].cells].map((c) => c.textContent), ["1", "620 m", "+0.412 s", "100 %", "12 m earlier", "98.2 / 101.5", "151.0 / 155.4"]);  // V0.9.7: share of the loss
 assert.ok(cornerRows[0].classList.contains("corner-row--loss"), "the corner that lost the most is marked");
 assert.ok(cornerRows[1].classList.contains("corner-row--gain"), "the corner that gained the most is marked");
-assert.equal(cornerRows[1].cells[3].textContent, "same point");
+assert.equal(cornerRows[1].cells[4].textContent, "same point");
+// V0.9.7: biggest loss first — the same rows, ordered by the time lost
+const orderSelect = app.querySelector(".corners__order");
+orderSelect.value = "loss";
+orderSelect.dispatchEvent(new dom.window.Event("change"));
+assert.deepEqual([...app.querySelectorAll(".corners__table tbody tr")].map((r) => r.cells[0].textContent).slice(0, 2), ["1", "2"]);
+orderSelect.value = "lap";
+orderSelect.dispatchEvent(new dom.window.Event("change"));
 assert.deepEqual([cornerRows[2].cells[0].textContent, cornerRows[2].cells[1].textContent], ["Total", "+0.262 s"], "the corners add up");
 cornerRows[0].click();
 const cornerView = state.getView();
@@ -298,54 +307,193 @@ assert.equal(app.querySelectorAll(".awin__handle").length, 13, "every window get
 assert.equal(text(customize), "Done");
 assert.equal(state.getCursor(), 30, "the shared state survives a rebuild");
 
-// --- reorder with the buttons
+// V0.9.5: the windows are tiles on a 12-column grid (x, y, w, h in cells) instead of a list.
 const idOf = (key) => [...app.querySelectorAll(".awin")].find((w) => (w.getAttribute("data-channel") || w.getAttribute("data-type")) === key).getAttribute("data-widget");
-calls.length = 0;
-app.querySelector(`[data-widget="${idOf("speed")}"] .awin__up`).click();
-assert.deepEqual(order(app).slice(0, 4), ["summary", "delta", "chart:speed", "corners"]);
-assert.deepEqual(stored().layout.map((w) => w.position), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], "positions stored");
-assert.equal(stored().layout[2].channel, "speed", "the new order is stored");
-assert.equal(compareCalls().length, 0, "reordering needs no data");
-app.querySelector(`[data-widget="${idOf("speed")}"] .awin__down`).click();
-assert.deepEqual(order(app).slice(0, 4), ["summary", "delta", "corners", "chart:speed"], "…and back");
-assert.equal(app.querySelector('[data-widget="w1"] .awin__up').disabled, true);
+const tileOf = (key) => app.querySelector(`.awin[data-channel="${key}"]`) || app.querySelector(`.awin[data-type="${key}"]`);
+const boxOf = (key) => ["x", "y", "w", "h"].map((k) => Number(tileOf(key).getAttribute(`data-${k}`)));
+const at = (x, y) => ({ clientX: 62 * x + 5, clientY: 52 * y + 5, button: 0 });   // a point inside cell (x, y)
+const storedBoxes = () => stored().layout.map((w) => [w.x, w.y, w.w, w.h]);
+const noOverlap = () => {
+  const boxes = storedBoxes();
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    const [ax, ay, aw, ah] = boxes[i];
+    const [bx, by, bw, bh] = boxes[j];
+    assert.ok(!(ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah), `tiles ${i} and ${j} overlap`);
+  }
+};
+assert.deepEqual(boxOf("speed"), [0, 22, 12, 4], "the standard layout: speed under the corners");
+assert.deepEqual([boxOf("trackmap"), boxOf("cursor_table")], [[0, 32, 6, 9], [6, 32, 6, 9]], "map and values side by side");
+assert.equal(app.querySelectorAll(".awin__resize").length, 13, "every tile gets a resize corner");
+assert.ok(app.querySelectorAll(".awin-cell").length >= 12 * 90, "the cells are shown, with free rows below the last tile");
+assert.ok(app.querySelector("[data-picker]"), "the tile picker is shown next to the grid");
 
-// --- reorder by dragging the handle (pointer events, as mouse / pen / touch all send them)
-// (the test's fake layout stacks windows 100 px apart in order: window k sits at y = 100*k)
+// --- keyboard on the handle: ↑ swaps with the tile above, ↓ back; Shift + arrows resize
+calls.length = 0;
 const handle = (id) => app.querySelector(`[data-widget="${id}"] .awin__handle`);
-let current = order(app);
+const key = (node, k, shiftKey = false) => node.dispatchEvent(new window.KeyboardEvent("keydown", { key: k, shiftKey, bubbles: true }));
+key(handle(idOf("speed")), "ArrowUp");
+assert.deepEqual(order(app).slice(0, 4), ["summary", "delta", "chart:speed", "corners"], "speed moved above the corners");
+assert.deepEqual([boxOf("speed")[1], boxOf("corners")[1]], [14, 18], "…they swapped rows");
+assert.deepEqual(Object.keys(stored().layout[2]).sort(), ["channel", "h", "type", "w", "x", "y"], "cells are stored, nothing else");
+assert.equal(stored().version, 2);
+assert.equal(compareCalls().length, 0, "moving needs no data");
+key(handle(idOf("speed")), "ArrowDown");
+assert.deepEqual(order(app).slice(0, 4), ["summary", "delta", "corners", "chart:speed"], "…and back");
+assert.deepEqual(boxOf("speed"), [0, 22, 12, 4]);
+key(handle(idOf("throttle")), "ArrowLeft", true);
+assert.deepEqual(boxOf("throttle").slice(2), [11, 3], "Shift+← makes it one column narrower");
+key(handle(idOf("throttle")), "ArrowRight", true);
+noOverlap();
+
+// --- moving by dragging the handle: a ghost shows the cells; free = green, in the way = amber
 let speedId = idOf("speed");
-handle(speedId).dispatchEvent(mouse("pointerdown", { clientX: 10, clientY: 310, button: 0 }));
-assert.ok(app.querySelector(".awin--dragging"), "the dragged window is marked");
-handle(speedId).dispatchEvent(mouse("pointermove", { clientX: 30, clientY: 510 }));   // y = 510 -> window index 5
-assert.equal(app.querySelectorAll(".awin--drop-target").length, 1, "the drop target is marked");
-handle(speedId).dispatchEvent(mouse("pointerup", { clientX: 30, clientY: 510 }));
-assert.deepEqual(order(app), ["summary", "delta", "corners", "chart:throttle", "chart:brake", "chart:speed", "trackmap", "cursor_table", "physics", "coaching", "events", "line", "corner_detail"], "dropped on the 6th window: speed moves there");
-assert.equal(stored().layout[5].channel, "speed");
+let ghost = () => app.querySelector(".awin-ghost");
+handle(speedId).dispatchEvent(mouse("pointerdown", at(0, 22)));
+assert.ok(app.querySelector(".awin--dragging"), "the dragged tile is marked");
+assert.equal(ghost().hidden, false, "a ghost shows where it goes");
+handle(speedId).dispatchEvent(mouse("pointermove", at(6, 90)));
+assert.equal(ghost().getAttribute("data-box"), "0,90,12,4", "a 12-wide tile cannot start at column 6: clamped");
+assert.ok(ghost().classList.contains("awin-ghost--free"), "empty cells: green");
+handle(speedId).dispatchEvent(mouse("pointermove", at(0, 0)));
+assert.ok(ghost().classList.contains("awin-ghost--push"), "over other tiles: amber (they will move down)");
+handle(speedId).dispatchEvent(mouse("pointermove", at(0, 90)));
+handle(speedId).dispatchEvent(mouse("pointerup", at(0, 90)));
+assert.deepEqual(boxOf("speed"), [0, 90, 12, 4], "dropped exactly there — the gap above stays");
+assert.equal(order(app).at(-1), "chart:speed", "reading order follows the grid");
+assert.deepEqual(stored().layout.at(-1), { type: "chart", x: 0, y: 90, w: 12, h: 4, channel: "speed" });
+noOverlap();
+// dropping onto tiles pushes them down, nothing overlaps
+speedId = idOf("speed");
+handle(speedId).dispatchEvent(mouse("pointerdown", at(0, 90)));
+handle(speedId).dispatchEvent(mouse("pointermove", at(0, 8)));
+handle(speedId).dispatchEvent(mouse("pointerup", at(0, 8)));
+assert.deepEqual(boxOf("speed"), [0, 8, 12, 4]);
+assert.equal(boxOf("summary")[1], 0, "the tile above stays");
+assert.equal(boxOf("delta")[1], 12, "the tile in the way moved down below it");
+noOverlap();
 // cancelling or dropping on itself changes nothing
 speedId = idOf("speed");
-current = order(app);
-handle(speedId).dispatchEvent(mouse("pointerdown", { clientX: 10, clientY: 510 }));
-handle(speedId).dispatchEvent(mouse("pointermove", { clientX: 10, clientY: 10 }));
+let current = JSON.stringify(storedBoxes());
+handle(speedId).dispatchEvent(mouse("pointerdown", at(0, 8)));
+handle(speedId).dispatchEvent(mouse("pointermove", at(0, 40)));
 handle(speedId).dispatchEvent(mouse("pointercancel"));
-assert.deepEqual(order(app), current, "a cancelled drag changes nothing");
-handle(speedId).dispatchEvent(mouse("pointerdown", { clientX: 10, clientY: 510 }));
-handle(speedId).dispatchEvent(mouse("pointerup", { clientX: 10, clientY: 510 }));
-assert.deepEqual(order(app), current, "dropping a window on itself changes nothing");
-// keyboard on the handle
-handle(speedId).dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
-assert.equal(order(app)[4], "chart:speed", "the handle also works from the keyboard");
+assert.equal(JSON.stringify(storedBoxes()), current, "a cancelled drag changes nothing");
+assert.equal(ghost().hidden, true, "…and the ghost is gone");
+handle(speedId).dispatchEvent(mouse("pointerdown", at(0, 8)));
+handle(speedId).dispatchEvent(mouse("pointerup", at(0, 8)));
+assert.equal(JSON.stringify(storedBoxes()), current, "dropping a tile on itself changes nothing");
 
-// --- sizes
-const sizeOf = (key) => app.querySelector(`[data-channel="${key}"]`).getAttribute("data-size");
-assert.equal(sizeOf("throttle"), "large");
-change(app.querySelector('[data-channel="throttle"] .awin__size'), "small");
-assert.equal(sizeOf("throttle"), "small");
-assert.ok(app.querySelector('[data-channel="throttle"]').classList.contains("awin--small"));
-assert.equal(stored().layout.find((w) => w.channel === "throttle").size, "small");
-change(app.querySelector('[data-channel="throttle"] .awin__size'), "medium");
-assert.equal(sizeOf("throttle"), "medium");
+// --- sizes: the corner, and the ready-made sizes
+const sizeOf = (key) => tileOf(key).getAttribute("data-size");
+const throttleBox = boxOf("throttle");
+const corner = () => tileOf("throttle").querySelector(".awin__resize");
+corner().dispatchEvent(mouse("pointerdown", at(11, throttleBox[1] + 2)));
+corner().dispatchEvent(mouse("pointermove", at(5, throttleBox[1] + 4)));
+assert.equal(ghost().getAttribute("data-box"), `0,${throttleBox[1]},6,5`);
+corner().dispatchEvent(mouse("pointerup", at(5, throttleBox[1] + 4)));
+assert.equal(sizeOf("throttle"), "6x5", "dragged to 6 x 5 cells");
+assert.ok(tileOf("throttle").classList.contains("awin--medium"));
+assert.deepEqual(stored().layout.find((w) => w.channel === "throttle").w, 6);
+corner().dispatchEvent(mouse("pointerdown", at(5, throttleBox[1] + 4)));
+corner().dispatchEvent(mouse("pointermove", at(0, throttleBox[1])));
+corner().dispatchEvent(mouse("pointerup", at(0, throttleBox[1])));
+assert.equal(sizeOf("throttle"), "3x3", "never smaller than the chart's minimum (3 x 3)");
+const sizeSelect = tileOf("throttle").querySelector(".awin__size");
+assert.ok([...sizeSelect.options].map((o) => o.value).includes("12x6"), "the ready-made sizes are offered");
+change(sizeSelect, "12x6");
+assert.equal(sizeOf("throttle"), "12x6");
+assert.ok(tileOf("throttle").classList.contains("awin--large"));
+noOverlap();
 assert.equal(compareCalls().length, 0);
+
+// --- the picker: Wofür → Art → Kachel, preview with sizes, then place
+calls.length = 0;
+const picker = app.querySelector("[data-picker]");
+const purposes = [...picker.querySelectorAll(".tpick__purpose")].map((d) => d.getAttribute("data-purpose"));
+assert.deepEqual(purposes.slice(0, 2), ["time", "inputs"], "first: what for");
+const forces = picker.querySelector('[data-purpose="forces"]');
+assert.ok(forces.querySelector('[data-kind="chart"] [data-tile="chart:lat_g"]'), "lateral G: forces → chart");
+assert.ok(forces.querySelector('[data-kind="diagram"] [data-tile="type:physics"]'), "the G-G view: forces → special diagram");
+assert.ok(picker.querySelector('[data-tile="type:summary"]').disabled, "a tile already on the grid cannot be added twice");
+forces.querySelector('[data-tile="chart:yaw_rate"]').click();
+await settle(60);
+let tdialog = document.querySelector('[data-tile-dialog="preview"]');
+assert.ok(tdialog, "clicking a tile opens its preview");
+assert.deepEqual(compareCalls().map((c) => c.searchParams.get("channels")), ["yaw_rate"], "the preview shows the real data (one request)");
+assert.ok(tdialog.querySelector(".tprev__stage [data-chart=yaw_rate]"), "…as the real chart");
+const sizeButtons = [...tdialog.querySelectorAll(".tsize__option")];
+assert.ok(sizeButtons.length >= 3, "ready-made sizes to choose from");
+tdialog.querySelector('.tsize__option[data-size="6x4"]').click();
+assert.equal(tdialog.querySelector(".tprev__stage").getAttribute("data-size"), "6x4", "the preview follows the size");
+tdialog.querySelector(".tprev__auto").click();
+await settle(40);
+assert.equal(document.querySelector("[data-tile-dialog]"), null, "the dialog closes");
+assert.equal(sizeOf("yaw_rate"), "6x4", "placed at the chosen size");
+noOverlap();
+// drag from the preview onto a free spot of the grid
+picker.querySelector('[data-tile="histogram:rpm"]').click();
+await settle(40);
+tdialog = document.querySelector('[data-tile-dialog="preview"]');
+const chip = tdialog.querySelector(".tprev__drag");
+chip.dispatchEvent(mouse("pointerdown", at(0, 0)));
+assert.ok(document.querySelector(".tprev-backdrop--dragging"), "the dialog steps aside while dragging");
+chip.dispatchEvent(mouse("pointermove", at(6, 100)));
+assert.equal(ghost().getAttribute("data-box"), "6,100,6,5", "the ghost has the tile's size");
+chip.dispatchEvent(mouse("pointerup", at(6, 100)));
+await settle(40);
+assert.deepEqual(boxOf("histogram"), [6, 100, 6, 5], "dropped where the ghost was");
+assert.equal(document.querySelector("[data-tile-dialog]"), null);
+// straight from the list by its grip, at the standard size
+const grip = app.querySelector('[data-picker] [data-grip="type:sectors"]');
+grip.dispatchEvent(mouse("pointerdown", at(0, 0)));
+grip.dispatchEvent(mouse("pointermove", at(0, 1)));
+grip.dispatchEvent(mouse("pointermove", at(0, 110)));
+grip.dispatchEvent(mouse("pointerup", at(0, 110)));
+await settle(40);
+assert.deepEqual(boxOf("sectors"), [0, 110, 12, 7], "dragged from the list");
+noOverlap();
+
+// --- draw a box on empty cells: only tiles that fit are offered
+calls.length = 0;
+const cell = (x, y) => app.querySelector(`.awin-cell[data-x="${x}"][data-y="${y}"]`);
+const lastRow = Math.max(...storedBoxes().map(([, y, , h]) => y + h));
+cell(0, lastRow + 1).dispatchEvent(mouse("pointerdown", at(0, lastRow + 1)));
+cell(0, lastRow + 1).dispatchEvent(mouse("pointermove", at(3, lastRow + 4)));
+assert.equal(ghost().getAttribute("data-box"), `0,${lastRow + 1},4,4`);
+cell(0, lastRow + 1).dispatchEvent(mouse("pointerup", at(3, lastRow + 4)));
+tdialog = document.querySelector('[data-tile-dialog="fit"]');
+assert.ok(tdialog, "letting go opens the chooser as an overlay");
+assert.ok(tdialog.querySelector('[data-tile="chart:gear"]'), "a chart fits into 4 x 4");
+assert.ok(tdialog.querySelector('[data-tile="histogram:speed"]'), "a histogram too");
+assert.equal(tdialog.querySelector('[data-tile="type:corners"]'), null, "the corner table does not (needs 6 x 4)");
+assert.equal(tdialog.querySelector('[data-tile="type:line"]'), null);
+tdialog.querySelector('[data-tile="histogram:speed"]').click();
+await settle(60);
+assert.ok(tdialog.querySelector(".tprev__stage[data-size='4x4']"), "the preview at exactly the drawn size");
+tdialog.querySelector(".tprev__place").click();
+await settle(60);
+const drawnTile = app.querySelector('.awin[data-type="histogram"][data-channel="speed"]');
+assert.deepEqual(["x", "y", "w", "h"].map((k) => Number(drawnTile.getAttribute(`data-${k}`))), [0, lastRow + 1, 4, 4], "the tile fills the drawn box");
+assert.equal(compareCalls().length, 0, "a histogram loads its own (small) distribution, not the lap data");
+drawnTile.querySelector(".awin__remove").click();
+// a box too small for anything
+cell(0, 0).dispatchEvent(mouse("pointerdown", at(0, lastRow + 1)));
+cell(0, 0).dispatchEvent(mouse("pointerup", at(1, lastRow + 1)));
+tdialog = document.querySelector('[data-tile-dialog="fit"]');
+assert.ok(text(tdialog).includes("No tile fits"), "a box too small says so");
+tdialog.querySelector(".tprev__close").click();
+assert.equal(document.querySelector("[data-tile-dialog]"), null);
+assert.equal(ghost().hidden, true, "closing removes the drawn box");
+// "close gaps" moves everything up
+app.querySelector(".editor__compact").click();
+assert.ok(Math.max(...storedBoxes().map(([, y, , h]) => y + h)) < lastRow, "the gaps are closed");
+noOverlap();
+// back to the standard layout for what follows
+app.querySelector(".editor__reset").click();
+await settle(60);
+app.querySelector(".analysis-customize").click();   // (the reset left edit mode on: toggle twice)
+app.querySelector(".analysis-customize").click();
+calls.length = 0;
 
 // --- a window's channel
 const brakeSelect = app.querySelector('[data-channel="brake"] .awin__channel');
@@ -669,7 +817,7 @@ const realSetItem = dom.window.Storage.prototype.setItem;
 dom.window.Storage.prototype.setItem = function setItem(k, v) { if (k === LAYOUT_KEY) throw new Error("quota"); return realSetItem.call(this, k, v); };
 app = await open();
 app.querySelector(".analysis-customize").click();
-app.querySelector('[data-widget="w3"] .awin__up').click();
+key(app.querySelector('[data-widget="w3"] .awin__handle'), "ArrowUp");
 assert.deepEqual(order(app).slice(0, 3), ["summary", "corners", "delta"], "the change applies for this session");
 assert.ok(app.querySelector(".editor__storage"), "…and the user is told it cannot be saved");
 dom.window.Storage.prototype.setItem = realSetItem;
@@ -678,12 +826,10 @@ localStorage.removeItem(LAYOUT_KEY);
 // ================================================================ responsive CSS (jsdom has no layout engine: assert the rules)
 const css = fs.readFileSync(new URL("../../web/css/styles.css", import.meta.url), "utf8");
 assert.match(css, /\.awin-grid\s*\{[^}]*grid-template-columns:\s*repeat\(12,\s*minmax\(0,\s*1fr\)\)/, "a 12-column grid whose tracks can shrink (no overflow)");
-assert.match(css, /\.awin--small\s*\{\s*grid-column:\s*span 4/);
-assert.match(css, /\.awin--medium\s*\{\s*grid-column:\s*span 6/);
-assert.match(css, /\.awin--large\s*\{\s*grid-column:\s*span 12/);
-assert.match(css, /@media \(max-width: 1280px\)[^}]*\.awin--small \{ grid-column: span 6/, "laptop: fewer columns");
-assert.match(css, /@media \(max-width: 900px\)\s*\{[^@]*\.awin--small \{ grid-column: span 6;[^@]*\.awin--medium \{ grid-column: span 12/, "tablet: small windows two per row, medium ones full width");
-assert.match(css, /@media \(max-width: 640px\)[^}]*\.awin--small,[^}]*\.awin--medium,[^}]*\.awin--large \{ grid-column: span 12/, "phone: one column");
+assert.match(css, /\.awin-grid\s*\{[^}]*grid-template-rows:\s*repeat\(var\(--rows\),\s*var\(--row\)\)/, "rows of a fixed height");
+assert.match(css, /@media \(max-width: 700px\)\s*\{[^@]*\.awin-grid \{ display: flex; flex-direction: column/, "phone: tiles stacked in reading order");
+assert.match(css, /\.awin__resize\s*\{[^}]*touch-action:\s*none/, "the resize corner owns touch gestures");
+assert.match(css, /\.awin-cell\s*\{[^}]*touch-action:\s*none/, "drawing on the cells owns touch gestures");
 assert.match(css, /\.awin\s*\{[^}]*min-width:\s*0/, "a window can shrink below its content");
 assert.match(css, /\.awin__body\s*\{[^}]*overflow-x:\s*auto/, "wide content scrolls inside its window, not the page");
 assert.match(css, /\.awin__handle\s*\{[^}]*touch-action:\s*none/, "the drag handle owns touch gestures");

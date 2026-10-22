@@ -18,15 +18,28 @@ export async function renderAccount(container) {
   container.appendChild(el("h1", {}, t("Account")));
   container.appendChild(el("p", { class: "subtitle" }, t("Manage your driver profile and Discord link.")));
 
-  const profileCard = el("div", { class: "card" }, [
+  // V0.9.6 — what you need often first (who you are, sign-in, Discord), the rarely needed parts
+  // folded at the bottom (desktop-client credentials, browser sessions, data export / deletion).
+  // Every card and every action is unchanged; only the order and the folding are new.
+  const signOutBtn = el("button", { class: "btn btn--ghost" }, t("Sign out"));
+  const profileCard = el("div", { class: "card account-profile" }, [
     el("div", { class: "card-row" }, [el("span", {}, t("Display name")), el("strong", {}, session.displayName)]),
     session.driverId ? el("div", { class: "card-row" }, [el("span", {}, t("Driver ID")), el("strong", {}, String(session.driverId))]) : null,
+    el("div", { class: "account-profile__actions" }, [
+      session.driverId ? el("a", { class: "btn btn--ghost", href: `#/driver/${session.driverId}` }, t("My public profile")) : null,
+      signOutBtn,
+    ]),
   ]);
   container.appendChild(profileCard);
+  const main = el("div");          // name, e-mail & password, Discord
+  container.appendChild(main);
+  const advanced = el("details", { class: "fold", id: "accountAdvanced" }, [el("summary", {}, t("Desktop client & sign-ins"))]);
+  const dataFold = el("details", { class: "fold", id: "accountData" }, [el("summary", {}, t("Data & Privacy"))]);
+  container.appendChild(advanced);
+  container.appendChild(dataFold);
 
   // --- discord link (V0.8.7: status, one-time link code, unlink) ---
   const discordCard = el("div", { class: "card" });
-  container.appendChild(discordCard);
   await renderDiscordCard(discordCard);
 
   // --- security: rotate / revoke credentials ---
@@ -106,7 +119,7 @@ export async function renderAccount(container) {
   securityCard.appendChild(rotateSecretBtn);
   securityCard.appendChild(revokeBtn);
   securityCard.appendChild(securityOut);
-  container.appendChild(securityCard);
+  advanced.appendChild(securityCard);
 
   // --- sessions (V0.7.2): this browser's own sign-in, separate from the
   // desktop client credentials above ---
@@ -176,7 +189,7 @@ export async function renderAccount(container) {
   sessionsCard.appendChild(sessionsBox);
   sessionsCard.appendChild(logoutAllBtn);
   sessionsCard.appendChild(sessionsOut);
-  container.appendChild(sessionsCard);
+  advanced.appendChild(sessionsCard);
   await loadSessions();
 
   // --- driver name (V0.8.9) ---
@@ -214,7 +227,7 @@ export async function renderAccount(container) {
   nameCard.appendChild(nameField);
   nameCard.appendChild(nameBtn);
   nameCard.appendChild(nameOut);
-  container.appendChild(nameCard);
+  main.appendChild(nameCard);
 
   // --- email & password (V0.6.9; verification status added V0.8-NAS §2) ---
   const pwCard = el("div", { class: "card" });
@@ -303,7 +316,8 @@ export async function renderAccount(container) {
   pwCard.appendChild(pwNewField);
   pwCard.appendChild(pwSaveBtn);
   pwCard.appendChild(pwOut);
-  container.appendChild(pwCard);
+  main.appendChild(pwCard);
+  main.appendChild(discordCard);
 
   // --- data & privacy (V0.6.9: the backend has had /accounts/me/export
   // and DELETE /accounts/me since before V0.6.8 — this card is the first
@@ -367,10 +381,9 @@ export async function renderAccount(container) {
   privacyCard.appendChild(el("div", { style: "height:16px;" }));
   privacyCard.appendChild(deleteBtn);
   privacyCard.appendChild(deleteOut);
-  container.appendChild(privacyCard);
+  dataFold.appendChild(privacyCard);
 
-  // --- sign out ---
-  const signOutBtn = el("button", { class: "btn btn--ghost", style: "margin-top:24px;" }, t("Sign out"));
+  // --- sign out (the button sits in the profile card at the top) ---
   signOutBtn.addEventListener("click", async () => {
     try {
       await api.logout(); // clears the server-side session + cookie, if any
@@ -380,7 +393,6 @@ export async function renderAccount(container) {
     store.signOut();
     window.location.hash = "#/leaderboard";
   });
-  container.appendChild(signOutBtn);
 }
 
 

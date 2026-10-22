@@ -6,7 +6,17 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 
 from .config import settings
 
-_connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+# V0.9.7: PostgreSQL sessions run in UTC. Every DateTime column is "timestamp without time zone"
+# holding UTC; the code writes aware UTC datetimes, which PostgreSQL converts to the SESSION time
+# zone before dropping the zone. A server configured for e.g. Europe/Berlin would store every
+# expiry two hours off (found by running the suite against a PostgreSQL in that zone: an expired
+# reset token was accepted). The official postgres image defaults to UTC — this makes it hold
+# no matter how the database server is configured.
+_connect_args = (
+    {"check_same_thread": False} if settings.database_url.startswith("sqlite")
+    else {"options": "-c timezone=UTC"} if settings.database_url.startswith("postgres")
+    else {}
+)
 _pool_kwargs = (
     {}
     if settings.database_url.startswith("sqlite")

@@ -101,3 +101,25 @@ def test_v094_stint_analyzer_statistics_and_dashboard():
 def test_v094_laptime_analyzer_lines_corners_coach_and_extra_laps():
     result = _run("v094_laptime.test.mjs")
     assert "V094-LAPTIME-OK" in result.stdout, result.stdout + result.stderr
+
+
+@needs_jsdom
+def test_v096_menu_fonts_dashboard_team_account_and_picker():
+    result = _run("v096_ux.test.mjs")
+    assert "V096-UX-OK" in result.stdout, result.stdout + result.stderr
+
+
+@needs_jsdom
+def test_v097_uncertainty_ranking_and_data_quality():
+    """V0.9.7: confidence intervals of degradation / fuel effect, consistency without the trend,
+    hints that respect the measuring accuracy, the corner ranking, the data-quality texts."""
+    result = _run("v097.test.mjs")
+    assert "V097-OK" in result.stdout, result.stdout + result.stderr
+
+
+@needs_jsdom
+def test_v099_decision_texts_and_the_integrity_tab():
+    """V0.9.9: texts of the decision layer's findings, held / quarantined in the verdict line, the
+    admin Integrity tab (quarantined laps, check again, release, audit log, chain check)."""
+    result = _run("v099.test.mjs")
+    assert "V099-OK" in result.stdout, result.stdout + result.stderr

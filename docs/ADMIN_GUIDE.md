@@ -107,13 +107,18 @@ Beide sichern PostgreSQL **und** Telemetrie-Dateien zusammen (beide
 müssen zueinander passen — ein Lap-Eintrag ohne zugehörige Datei ist ein
 Datenintegritätsproblem).
 
+Seit V0.9.8 ist jedes Backup ein Ordner `garage16_<Zeitstempel>/` (Dump, Telemetrie-Archiv,
+`manifest.json` mit SHA-256), aus **demselben Moment**: während des Backups werden neue Uploads
+kurz mit „Wartung“ abgewiesen (der Client wiederholt sie), laufende werden noch fertig. Der Ordner
+erscheint erst, wenn beide Dateien geprüft sind.
+
 **Restore ist ein Release-Gate — nicht nur Backups erstellen, sondern
 mindestens einmal echt wiederherstellen und prüfen:**
-1. Laufenden Stack stoppen: `docker compose down`
-2. Restore-Schritte aus `docs/ROLLBACK.md` befolgen
-3. Stack wieder starten: `docker compose up -d`
-4. Prüfen: Login funktioniert, Leaderboard zeigt die erwarteten Daten,
+1. `./scripts/restore.sh /pfad/zu/garage16_<Zeitstempel>` (Ablauf und Rückweg: `docs/ROLLBACK.md`) —
+   der Stack läuft dabei weiter; das Skript stoppt und startet server/bot selbst
+2. Prüfen: Login funktioniert, Leaderboard zeigt die erwarteten Daten,
    Teams sind vorhanden, eine Testrunde lässt sich hochladen
+3. `./scripts/restore.sh --cleanup <stamp>` gibt den Platz des Rückfallpunkts frei
 
 Ohne diesen echten Durchlauf ist ein Backup nur eine unbewiesene Annahme.
 
@@ -215,6 +220,362 @@ Domain zeigen — sie steckt im Link, den die E-Mail enthält.
   Rate-Limit-Obergrenze `LMU_GARAGE_RATELIMIT_ANALYSIS_MAX` (Standard seit V0.9.1:
   900 pro Stunde und Fahrer/IP, vorher 300) musst du für einen Freundeskreis nicht
   anfassen.
+
+**Neu in V0.9.9 — Tracklimits nachvollziehbar, Manipulationsschutz für gespeicherte Runden**
+
+- **Klare Entscheidung je Runde: GÜLTIG / UNGÜLTIG / PRÜFEN.** Eine Runde, die nicht ausreichend
+  geprüft werden kann (fehlende Signale, Lücken, unplausible Bewegung, Datei eines anderen Fahrers),
+  ist nicht mehr automatisch gültig: Sie wird gespeichert und ist analysierbar, **zählt aber erst
+  nach deiner Freigabe** (Admin → Track-Limit-Prüfung, „Runde zählt“). Erst dann gibt es PB/WR/
+  Team-Bestzeit und die Discord-Meldung. Runden, die schon vor dem Update „in Prüfung“ waren, zählen
+  weiter vorläufig — **keine bestehende Bestzeit ändert sich durch das Update.**
+- **Gespeicherte Runden-Dateien sind geschützt:** Größe, SHA-256 und eine Server-Signatur (MAC) je
+  Runde. Wird eine Datei nachträglich verändert, ausgetauscht oder gelöscht, wird die Runde beim
+  nächsten Zugriff **zurückgestellt** (Quarantäne: raus aus Bestenlisten). Admin → Integrität zeigt
+  sie; nach dem Zurückspielen der Datei „Freigeben, wenn intakt“.
+- **Audit-Protokoll** (Admin → Integrität): jede Annahme, Quarantäne, Freigabe und Admin-Entscheidung,
+  verkettet und gegen Änderung geschützt; der Kettenkopf steht in jedem Backup-Manifest.
+- **Eine Datenbank-Migration (0017)**, rein additiv. Client bleibt 0.9.4.
+- Neu: `scripts/integrity_check.py`, `scripts/trackcheck_eval.py`, `scripts/bench_compare.py`.
+  Ausführliche Anleitung mit allem, was nur auf dem NAS geht: `docs/V0_9_9_NAS_ANLEITUNG.md`.
+
+Update von V0.9.8:
+
+1. **Backup** (noch mit dem alten Ordner):
+   ```
+   ALT="/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_8/Garage16 - LMU"
+   cd "$ALT"
+   sudo ./scripts/backup.sh /volumeUSB2/usbshare/garage16-backups
+   ```
+2. **Neuen Ordner anlegen**, `Garage16_Lmu_V0_9_9.zip` per File Station hineinladen und dort
+   entpacken („Hierher extrahieren“), dann `.env` übernehmen:
+   ```
+   NEU="/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_9/Garage16 - LMU"
+   mkdir -p /volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_9
+   # … ZIP per File Station in diesen Ordner laden und dort entpacken …
+   ls "$NEU"
+   sudo cp "$ALT/.env" "$NEU/.env"
+   ```
+3. **Eigener Integritäts-Schlüssel (empfohlen, VOR dem ersten Start):**
+   ```
+   python3 -c "import secrets; print(secrets.token_hex(32))"
+   sudo nano "$NEU/.env"        # Zeile anhängen:  LMU_GARAGE_INTEGRITY_KEY=<die Ausgabe>
+   ```
+   Den Schlüssel zusätzlich offline aufbewahren (Passwort-Manager). Ohne ihn können die Signaturen
+   die gespeicherten Runden nicht mehr bestätigen. Lässt du die Zeile weg, wird er aus
+   `LMU_GARAGE_SECRET_KEY` abgeleitet.
+4. **Alten Stack stoppen** (ohne `-v`), **neuen bauen und starten** — die Migration 0017 läuft dabei:
+   ```
+   cd "$ALT" && sudo docker compose --profile tunnel down
+   cd "$NEU" && sudo docker compose --profile tunnel up -d --build
+   sudo docker compose --profile tunnel ps
+   sudo docker compose exec -T server python -c "import urllib.request as u; print(u.urlopen('http://localhost:8000/health/ready').read().decode())"
+   ```
+   Die Ausgabe muss `"status":"ready"` und `"version":"0.9.9"` enthalten. Im Browser **Strg+F5**.
+5. **Alle Runden-Dateien einmal prüfen und signieren:**
+   ```
+   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.integrity_check'
+   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.integrity_check --apply --backfill'
+   ```
+   Der erste Befehl ändert nichts (Exit-Code 1 = etwas gefunden, steht in der Ausgabe). Der zweite
+   signiert alle älteren Runden, deren Datei zu ihrer Prüfsumme passt, und stellt kaputte zurück.
+6. **Trockenlauf der neuen Regeln über alle gespeicherten Runden** (ändert nichts):
+   ```
+   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.revalidate_laps --hold' > ~/v099_trockenlauf.txt
+   tail -40 ~/v099_trockenlauf.txt
+   ```
+   „valid -> review“ und „of which hold a current record“ zeigen, wie viele alte Runden die neuen
+   Regeln prüfen lassen würden. **Nichts davon wird angewendet**, solange du nicht `--apply` angibst
+   (siehe `docs/V0_9_9_NAS_ANLEITUNG.md`, Teil C).
+7. **Ein Backup mit dem neuen Ordner** — im Manifest steht jetzt der Kettenkopf des Audit-Protokolls:
+   ```
+   sudo ./scripts/backup.sh /volumeUSB2/usbshare/garage16-backups
+   cat /volumeUSB2/usbshare/garage16-backups/$(ls -t /volumeUSB2/usbshare/garage16-backups | head -1)/manifest.json
+   ```
+
+Zurück auf V0.9.8: **erst die Migration zurücknehmen** (V0.9.8 kennt Revision 0017 nicht und würde
+sonst nicht starten), dann im alten Ordner starten:
+```
+cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_9/Garage16 - LMU"
+sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" alembic downgrade 0016'
+sudo docker compose --profile tunnel down
+cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_8/Garage16 - LMU"
+sudo docker compose --profile tunnel up -d
+```
+(Die Downgrade-Zeile löscht nur das Audit-Protokoll und die drei neuen Spalten (Größe, Request-ID,
+Signatur); Runden, Dateien und Urteile bleiben. Runden mit dem Status „held“ oder „quarantined“
+zeigt V0.9.8 als „in Prüfung“ an und zählt sie vorläufig mit — vor dem Rückweg in Admin →
+Track-Limit-Prüfung entscheiden, wenn das nicht gewollt ist.)
+
+**Neu in V0.9.8 — sicherer Betrieb: echte Client-Adressen, konsistente Backups, sichere Wiederherstellung**
+
+- **Rate-Limits zählen die echte Adresse:** ein selbst geschriebener `X-Forwarded-For`-Header hilft
+  niemandem mehr, die Grenzen zu umgehen. Nichts einzustellen — `docker-compose.yml` setzt
+  `LMU_GARAGE_TRUSTED_PROXIES=private`, die `Caddyfile` vertraut nur dem Docker-Netz.
+- **Backups aus einem Moment:** während des Dumps (Sekunden) bekommen neue Uploads „Wartung“ (503),
+  der Client wiederholt sie. Jedes Backup ist jetzt **ein Ordner** `garage16_<Zeitstempel>/` mit
+  `db.sql.gz`, `telemetry.tar.gz` und `manifest.json` (Prüfsummen). Der Synology-Task und das
+  `backup`-Profil bleiben, wie sie sind.
+- **Wiederherstellen:** `./scripts/restore.sh <backup-ordner>` — prüft, stellt in einer NEUEN
+  Datenbank bereit, prüft dort, tauscht erst dann, und dreht bei jedem Fehler zurück
+  (`docs/ROLLBACK.md`). Alte Backups (zwei lose Dateien): `--allow-unverified`.
+- **Neue Doku:** `docs/RUNBOOKS.md` (was tun, wenn …), `docs/ARCHITECTURE.md`,
+  `docs/DATA_PROTECTION.md`, `docs/QUALITY.md`.
+- **Keine Datenbank-Migration**, kein neuer Client (bleibt 0.9.4), nichts neu zu berechnen.
+
+Update von V0.9.7:
+
+1. **Backup** (noch mit dem alten Skript):
+   ```
+   ALT="/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_7/Garage16 - LMU"
+   cd "$ALT"
+   sudo ./scripts/backup.sh /volumeUSB2/usbshare/garage16-backups
+   ```
+2. **Neuen Ordner anlegen**, `Garage16_Lmu_V0_9_8.zip` per File Station hineinladen und dort
+   entpacken („Hierher extrahieren“), dann prüfen und `.env` übernehmen:
+   ```
+   mkdir -p /volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_8
+   # … ZIP per File Station in diesen Ordner laden und dort entpacken …
+   ls "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_8/Garage16 - LMU"
+   sudo cp "$ALT/.env" "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_8/Garage16 - LMU/.env"
+   ```
+3. **Alten Stack stoppen** (ohne `-v`):
+   ```
+   cd "$ALT"
+   sudo docker compose --profile tunnel down
+   ```
+4. **Neuen Stack bauen und starten** (Caddy liest dabei die neue `Caddyfile`):
+   ```
+   cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_8/Garage16 - LMU"
+   sudo docker compose --profile tunnel up -d --build
+   sudo docker compose --profile tunnel ps
+   sudo docker compose exec -T server python -c "import urllib.request as u; print(u.urlopen('http://localhost:8000/health/ready').read().decode())"
+   ```
+   Die Ausgabe muss `"status":"ready"` und `"version":"0.9.8"` enthalten. Im Browser **Strg+F5**
+   (Mac: Cmd+Shift+R).
+5. **Ein Backup mit dem neuen Skript** — und kurz ansehen, dass ein Ordner mit `manifest.json`
+   entsteht:
+   ```
+   sudo ./scripts/backup.sh /volumeUSB2/usbshare/garage16-backups
+   ls /volumeUSB2/usbshare/garage16-backups/
+   ```
+   Nutzt du das `backup`-Profil: `sudo docker compose --profile backup up -d` (der Dienst bekommt
+   das Telemetrie-Volume jetzt beschreibbar — für die Wartungs-Markierung).
+6. **Optional — gespeicherte Kennzahlen auffrischen** (Version 5; betrifft nur Runden mit längeren
+   Lücken im Tempo-Signal, die Analyse selbst rechnet ohnehin frisch):
+   ```
+   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.consistency_check --recompute-figures'
+   ```
+
+Zurück auf V0.9.7: neuen Stack stoppen, im alten Ordner starten — nichts zurückzudrehen (keine
+Migration). Backups im neuen Ordner-Format stellt die V0.9.7-`restore.sh` mit den zwei Dateien des
+Ordners wieder her.
+```
+cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_8/Garage16 - LMU"
+sudo docker compose --profile tunnel down
+cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_7/Garage16 - LMU"
+sudo docker compose --profile tunnel up -d
+```
+
+**Neu in V0.9.7 — nachprüfbar: Release-Prüfung, Referenzrunden, Datenqualität, Betrieb**
+
+- **Release-Prüfung:** Jede Version wird mit `python -m scripts.release_check` in einer sauberen
+  Umgebung mit festen Versionen (`constraints.txt`) geprüft; fehlt etwas, heißt das „nicht
+  getestet“ (Exit-Code 6), nicht „grün“. Der Bericht liegt im ZIP unter `release/TEST_REPORT.md`.
+  Die Docker-Images installieren jetzt genau diese Versionen.
+- **Analyse gegen bekannte Sollwerte geprüft** (simulierte Referenzrunden). Dabei gefunden und
+  behoben: wenige fehlende Tempo-Werte ließen alle Kurven verschwinden; ein Neustart mitten in einer
+  Datei wurde als Runde analysiert (jetzt abgelehnt).
+- **Neue Kachel „Datenqualität“** im LapTime Analyzer: Kanäle, Frames pro Sekunde, Lücken,
+  Zeit/Distanz, Auflösung eines Bremspunkts u. a. — bevor man der Analyse misstraut. Fahrhinweise
+  zeigen ihre Messgenauigkeit (±), Kurven lassen sich nach Zeitverlust sortieren, der Stint Analyzer
+  zeigt 95-%-Bereiche und die Konstanz ohne Trend.
+- **Admin → „Betrieb“:** jeder Upload-Versuch mit Ergebnis, Grund und Request-ID (dieselbe ID steht
+  im Server-Log), Fehlerquote, Dauer; dazu der **Konsistenz-Check** Datenbank ↔ Telemetriedateien.
+- **Eine Datenbank-Migration (0016, neue Tabelle `upload_events`)** — läuft beim Start von selbst,
+  ändert keine bestehenden Daten. **Kein neuer Client** (bleibt 0.9.4), kein Neuberechnen nötig.
+
+Update von V0.9.6:
+
+1. **Backup:**
+   ```
+   ALT="/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_6/Garage16 - LMU"
+   cd "$ALT"
+   sudo ./scripts/backup.sh /volumeUSB2/usbshare/garage16-backups
+   ```
+2. **Neuen Ordner anlegen**, `Garage16_Lmu_V0_9_7.zip` per File Station hineinladen und dort
+   entpacken („Hierher extrahieren“), dann prüfen und `.env` übernehmen:
+   ```
+   mkdir -p /volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_7
+   # … ZIP per File Station in diesen Ordner laden und dort entpacken …
+   ls "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_7/Garage16 - LMU"
+   sudo cp "$ALT/.env" "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_7/Garage16 - LMU/.env"
+   ```
+3. **Alten Stack stoppen** (ohne `-v`):
+   ```
+   cd "$ALT"
+   sudo docker compose --profile tunnel down
+   ```
+4. **Neuen Stack bauen und starten** (der Build lädt die festen Versionen aus `constraints.txt`,
+   beim ersten Mal dauert das einige Minuten; die Migration 0016 läuft beim Start):
+   ```
+   cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_7/Garage16 - LMU"
+   sudo docker compose --profile tunnel up -d --build
+   sudo docker compose --profile tunnel ps
+   sudo docker compose exec -T server python -c "import urllib.request as u; print(u.urlopen('http://localhost:8000/health').read().decode())"
+   ```
+   Die Ausgabe muss `"version":"0.9.7"` und `"db_ok":true` enthalten. Im Browser **Strg+F5**
+   (Mac: Cmd+Shift+R).
+5. **Konsistenz prüfen** (nur lesend, ändert nichts):
+   ```
+   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.consistency_check'
+   ```
+   Zeilen mit `!!` brauchen dich (z. B. Runden ohne Datei). „Dateien ohne Runde“ und „Temporäre
+   Dateien“ kannst du mit demselben Befehl plus `--delete-orphans` entfernen; `--deep` liest zusätzlich
+   jede Datei und vergleicht ihre Prüfsumme. Dasselbe siehst du unter Admin → Betrieb.
+
+Zurück auf V0.9.6: **erst die Migration zurücknehmen** (V0.9.6 kennt Revision 0016 nicht und würde
+sonst nicht starten), dann im alten Ordner starten:
+```
+cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_7/Garage16 - LMU"
+sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" alembic downgrade 0015'
+sudo docker compose --profile tunnel down
+cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_6/Garage16 - LMU"
+sudo docker compose --profile tunnel up -d
+```
+(Die Downgrade-Zeile löscht nur die Upload-Protokoll-Tabelle; Runden und alles andere bleiben.)
+
+**Neu in V0.9.6 — übersichtlicher, einfacher, schneller**
+
+- **Menü in Gruppen** (Meine Garage · Analyse · Rennen; Konto und Download unten), überall der
+  Name **Garage16**. Die **Schriften liefert Garage16 selbst aus** (`web/fonts`) — kein Abruf bei
+  Google mehr (Datenschutz), funktioniert auch offline im Analysefenster der App.
+- **Schneller:** Seiten werden erst geladen, wenn man sie öffnet (Startseite: 9 statt 50
+  JS-Dateien, ~130 statt ~580 KB); Dashboard und Teamseite laden ihre Teile gleichzeitig; Caddy
+  komprimiert mit zstd.
+- **Übersichtlicher:** Dashboard mit Schnellzugriffen (letzte Runde analysieren, gegen Garage16
+  Best, Stint Analyzer) und Rundenliste mit Strecken-Auswahl; Aktivitäten **eine Zeile pro Runde**
+  (statt dieselbe Runde zwei-, dreimal); Leaderboard zeigt sofort eine Tabelle (meistgefahrene
+  Strecke/Klasse), lädt bei jeder Änderung neu, merkt sich die Auswahl in der Adresse und zeigt den
+  Abstand zu P1; Teamseite: Ergebnisse zuerst, Einstellungen eingeklappt; Kontoseite: Häufiges
+  oben, Client-Zugangsdaten / Sitzungen / Datenexport eingeklappt; Rundenauswahl im LapTime
+  Analyzer nach Strecke gruppiert, schnellste Runde markiert; Strecken ohne Runden als kurze Liste.
+- **Keine Datenbank-Migration**, keine neue Abhängigkeit, **kein neuer Client** (bleibt 0.9.4),
+  kein Neuberechnen der Runden nötig. Die API liefert in den Aktivitäten zusätzlich `lap_id` und
+  `car_model` (nur ergänzt).
+
+Update von V0.9.5:
+
+1. **Backup:**
+   ```
+   ALT="/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_5/Garage16 - LMU"
+   cd "$ALT"
+   sudo ./scripts/backup.sh /volumeUSB2/usbshare/garage16-backups
+   ```
+2. **Neuen Ordner anlegen**, `Garage16_Lmu_V0_9_6.zip` per File Station hineinladen und dort
+   entpacken („Hierher extrahieren“), dann prüfen und `.env` übernehmen:
+   ```
+   mkdir -p /volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_6
+   # … ZIP per File Station in diesen Ordner laden und dort entpacken …
+   ls "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_6/Garage16 - LMU"
+   sudo cp "$ALT/.env" "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_6/Garage16 - LMU/.env"
+   ```
+3. **Alten Stack stoppen** (ohne `-v`):
+   ```
+   cd "$ALT"
+   sudo docker compose --profile tunnel down
+   ```
+4. **Neuen Stack bauen und starten** (der Reverse Proxy liest dabei die neue `docker/Caddyfile`):
+   ```
+   cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_6/Garage16 - LMU"
+   sudo docker compose --profile tunnel up -d --build
+   sudo docker compose --profile tunnel ps
+   sudo docker compose exec -T server python -c "import urllib.request as u; print(u.urlopen('http://localhost:8000/health').read().decode())"
+   ```
+   Die Ausgabe muss `"version":"0.9.6"` und `"db_ok":true` enthalten. Im Browser **Strg+F5**
+   (Mac: Cmd+Shift+R).
+
+Zurück auf V0.9.5: neuen Stack stoppen, im alten Ordner starten — nichts zurückzudrehen:
+```
+cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_6/Garage16 - LMU"
+sudo docker compose --profile tunnel down
+cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_5/Garage16 - LMU"
+sudo docker compose --profile tunnel up -d
+```
+
+**Neu in V0.9.5 — LapTime Analyzer im Raster, alle Kanäle in voller Auflösung**
+
+- **Ansicht anpassen ist jetzt ein Raster-Editor:** Kacheln liegen auf einem Raster aus 12
+  Spalten; verschieben am Griff ⠿, Größe an der Ecke ◢, neue Kacheln links über
+  **Wofür? › Art › Kachel** mit Vorschau und fertigen Größen — oder auf leeren Feldern einen
+  Kasten aufziehen, dann gibt es nur passende Kacheln. Gespeichert wird weiter nur im Browser;
+  ein Layout aus V0.9.1–V0.9.4 wird automatisch übernommen.
+- **Genauere Auswertung aller Kanäle:** Die Rundendistanz (`lap_dist`) kommt bei LMU aus dem
+  Scoring-Block, der in rFactor 2 nur etwa 5-mal pro Sekunde aktualisiert wird, die übrigen
+  Kanäle aus der Telemetrie (~50/s). Bis V0.9.4 hat der Server jede Messung verworfen, bei der
+  `lap_dist` noch stand — falls LMU es genauso macht, blieb nur jede zehnte Messung übrig
+  (Bremspunkte, Linien, Delta, Dämpfer-Histogramme, Radschlupf). Jetzt bekommt jede Messung ihre
+  Distanz aus der Geschwindigkeit, exakt angeglichen an jeden neuen `lap_dist`-Wert. Ob das bei
+  dir zutrifft, zeigt jede Analyse-Antwort: `orientation.a.distance_axis` mit `anchors`
+  (Messungen mit neuem `lap_dist`) und `kept` (verwendete Messungen). Liegt `anchors` deutlich
+  unter `kept`, aktualisiert LMU die Distanz seltener als die Telemetrie.
+- **Ideallinien auf der Strecke:** Die Karte zeigt jetzt die Strecke von oben — Asphalt, weiße
+  Ränder, rot-weiße Kerbs — mit den Linien jeder Runde darauf und um jede Runde ein blasses Band
+  in Fahrzeugbreite. Die Strecke wird aus LMUs Streckendaten (`path_lateral`, `track_edge`,
+  Untergrund der Räder) der Runden auf der Karte und bis zu 6 weiteren gültigen Runden derselben
+  Strecke rekonstruiert; je mehr Runden von verschiedenen Linien es gibt, desto vollständiger.
+  Ein gestrichelter Rand ist geschätzt (dort ist nie jemand entlanggefahren). Runden von Clients
+  vor 0.9.0 haben diese Daten nicht.
+- Brems-, Einlenk- und Gaspunkte werden zwischen zwei Messungen interpoliert; die höchste
+  Verzögerung ist der höchste 0,1-s-Mittelwert (ein Randstein in einem Frame zählt nicht mehr).
+- **Keine Datenbank-Migration** (bleibt bei `0015`), **keine neue Abhängigkeit**, **kein neuer
+  Client** — der Desktop-Client bleibt 0.9.4, das Analysefenster der App zeigt das neue Raster
+  automatisch (es lädt die Seite vom Server).
+
+Update von V0.9.4:
+
+1. **Backup:**
+   ```
+   ALT="/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_4/Garage16 - LMU"
+   cd "$ALT"
+   sudo ./scripts/backup.sh /volumeUSB2/usbshare/garage16-backups
+   ```
+2. **Neuen Ordner anlegen**, ZIP per File Station hineinladen und dort entpacken, `.env` übernehmen:
+   ```
+   mkdir -p /volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_5
+   # … Garage16_Lmu_V0_9_5.zip per File Station in diesen Ordner laden und dort entpacken …
+   cp "$ALT/.env" "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_5/Garage16 - LMU/.env"
+   ```
+3. **Alten Stack stoppen** (ohne `-v`):
+   ```
+   cd "$ALT"
+   sudo docker compose --profile tunnel down
+   ```
+4. **Neuen Stack bauen und starten:**
+   ```
+   cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_5/Garage16 - LMU"
+   sudo docker compose --profile tunnel up -d --build
+   curl -s https://<adresse-der-seite>/health
+   ```
+   `/health` muss `"version":"0.9.5"` und `"db_ok":true` zeigen (über die Adresse, unter der die
+   Seite gerade erreichbar ist). Im Browser **Strg+F5**.
+5. **Rundenwerte neu berechnen** (empfohlen — Kurven und Zeitprofil der gespeicherten Runden auf
+   der neuen Distanzachse, Version 4). Erst der Probelauf, dann speichern; beides ändert keine
+   Gültigkeit:
+   ```
+   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.revalidate_laps'
+   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.revalidate_laps --apply'
+   ```
+
+Zurück auf V0.9.4: neuen Stack stoppen, im alten Ordner wieder starten — es gibt nichts
+zurückzudrehen:
+```
+cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_5/Garage16 - LMU"
+sudo docker compose --profile tunnel down
+cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_4/Garage16 - LMU"
+sudo docker compose --profile tunnel up -d
+```
+Der Analyse-Cache rechnet einmal neu (Version 6).
 
 **Neu in V0.9.4 — zwei Dashboards: LapTime Analyzer und Stint Analyzer**
 

@@ -1,14 +1,24 @@
-// pages/dashboard.js — "YOUR GARAGE" (V0.7.2 §6): a personal cockpit,
-// not just a raw laps table. Every number here comes from a real
-// endpoint (driver profile §4, team records §21) — nothing fabricated.
-// The original filterable "all your laps" browser stays intact below it.
+// pages/dashboard.js — "YOUR GARAGE": the personal cockpit (V0.7.2 §6, reorganised in V0.9.6).
+//
+//   1. quick actions — the three things you come here for: analyse the last lap, you vs. the
+//      fastest lap, the session in the Stint Analyzer
+//   2. your bests per track (each with "vs. Garage16 Best") and your team(s), side by side
+//   3. your recent records — one row per lap (activity.js)
+//   4. all your laps, filtered in the browser (track, valid only) — one request, no "Filter" button
+//
+// Every number comes from a real endpoint (driver profile, team records, /telemetry/laps); the
+// three requests run in parallel, team records too.
 
 import { api } from "../api.js";
 import { store } from "../state.js";
-import { el, formatLapTime, formatDate, recordTypeLabel } from "../format.js";
+import { renderActivityList } from "../activity.js";
+import { el, formatLapTime, formatDate } from "../format.js";
 import { renderSignInPrompt } from "./auth.js";
 
 import { t, tp } from "../i18n.js";
+
+const LAPS_LIMIT = 200;
+
 export async function renderDashboard(container) {
   if (!store.isSignedIn()) {
     renderSignInPrompt(container, t("Sign in to see your garage."));
@@ -19,143 +29,131 @@ export async function renderDashboard(container) {
   container.appendChild(el("h1", {}, t("Garage16")));
   container.appendChild(el("p", { class: "subtitle" }, t("Welcome back, {0}.", [session.displayName])));
 
-  if (session.driverId != null) {
-    await renderCockpit(container, session.driverId);
-  }
-  // No driverId (shouldn't happen post-V0.7.2 — see auth.js's restore
-  // flow — but stay defensive rather than throw): skip straight to the
-  // laps browser below, which only ever needed the auth token.
+  const actions = el("div", { class: "quick-actions" });
+  container.appendChild(actions);
+  const cockpit = el("div");
+  container.appendChild(cockpit);
 
-  // --- My Laps (unchanged from pre-V0.7.2: filterable, full history) ---
+  const [profile, teams, laps] = await Promise.all([
+    session.driverId != null ? api.driverProfile(session.driverId).catch((err) => ({ error: err })) : Promise.resolve(null),
+    api.myTeams().catch(() => []),
+    api.myLaps({ limit: LAPS_LIMIT }).catch((err) => ({ error: err })),
+  ]);
+
+  renderQuickActions(actions, Array.isArray(laps) ? laps : []);
+  if (profile && profile.error) cockpit.appendChild(el("div", { class: "notice notice--error" }, profile.error.message));
+  else if (profile) await renderCockpit(cockpit, profile, teams);
+
   container.appendChild(el("h2", {}, t("My Laps")));
-  await renderLapsBrowser(container);
+  if (laps && laps.error) container.appendChild(el("div", { class: "notice notice--error" }, laps.error.message));
+  else renderLapsBrowser(container, laps);
 }
 
-async function renderCockpit(container, driverId) {
-  let profile, teams;
-  try {
-    [profile, teams] = await Promise.all([api.driverProfile(driverId), api.myTeams()]);
-  } catch (err) {
-    container.appendChild(el("div", { class: "notice notice--error" }, err.message));
-    return;
-  }
+// ---------------------------------------------------------------- 1. quick actions
 
-  // --- Your Best: fastest valid lap per track, across every car ---
-  container.appendChild(el("h2", {}, t("Your Best")));
+function renderQuickActions(host, laps) {
+  const last = laps[0];   // newest first
+  const action = (href, title, hint, primary = false) => el("a", { href, class: `quick-action${primary ? " quick-action--primary" : ""}` }, [
+    el("strong", {}, title), el("span", {}, hint),
+  ]);
+  host.appendChild(last
+    ? action(`#/analysis?a=${last.id}`, t("Analyse last lap"), `${last.track_name} · ${formatLapTime(last.lap_time)}`, true)
+    : action("#/download", t("Record your first lap"), t("Install the desktop client and drive"), true));
+  host.appendChild(action(`#/analysis?quick=wr${last ? `&track=${encodeURIComponent(last.track_name)}` : ""}`, t("You vs. Garage16 Best"), t("Your best lap against the fastest one")));
+  host.appendChild(action("#/stints", t("Stint Analyzer"), t("Whole sessions: pace, tyres, fuel")));
+}
+
+// ---------------------------------------------------------------- 2. bests + team, 3. records
+
+async function renderCockpit(container, profile, teams) {
+  const grid = el("div", { class: "dash-grid" });
+  container.appendChild(grid);
+
+  // --- Your Best: fastest valid lap per track, across every car
+  const bestCol = el("section", { class: "dash-grid__col" }, [el("h2", {}, t("Your Best"))]);
+  grid.appendChild(bestCol);
   const bestPerTrack = new Map();
   for (const r of profile.personal_records) {
     const current = bestPerTrack.get(r.track_name);
-    if (!current || r.lap_time < current) bestPerTrack.set(r.track_name, r.lap_time);
+    if (!current || r.lap_time < current.lap_time) bestPerTrack.set(r.track_name, r);
   }
   if (bestPerTrack.size === 0) {
-    container.appendChild(el("div", { class: "empty-state" }, t("No valid laps yet — once your recorder client uploads one, it'll show up here.")));
+    bestCol.appendChild(el("div", { class: "empty-state" }, t("No valid laps yet — once your recorder client uploads one, it'll show up here.")));
   } else {
     const card = el("div", { class: "card" });
-    [...bestPerTrack.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .forEach(([track, time]) => {
-        card.appendChild(
-          el("div", { class: "card-row" }, [el("span", {}, track), el("span", { class: "lap-time" }, formatLapTime(time))])
-        );
+    [...bestPerTrack.values()]
+      .sort((a, b) => a.track_name.localeCompare(b.track_name))
+      .forEach((r) => {
+        card.appendChild(el("div", { class: "card-row" }, [
+          el("div", {}, [el("div", {}, r.track_name), el("div", { class: "subtitle", style: "margin:2px 0 0;" }, r.car_model || r.car_name)]),
+          el("div", { style: "text-align:right;" }, [
+            el("span", { class: "lap-time" }, formatLapTime(r.lap_time)),
+            el("div", {}, el("a", { class: "small-link", href: `#/analysis?quick=wr&track=${encodeURIComponent(r.track_name)}` }, t("vs. Garage16 Best →"))),
+          ]),
+        ]));
       });
-    container.appendChild(card);
+    bestCol.appendChild(card);
   }
 
-  // --- Your Team(s): records held + closest gap to one you don't hold ---
-  if (teams.length) {
-    container.appendChild(el("h2", {}, t("Your Team")));
-    const teamsCard = el("div", { class: "card" });
-    for (const myTeam of teams) {
-      let records = [];
-      try {
-        records = await api.teamRecords(myTeam.id);
-      } catch {
-        continue; // skip a team whose records failed to load rather than break the whole dashboard
-      }
-      const held = records.filter((r) => r.you_hold_it).length;
-      const closest = records
-        .filter((r) => !r.you_hold_it && r.gap != null)
-        .sort((a, b) => a.gap - b.gap)[0];
-
-      const rows = [
-        el("div", { class: "card-row" }, [
-          el("a", { href: `#/team/${myTeam.id}` }, [el("strong", {}, myTeam.name)]),
-          el("span", {}, tp("{0} / {1} team best held", "{0} / {1} team bests held", records.length, [held, records.length])),
-        ]),
-      ];
-      if (closest) {
-        rows.push(
-          el("div", { class: "subtitle", style: "margin:2px 0 12px;" }, [
-            t("Closest to a record: {0} — {1} ", [closest.track_name, closest.car_model]),
-            el("span", { class: "lap-time" }, `+${closest.gap.toFixed(3)}`),
-            t(" (held by {0})", [closest.driver_name]),
-          ])
-        );
-      }
-      rows.forEach((r) => teamsCard.appendChild(r));
-    }
-    container.appendChild(teamsCard);
-  }
-
-  // --- Recent Activity ---
-  container.appendChild(el("h2", {}, t("Recent Activity")));
-  if (!profile.recent_activity.length) {
-    container.appendChild(el("div", { class: "empty-state" }, t("No activity yet.")));
+  // --- Your Team(s): records held + closest gap to one you don't hold (records in parallel)
+  const teamCol = el("section", { class: "dash-grid__col" }, [el("h2", {}, t("Your Team"))]);
+  grid.appendChild(teamCol);
+  if (!teams.length) {
+    teamCol.appendChild(el("div", { class: "empty-state" }, [t("You are not in a team yet. "), el("a", { href: "#/teams" }, t("Create or join one →"))]));
   } else {
-    const card = el("div", { class: "card" });
-    profile.recent_activity.slice(0, 10).forEach((a) => {
-      card.appendChild(
-        el("div", { class: "card-row" }, [
-          el("div", {}, [
-            el("span", { class: "tag" }, recordTypeLabel(a.record_type)),
-            el("span", { style: "margin-left:8px;" }, `${a.track_name} — ${a.car_name}`),
-          ]),
-          el("div", {}, [
-            el("span", { class: "lap-time" }, formatLapTime(a.lap_time)),
-            el("div", { class: "subtitle", style: "margin:2px 0 0; text-align:right;" }, formatDate(a.created_at)),
-          ]),
-        ])
-      );
+    const records = await Promise.all(teams.map((team) => api.teamRecords(team.id).catch(() => null)));
+    const teamsCard = el("div", { class: "card" });
+    teams.forEach((myTeam, i) => {
+      const list = records[i];
+      if (!list) return; // a team whose records failed to load is skipped, the rest still shows
+      const held = list.filter((r) => r.you_hold_it).length;
+      const closest = list.filter((r) => !r.you_hold_it && r.gap != null).sort((a, b) => a.gap - b.gap)[0];
+      teamsCard.appendChild(el("div", { class: "card-row" }, [
+        el("a", { href: `#/team/${myTeam.id}` }, [el("strong", {}, myTeam.name)]),
+        el("span", {}, tp("{0} / {1} team best held", "{0} / {1} team bests held", list.length, [held, list.length])),
+      ]));
+      if (closest) {
+        teamsCard.appendChild(el("div", { class: "subtitle", style: "margin:2px 0 12px;" }, [
+          t("Closest to a record: {0} — {1} ", [closest.track_name, closest.car_model]),
+          el("span", { class: "lap-time" }, `+${closest.gap.toFixed(3)}`),
+          t(" (held by {0})", [closest.driver_name]),
+        ]));
+      }
     });
-    container.appendChild(card);
+    teamCol.appendChild(teamsCard);
   }
+
+  // --- 3. Recent records, one row per lap
+  container.appendChild(el("h2", {}, t("Recent Activity")));
+  container.appendChild(renderActivityList(profile.recent_activity, { limit: 8 }));
 }
 
-async function renderLapsBrowser(container) {
-  const form = el("div", { class: "inline-form section" });
-  const trackField = el("div", { class: "field" }, [
-    el("label", { for: "fTrack" }, t("Track (optional)")),
-    el("input", { id: "fTrack", type: "text" }),
-  ]);
-  const carField = el("div", { class: "field" }, [
-    el("label", { for: "fCar" }, t("Car (optional)")),
-    el("input", { id: "fCar", type: "text" }),
-  ]);
-  const filterBtn = el("button", { class: "btn" }, t("Filter"));
-  form.appendChild(trackField);
-  form.appendChild(carField);
-  form.appendChild(filterBtn);
-  container.appendChild(form);
+// ---------------------------------------------------------------- 4. all laps
 
+function renderLapsBrowser(container, laps) {
+  const tracks = [...new Set(laps.map((l) => l.track_name))].sort((a, b) => a.localeCompare(b));
+  const trackSelect = el("select", { id: "fTrack", "aria-label": t("Track") }, [
+    el("option", { value: "" }, t("All tracks")),
+    ...tracks.map((name) => el("option", { value: name }, name)),
+  ]);
+  const validOnly = el("input", { type: "checkbox", id: "fValid" });
+  const count = el("span", { class: "subtitle laps-filter__count" });
+  container.appendChild(el("div", { class: "inline-form laps-filter" }, [
+    el("div", { class: "field" }, [el("label", { for: "fTrack" }, t("Track")), trackSelect]),
+    el("label", { class: "laps-filter__check", for: "fValid" }, [validOnly, ` ${t("Valid laps only")}`]),
+    count,
+  ]));
   const resultsBox = el("div");
   container.appendChild(resultsBox);
-
-  async function load() {
+  const draw = () => {
+    const shown = laps.filter((l) => (!trackSelect.value || l.track_name === trackSelect.value) && (!validOnly.checked || l.is_valid));
+    count.textContent = tp("{0} lap", "{0} laps", shown.length, [shown.length]);
     resultsBox.innerHTML = "";
-    try {
-      const laps = await api.myLaps({
-        trackName: trackField.querySelector("input").value.trim() || undefined,
-        carName: carField.querySelector("input").value.trim() || undefined,
-        limit: 100,
-      });
-      resultsBox.appendChild(renderLapsTable(laps));
-    } catch (err) {
-      resultsBox.appendChild(el("div", { class: "notice notice--error" }, err.message));
-    }
-  }
-
-  filterBtn.addEventListener("click", load);
-  await load();
+    resultsBox.appendChild(renderLapsTable(shown));
+  };
+  trackSelect.addEventListener("change", draw);
+  validOnly.addEventListener("change", draw);
+  draw();
 }
 
 function renderLapsTable(laps) {
@@ -180,6 +178,13 @@ function renderLapsTable(laps) {
           // V0.9.3: the track-limits check left this lap to an admin; it counts until then
           lap.review_status === "pending"
             ? el("span", { class: "tag tag--basic", style: "margin-left:6px;", title: t("The automatic track-limits check asked an admin to look at this lap. It counts until then.") }, t("under review"))
+            : null,
+          // V0.9.9: held = waiting for an admin, not counted yet; quarantined = the file failed its check
+          lap.review_status === "held"
+            ? el("span", { class: "tag tag--basic", style: "margin-left:6px;", "data-review": "held", title: t("The check could not confirm this lap on its own (see the analysis: track limits & events). It is stored and can be analysed, but it counts for leaderboards and records only after an admin has looked at it.") }, t("waiting for review"))
+            : null,
+          lap.review_status === "quarantined"
+            ? el("span", { class: "tag tag--invalid", style: "margin-left:6px;", "data-review": "quarantined", title: t("The stored telemetry file no longer matches what was uploaded. The lap was set aside until an admin has checked it.") }, t("set aside"))
             : null,
           lap.data_level === "basic"
             ? el("span", { class: "tag tag--basic", style: "margin-left:6px;", title: t("Recorded by a client older than 0.9.0 — only the basic channels in the analysis") }, t("basic data"))

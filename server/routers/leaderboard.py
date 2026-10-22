@@ -38,6 +38,7 @@ from ..catalog import (
 )
 from ..models import Driver, Lap
 from ..schemas import CatalogClassOptionOut, CatalogLayoutOut, CatalogVenueOut, LeaderboardEntry, RecentActivityEntry
+from ..official import official_filter
 
 router = APIRouter(prefix="/leaderboard", tags=["leaderboard"])
 
@@ -50,9 +51,9 @@ def recent_activity(limit: int = 15, db: Session = Depends(get_db)) -> List[Rece
     been happening lately, same spirit as a team's activity console but
     across the whole platform instead of one team."""
     stmt = (
-        select(Lap.driver_id, Driver.display_name, Lap.track_name, Lap.car_name, Lap.lap_time, Lap.uploaded_at)
+        select(Lap.driver_id, Driver.display_name, Lap.track_name, Lap.car_name, Lap.lap_time, Lap.uploaded_at, Lap.id, Lap.car_model)
         .join(Driver, Driver.id == Lap.driver_id)
-        .where(Lap.is_valid.is_(True))
+        .where(official_filter())
         .order_by(Lap.uploaded_at.desc())
         .limit(min(limit, 50))
     )
@@ -60,9 +61,9 @@ def recent_activity(limit: int = 15, db: Session = Depends(get_db)) -> List[Rece
     return [
         RecentActivityEntry(
             driver_id=driver_id, driver_name=name, track_name=track, car_name=car,
-            lap_time=lap_time, uploaded_at=uploaded_at.isoformat(),
+            lap_time=lap_time, uploaded_at=uploaded_at.isoformat(), lap_id=lap_id, car_model=car_model,
         )
-        for driver_id, name, track, car, lap_time, uploaded_at in rows
+        for driver_id, name, track, car, lap_time, uploaded_at, lap_id, car_model in rows
     ]
 
 
@@ -159,7 +160,7 @@ def catalog_venues(q: Optional[str] = None, db: Session = Depends(get_db)) -> Li
     case, accents and punctuation: q=fuji returns Fuji Speedway with every
     Fuji layout. Only valid laps count (the leaderboards only show those)."""
     rows = db.execute(
-        select(Lap.track_name, func.count()).where(Lap.is_valid.is_(True)).group_by(Lap.track_name)
+        select(Lap.track_name, func.count()).where(official_filter()).group_by(Lap.track_name)
     ).all()
     by_venue: dict = {}
     for track_name, count in rows:
@@ -182,7 +183,7 @@ def catalog_class_options(track_name: Optional[str] = None, db: Session = Depend
     lap is driven, plus any other class LMU has sent, each with its number of
     valid laps (at `track_name` when given). The UI can then offer the whole
     list and just say "no laps yet" instead of hiding classes nobody drove."""
-    stmt = select(Lap.car_class, func.count()).where(Lap.is_valid.is_(True), Lap.car_class.is_not(None))
+    stmt = select(Lap.car_class, func.count()).where(official_filter(), Lap.car_class.is_not(None))
     if track_name:
         stmt = stmt.where(Lap.track_name == track_name)
     counts = {name: count for name, count in db.execute(stmt.group_by(Lap.car_class)).all()}

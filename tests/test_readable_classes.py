@@ -15,7 +15,6 @@ from pathlib import Path
 import pytest
 
 from server import catalog
-from tests.test_moderation import _upload_lap
 
 ROOT = Path(__file__).resolve().parent.parent
 

@@ -2,37 +2,30 @@
 // async function(container) that renders itself into `container`.
 
 import { store } from "./state.js";
-import { renderAuth } from "./pages/auth.js";
-import { renderLeaderboard } from "./pages/leaderboard.js";
-import { renderDashboard } from "./pages/dashboard.js";
-import { renderTeams } from "./pages/teams.js";
-import { renderTeamDetail } from "./pages/team_detail.js";
-import { renderAccount } from "./pages/account.js";
-import { renderResetPassword } from "./pages/reset_password.js";
-import { renderVerifyEmail } from "./pages/verify_email.js";
-import { renderDriverProfile } from "./pages/driver.js";
-import { renderAdmin } from "./pages/admin.js";
-import { renderLanding } from "./pages/landing.js";
-import { renderAnalysis } from "./pages/analysis.js";
-import { renderCircuits } from "./pages/circuits.js";
-import { renderDownload } from "./pages/download.js";
-import { renderStints } from "./pages/stints.js";
+// V0.9.6: every page is loaded when it is first opened (dynamic import), not all at start —
+// the landing page no longer waits for the ~40 modules of the analysis, the stint analyzer and
+// the admin area. A page module is fetched once and kept by the browser.
+const page = (path, name) => () => import(path).then((m) => m[name]);
+const loadTeamDetail = page("./pages/team_detail.js", "renderTeamDetail");
+const loadDriverProfile = page("./pages/driver.js", "renderDriverProfile");
+const loadResetPassword = page("./pages/reset_password.js", "renderResetPassword");
+const loadVerifyEmail = page("./pages/verify_email.js", "renderVerifyEmail");
 import { startDesktopAppBridge } from "./app_bridge.js";
 
 import { applyStaticTranslations, createLanguageSwitch, ensureLanguageChosen, t } from "./i18n.js";
 const routes = {
-  landing: renderLanding,
-  leaderboard: renderLeaderboard,
-  dashboard: renderDashboard,
-  analysis: renderAnalysis,
+  landing: page("./pages/landing.js", "renderLanding"),
+  leaderboard: page("./pages/leaderboard.js", "renderLeaderboard"),
+  dashboard: page("./pages/dashboard.js", "renderDashboard"),
+  analysis: page("./pages/analysis.js", "renderAnalysis"),
   // V0.9.4: the Stint Analyzer; #/sessions is the V0.9.3 address of the same page
-  stints: renderStints,
-  sessions: renderStints,
-  circuits: renderCircuits,
-  download: renderDownload,
-  teams: renderTeams,
-  account: renderAccount,
-  admin: renderAdmin,
+  stints: page("./pages/stints.js", "renderStints"),
+  sessions: page("./pages/stints.js", "renderStints"),
+  circuits: page("./pages/circuits.js", "renderCircuits"),
+  download: page("./pages/download.js", "renderDownload"),
+  teams: page("./pages/teams.js", "renderTeams"),
+  account: page("./pages/account.js", "renderAccount"),
+  admin: page("./pages/admin.js", "renderAdmin"),
 };
 
 const app = document.getElementById("app");
@@ -82,27 +75,38 @@ function updateStatus() {
   statusText.textContent = signedIn ? t("signed in as {0}", [session.displayName]) : t("not signed in");
 }
 
+let renderSeq = 0;
 async function render() {
   const { path, query } = currentRoute();
   const teamId = matchTeamDetail(path);
   const driverId = matchDriverDetail(path);
+  const seq = ++renderSeq;
   updateNavActive(path);
-  app.innerHTML = "";
-  app.classList.remove("panel--wide"); // the analysis and circuit pages ask for the full width
   pitwall.classList.remove("open");
   try {
+    // load the page module first (usually instant, cached), THEN clear — no blank flash
+    let run;
     if (teamId) {
-      await renderTeamDetail(app, teamId);
+      const fn = await loadTeamDetail();
+      run = () => fn(app, teamId);
     } else if (driverId) {
-      await renderDriverProfile(app, driverId);
+      const fn = await loadDriverProfile();
+      run = () => fn(app, driverId);
     } else if (path === "reset-password") {
-      await renderResetPassword(app, query.get("token") || "");
+      const fn = await loadResetPassword();
+      run = () => fn(app, query.get("token") || "");
     } else if (path === "verify-email") {
-      await renderVerifyEmail(app, query.get("token") || "");
+      const fn = await loadVerifyEmail();
+      run = () => fn(app, query.get("token") || "");
     } else {
-      const handler = routes[path] || renderNotFound;
-      await handler(app);
+      const fn = routes[path] ? await routes[path]() : renderNotFound;
+      run = () => fn(app);
     }
+    if (seq !== renderSeq) return;   // another page was chosen while this one loaded
+    app.innerHTML = "";
+    app.classList.remove("panel--wide"); // the analysis and circuit pages ask for the full width
+    (document.scrollingElement || document.documentElement).scrollTop = 0;
+    await run();
   } catch (err) {
     app.innerHTML = "";
     const notice = document.createElement("div");

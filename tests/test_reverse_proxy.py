@@ -88,7 +88,7 @@ needs_caddy = pytest.mark.skipif(not CADDY_BIN, reason="no caddy binary (set CAD
 
 
 @pytest.fixture
-def proxied(client, tmp_path, monkeypatch):
+def proxied(client, tmp_path, monkeypatch, request):
     """Real Caddy running docker/Caddyfile (only the container-specific
     bits — upstream address, web root, log path, admin API — rewritten
     for localhost) in front of the real app. Yields
@@ -103,7 +103,14 @@ def proxied(client, tmp_path, monkeypatch):
 
     text = CADDYFILE.replace("server:8000", f"127.0.0.1:{app_server.port}")
     text = text.replace("/srv/web", str(web_dir)).replace("/data/access.log", str(tmp_path / "access.log"))
-    (tmp_path / "Caddyfile").write_text("{\n    admin off\n}\n\n" + text, encoding="utf-8")
+    # V0.9.8: the Caddyfile has its own global block now — `admin off` goes into it
+    assert text.lstrip().startswith("#") and "\n{\n    servers {" in text
+    text = text.replace("\n{\n    servers {", "\n{\n    admin off\n    servers {", 1)
+    # V0.9.8: a test may say whom Caddy trusts (indirect parametrization); default = as shipped
+    trusted = getattr(request, "param", None)
+    if trusted:
+        text = text.replace("trusted_proxies static private_ranges", f"trusted_proxies static {trusted}", 1)
+    (tmp_path / "Caddyfile").write_text(text, encoding="utf-8")
 
     proc = subprocess.Popen(
         [CADDY_BIN, "run", "--config", str(tmp_path / "Caddyfile"), "--adapter", "caddyfile"],

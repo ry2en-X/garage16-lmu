@@ -36,13 +36,15 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import time
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from pydantic import ValidationError
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -57,7 +59,10 @@ from ..catalog import canonical_class, track_matches_query
 from ..versioning import data_level_for_client_version, is_client_outdated
 from ..schemas import LapMetadata, LapReportOut, LapReportRequest, LapSummary, UploadResponse
 from ..security import verify_hmac
-from ..storage import telemetry_storage_dir
+from ..storage import StorageOutside, telemetry_storage_dir
+from .. import audit, integrity
+from ..upload_log import reason_of, record_upload
+from ..write_lock import RETRY_AFTER_S, MaintenanceActive, writing
 from ..lap_check import check_lap, identity_fields, learn_from_upload, link_neighbours, stored_validation
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
@@ -86,8 +91,11 @@ def _stream_to_temp_file(upload: UploadFile, dest_dir: Path) -> tuple[Path, str,
     tmp_path = dest_dir / f".upload-{uuid.uuid4().hex}.tmp"
     sha256 = hashlib.sha256()
     total = 0
+    # V0.9.9: a NEW file only (O_EXCL), never through a symlink (O_NOFOLLOW), readable by the
+    # server only; the bytes are hashed exactly as they arrive, before anything parses them
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
     try:
-        with tmp_path.open("wb") as out:
+        with os.fdopen(os.open(tmp_path, flags, 0o600), "wb") as out:
             while True:
                 chunk = upload.file.read(_UPLOAD_CHUNK_SIZE)
                 if not chunk:
@@ -123,6 +131,7 @@ def _discard_unreferenced_file(db: Session, path: Path) -> bool:
 
 @router.post("/upload", response_model=UploadResponse)
 def upload_lap(
+    request: Request,
     telemetry: UploadFile = File(...),
     envelope: str = Form(...),
     signature: str = Form(...),
@@ -130,6 +139,46 @@ def upload_lap(
     db: Session = Depends(get_db),
     _rl: None = Depends(rate_limit("upload", per_driver=True)),
 ) -> UploadResponse:
+    """V0.9.7: every attempt is recorded (server/upload_log.py) — outcome, reason, request id,
+    lap id, duration — for the operations view; the log line carries the same ids."""
+    started = time.monotonic()
+    info: dict = {}
+    request_id = getattr(request.state, "request_id", None)
+    driver_id = driver.id
+
+    def log(**kw) -> None:
+        # end this request's transaction first: on SQLite (BEGIN IMMEDIATE) it holds the write
+        # lock until the session closes, and the log is written in a session of its own
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        record_upload(request_id=request_id, driver_id=driver_id, started=started, **info, **kw)
+
+    try:
+        # V0.9.8: rows and file are written under the shared write lock — a backup (which takes it
+        # exclusively) sees either the whole upload or none of it (server/write_lock.py)
+        with writing():
+            result = _upload_lap(telemetry, envelope, signature, driver, db, info, request_id)
+    except MaintenanceActive:
+        log(status_code=503, outcome="rejected", reason="MAINTENANCE")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            {"code": "MAINTENANCE", "message": "A backup is running — the lap is kept and sent again shortly."},
+            headers={"Retry-After": str(RETRY_AFTER_S)},
+        )
+    except HTTPException as exc:
+        log(status_code=exc.status_code, outcome="rejected", reason=reason_of(exc.detail))
+        raise
+    except Exception as exc:  # noqa: BLE001 — recorded, then the normal 500 handling
+        log(status_code=500, outcome="error", reason=type(exc).__name__)
+        raise
+    log(status_code=200, lap_id=result.lap_id, outcome="duplicate" if result.duplicate else "accepted")
+    return result
+
+
+def _upload_lap(telemetry: UploadFile, envelope: str, signature: str, driver: Driver, db: Session,
+                info: dict, request_id: Optional[str] = None) -> UploadResponse:
     """Plain `def`, not `async def` — a real V0.8-NAS fix, not a style
     choice. This endpoint does purely synchronous, blocking work
     throughout (SQLAlchemy calls, disk I/O) with no genuinely async
@@ -177,6 +226,7 @@ def upload_lap(
     # doing any other work. Prevents a known-broken old client (like
     # V0.5.2's P0-1 bug) from silently piling up permanent failures.
     client_version = envelope_dict.get("client_version", "0.0.0")
+    info["client_version"] = str(client_version)[:32]
     if is_client_outdated(client_version, settings.min_client_version):
         # V0.8.6: 426 Upgrade Required with a machine-readable body
         # instead of a generic 400 — the desktop client recognizes
@@ -224,8 +274,15 @@ def upload_lap(
         )
 
     # --- 4. Stream telemetry to temp file ---
-    out_dir = telemetry_storage_dir(driver.id, metadata.track_name, metadata.car_name)
+    info["track_name"] = metadata.track_name[:120]
+    try:
+        out_dir = telemetry_storage_dir(driver.id, metadata.track_name, metadata.car_name)
+    except StorageOutside:
+        logger.error("Telemetry folder for driver %s resolves outside the storage root — upload refused", driver.id)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            {"code": "STORAGE_UNAVAILABLE", "message": "Telemetry storage is not available."})
     tmp_path, actual_hash, _size = _stream_to_temp_file(telemetry, out_dir)
+    info["file_bytes"] = int(_size)
 
     if actual_hash != envelope_dict.get("telemetry_hash"):
         tmp_path.unlink(missing_ok=True)
@@ -260,7 +317,11 @@ def upload_lap(
         # A crash in any of them is caught there — never a 500.
         # P0-3 stays: the client's own verdict (pit lane, its game reading) is one of
         # the inputs, so both sides can still reject a lap.
-        check = check_lap(db, dest_path, metadata, client_valid=metadata.is_valid)
+        # V0.9.9: the same bytes from ANOTHER driver are a replay candidate (server/lap_decision.py)
+        reused = db.query(func.count(func.distinct(Lap.driver_id))).filter(
+            Lap.telemetry_hash == actual_hash, Lap.driver_id != driver.id).scalar() or 0
+        check = check_lap(db, dest_path, metadata, client_valid=metadata.is_valid,
+                          client_version=str(client_version), reused_by_others=int(reused))
         is_valid = check.is_valid
 
         lap = Lap(
@@ -294,6 +355,9 @@ def upload_lap(
             telemetry_path=str(dest_path),
             client_version=envelope_dict.get("client_version"),
             sent_at=envelope_dict.get("sent_at"),
+            # V0.9.9: the received original — size and the request that stored it (server/integrity.py)
+            telemetry_bytes=int(_size),
+            upload_request_id=(request_id or None) and str(request_id)[:64],
         )
         db.add(lap)
         try:
@@ -309,9 +373,12 @@ def upload_lap(
             )
             return UploadResponse(status="ok", lap_id=existing.id, duplicate=True)
 
+        # V0.9.9: the server's MAC over the lap's identity, file hash, size and lap time
+        lap.integrity_mac = integrity.lap_mac(lap)
+
         # V0.9.3.1: track-limits reports LMU sent after the finish line belong to the lap
         # before — link this lap with its neighbours (server/lap_check.py)
-        link_neighbours(db, lap)
+        link_neighbours(db, lap, new_lap=True)
 
         # V0.9.3: what the upload says about the cars of the session (car_identity.py)
         learned = learn_from_upload(db, metadata)
@@ -323,12 +390,26 @@ def upload_lap(
         # V0.9.3: keyed by the car MODEL — records compare models (records.py), so two
         # liveries of one model racing for the same record must take the same lock.
         acquire_record_lock(db, metadata.track_name, lap.car_model or metadata.car_name)
-        evaluate_and_record(db, lap)
+        records = evaluate_and_record(db, lap)
+        # V0.9.9: the audit log (last before the commit — it holds the chain lock)
+        decision = (lap.validation or {}).get("decision") or {}
+        audit.append(db, "lap.accepted", lap_id=lap.id, driver_id=driver.id, request_id=request_id, detail={
+            "sha256": actual_hash, "bytes": int(_size), "format": "parquet", "status": check.status,
+            "review_status": lap.review_status,
+            "codes": [f.code for f in check.verdict.findings if f.severity != "info"][:20],
+            "evidence": (decision.get("evidence") or {}).get("level"),
+            "validators": decision.get("validators"), "records": [e.record_type for e in records],
+            "client_version": str(client_version)[:32],
+        })
         db.commit()
     except Exception:
         db.rollback()
         _discard_unreferenced_file(db, dest_path)
         raise
+    try:
+        os.chmod(dest_path, 0o440)        # V0.9.9: the original is never written again
+    except OSError:
+        pass
 
     db.refresh(lap)
     return UploadResponse(status="ok", lap_id=lap.id, duplicate=False)

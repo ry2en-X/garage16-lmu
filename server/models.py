@@ -9,7 +9,9 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 from sqlalchemy import (
+    DDL,
     JSON,
+    BigInteger,
     Boolean,
     Column,
     DateTime,
@@ -19,6 +21,7 @@ from sqlalchemy import (
     Integer,
     String,
     UniqueConstraint,
+    event,
     func,
 )
 from sqlalchemy.orm import relationship
@@ -140,6 +143,9 @@ class Lap(Base):
     validation = Column(JSON, nullable=True)
     # V0.9.3 — admin review of laps the check could not decide on its own:
     # NULL (nothing to review) | "pending" | "cleared" | "invalidated"
+    # V0.9.9: | "held" (REVIEW: stored, not official until an admin clears it)
+    #         | "quarantined" (the file failed its integrity check — server/integrity.py)
+    # "pending" keeps its V0.9.3 meaning (counts provisionally) for laps judged before V0.9.9.
     review_status = Column(String, nullable=True, index=True)
     # V0.9.3 — compact per-lap figures computed once at upload (server/lap_insights.py):
     # fuel/energy/tyre use, input shares, peaks, and the time profile behind the
@@ -160,6 +166,13 @@ class Lap(Base):
     client_version = Column(String, nullable=True)
     sent_at = Column(Float, nullable=True)
     uploaded_at = Column(DateTime, default=_utcnow)
+    # V0.9.9 — the received original (server/integrity.py): its size in bytes as received, the
+    # request id of the upload that stored it, and the server's MAC over (lap id, driver, sha256,
+    # size, upload time) with the integrity key. NULL for laps stored before V0.9.9 until
+    # scripts/integrity_check.py --backfill has verified the file and filled them in.
+    telemetry_bytes = Column(BigInteger, nullable=True)
+    upload_request_id = Column(String(64), nullable=True)
+    integrity_mac = Column(String(120), nullable=True)
 
     driver = relationship("Driver", back_populates="laps")
 
@@ -432,3 +445,79 @@ class RaceRuleSet(Base):
     rules = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=_utcnow)
     updated_at = Column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class UploadEvent(Base):
+    """V0.9.7 — one row per upload attempt: how it ended and why. The operations view
+    (GET /admin/operations) reads error rates, reasons and slow uploads from it; the request id
+    is the same one the response carries (X-Request-ID) and the server log line shows, so one
+    failed upload can be followed from the client's log to the server's.
+
+    No personal data beyond the driver id (deleted with the driver, server/driver_lifecycle.py);
+    rows older than UPLOAD_EVENT_RETENTION_DAYS are removed on their own."""
+
+    __tablename__ = "upload_events"
+
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime, default=_utcnow, index=True)
+    request_id = Column(String, nullable=True, index=True)
+    driver_id = Column(Integer, nullable=True, index=True)
+    lap_id = Column(Integer, nullable=True)
+    outcome = Column(String, nullable=False)          # accepted | duplicate | rejected | error
+    status_code = Column(Integer, nullable=False)
+    reason = Column(String, nullable=True)            # short machine-readable reason / message
+    client_version = Column(String, nullable=True)
+    track_name = Column(String, nullable=True)
+    file_bytes = Column(Integer, nullable=True)
+    duration_ms = Column(Float, nullable=True)
+
+
+class AuditEvent(Base):
+    """V0.9.9 — integrity, validation and admin events (server/audit.py), chained: every row's
+    `mac` is an HMAC (integrity key) over the previous row's mac and this row's content, so a row
+    changed, removed or inserted afterwards breaks the chain (scripts/integrity_check.py --audit).
+    `driver_id` is deliberately NOT covered by the chain: it is personal data and is set to NULL
+    when the driver is deleted (server/driver_lifecycle.py). A database trigger refuses any other
+    UPDATE (migration 0017 and the DDL below). Limits: whoever holds the integrity key AND can write
+    the database can rewrite the whole chain — docs/ARCHITECTURE.md."""
+
+    __tablename__ = "audit_events"
+
+    id = Column(Integer, primary_key=True)
+    created_at = Column(DateTime, default=_utcnow, index=True)
+    kind = Column(String(40), nullable=False, index=True)
+    actor = Column(String(20), nullable=False)        # system | admin | script
+    lap_id = Column(Integer, nullable=True, index=True)
+    driver_id = Column(Integer, nullable=True, index=True)
+    request_id = Column(String(64), nullable=True, index=True)
+    detail = Column(JSON, nullable=True)
+    prev_mac = Column(String(120), nullable=True)
+    mac = Column(String(120), nullable=False)
+
+
+# The same guard migration 0017 installs, for databases created from the models (tests, dev).
+_AUDIT_TRIGGER_SQLITE = DDL(
+    "CREATE TRIGGER IF NOT EXISTS audit_events_no_update BEFORE UPDATE ON audit_events "
+    "WHEN NEW.id IS NOT OLD.id OR NEW.created_at IS NOT OLD.created_at OR NEW.kind IS NOT OLD.kind "
+    "OR NEW.actor IS NOT OLD.actor OR NEW.lap_id IS NOT OLD.lap_id OR NEW.request_id IS NOT OLD.request_id "
+    "OR NEW.detail IS NOT OLD.detail OR NEW.prev_mac IS NOT OLD.prev_mac OR NEW.mac IS NOT OLD.mac "
+    "OR (NEW.driver_id IS NOT NULL AND NEW.driver_id IS NOT OLD.driver_id) "
+    "BEGIN SELECT RAISE(ABORT, 'audit_events rows are append-only'); END"
+)
+_AUDIT_TRIGGER_PG_FN = DDL(
+    "CREATE OR REPLACE FUNCTION audit_events_no_update() RETURNS trigger AS $$ BEGIN "
+    "IF NEW.id IS DISTINCT FROM OLD.id OR NEW.created_at IS DISTINCT FROM OLD.created_at "
+    "OR NEW.kind IS DISTINCT FROM OLD.kind OR NEW.actor IS DISTINCT FROM OLD.actor "
+    "OR NEW.lap_id IS DISTINCT FROM OLD.lap_id OR NEW.request_id IS DISTINCT FROM OLD.request_id "
+    "OR NEW.detail::text IS DISTINCT FROM OLD.detail::text OR NEW.prev_mac IS DISTINCT FROM OLD.prev_mac "
+    "OR NEW.mac IS DISTINCT FROM OLD.mac "
+    "OR (NEW.driver_id IS NOT NULL AND NEW.driver_id IS DISTINCT FROM OLD.driver_id) THEN "
+    "RAISE EXCEPTION 'audit_events rows are append-only'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql"
+)
+_AUDIT_TRIGGER_PG = DDL(
+    "CREATE TRIGGER audit_events_no_update BEFORE UPDATE ON audit_events "
+    "FOR EACH ROW EXECUTE FUNCTION audit_events_no_update()"
+)
+event.listen(AuditEvent.__table__, "after_create", _AUDIT_TRIGGER_SQLITE.execute_if(dialect="sqlite"))
+event.listen(AuditEvent.__table__, "after_create", _AUDIT_TRIGGER_PG_FN.execute_if(dialect="postgresql"))
+event.listen(AuditEvent.__table__, "after_create", _AUDIT_TRIGGER_PG.execute_if(dialect="postgresql"))

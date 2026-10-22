@@ -1,0 +1,36 @@
+{
+  "false_negatives": [
+    "all four on a wide kerb beyond the line, LMU silent",
+    "inner wheel 5 cm beyond the line, LMU silent"
+  ],
+  "false_positives": [],
+  "flagged": {
+    "fn": 2,
+    "fnr": 0.1667,
+    "fp": 0,
+    "fpr": 0.0,
+    "n": 38,
+    "precision": 1.0,
+    "recall": 0.8333,
+    "tn": 26,
+    "tp": 10
+  },
+  "invalidated": {
+    "fn": 8,
+    "fnr": 0.6667,
+    "fp": 0,
+    "fpr": 0.0,
+    "n": 38,
+    "precision": 1.0,
+    "recall": 0.3333,
+    "tn": 26,
+    "tp": 4
+  },
+  "manipulated": {
+    "n": 14,
+    "not_valid": 13,
+    "passed_as_valid": [
+      "consistent forgery of flags, surfaces and position"
+    ]
+  }
+}

@@ -5,7 +5,7 @@ desktop client reads shared memory and uploads laps, a FastAPI server
 stores and evaluates them (PR/WR/TEAM_BEST), a Discord bot announces
 records, and a static web app shows leaderboards/teams.
 
-**Current version: server 0.9.4 / desktop client 0.9.4.** The instance runs at **https://garage16.de**. See `CHANGELOG.md` for what changed and
+**Current version: server 0.9.9 / desktop client 0.9.4.** The instance runs at **https://garage16.de**. See `CHANGELOG.md` for what changed and
 `docs/` for deployment, privacy, and LMU-verification protocols.
 
 **Running Garage16 or playing on it?** Two short, practical guides —
@@ -211,10 +211,16 @@ it as a Docker-managed volume). No host-level cron or Task Scheduler
 needed at all; the same `docker compose --profile backup up -d`
 continues working unchanged after a NAS → VPS move.
 
+Since V0.9.8 both write one folder `garage16_<stamp>/` (dump, archive, `manifest.json` with
+SHA-256, schema revision, lap count) from ONE moment: the write lock (`server/write_lock.py`)
+holds new uploads off with 503 (the client retries) while running ones finish; the folder only
+appears once both files are checked.
+
 Either way: **periodically test a real restore**, not just that the
-backup file exists. `./scripts/restore.sh <db.sql.gz> <telemetry.tar.gz>`
-restores both together (drops and re-creates the database — a plain
-`psql < dump` into the existing one fails) — see `docs/ROLLBACK.md`.
+backup file exists. `./scripts/restore.sh <backup-folder>` stages the backup in a new database and
+volume, validates it there (migrations, every file's SHA-256), and only then switches — ending in
+the validated backup or the state before, never a mix (`--rollback <stamp>`, `--cleanup <stamp>`)
+— see `docs/ROLLBACK.md`.
 
 ### Lap analysis (V0.9.0)
 
@@ -287,9 +293,12 @@ the overview grid whose raw samples reach further than the drawn line (> 2 % of 
 a brake tap, a kerb), the response carries the raw min/max (`a_spikes` / `b_spikes`: `{i, lo, hi}`)
 and the chart draws them as thin vertical strokes.
 
-**Layout.** First open = the Garage16 standard layout. "Customise view" lets you reorder, resize
-and re-assign windows and pick colours; "Restore standard layout" removes only that stored
-preference. It lives in the browser's `localStorage` (key `garage16_analysis_layout`, versioned),
+**Layout.** First open = the Garage16 standard layout. "Customise view" turns the analysis into a
+grid editor (V0.9.5): tiles sit on a 12-column grid of 40 px rows (`x, y, w, h` in cells), are moved
+by their handle, resized at the corner, and added from the tile picker (What for? → Kind → Tile,
+with a live preview and ready-made sizes) or by drawing a box on empty cells (then only tiles that
+fit are offered); tiles in the way move down, nothing overlaps. "Restore standard layout" removes
+only that stored preference. It lives in the browser's `localStorage` (key `garage16_analysis_layout`, version 2; a version-1 layout is migrated),
 never on the server, never with telemetry. Window types are defined in
 `web/js/analysis/modules.js`, the layout model in `layout.js`, the shared cursor/zoom state in
 `model.js`; channel names, units and groups stay defined by the server (`/channels`).
@@ -398,6 +407,102 @@ builds both editions; a `client-v*` tag also publishes a GitHub release with all
 Verified: unit/jsdom tests, real PyInstaller builds of both editions on Linux, and the real window
 (pywebview, Qt WebEngine under Xvfb) against the real stack. Requires real Windows verification: the
 WebView2 window, the Windows bundle of pythonnet/WebView2, the installer edition switch.
+
+### V0.9.9 — track limits you can follow, stored laps you can trust
+
+- **VALID / INVALID / REVIEW** for every lap (`server/lap_decision.py`): a lap that cannot be checked
+  (signals missing, gaps, implausible motion, another driver's file) is REVIEW — stored and
+  analysable, but **held** out of leaderboards and records until an admin clears it. Laps flagged
+  before V0.9.9 keep counting: no record changes with the update.
+- **Measured against a labelled reference set** (truth from geometry, `scripts/trackcheck_eval.py`):
+  curated set precision 100 %, recall 83.3 %, no false positives; every miss is the same documented
+  limit (all four wheels on the kerb beyond the line with LMU reporting nothing). Not yet measured on
+  real laps — `--labels` does that on the NAS.
+- **Stored laps are tamper-evident**: size, sha256 and a server MAC per lap, checked on every
+  analysis access and by `scripts/integrity_check.py`; a changed file or an edited lap time puts the
+  lap into quarantine (Admin → Integrität). Chained, append-only **audit log**; its head is in every
+  backup manifest.
+- One additive migration (0017). Details: `CHANGELOG.md`, `docs/QUALITY.md`, `docs/ARCHITECTURE.md`;
+  NAS steps: `docs/ADMIN_GUIDE.md` and `docs/V0_9_9_NAS_ANLEITUNG.md`.
+
+### V0.9.8 — trustworthy operation: proxy trust, consistent backups, safe restores
+
+- **Rate limits count the real address** (`server/client_ip.py`, `LMU_GARAGE_TRUSTED_PROXIES`):
+  forwarding headers only from our proxies, read from the right.
+- **Backups from one moment** (`server/write_lock.py`): uploads pause with 503 for the seconds of
+  the dump; one folder per backup with a SHA-256 manifest, published only when checked.
+- **Restores that end in the backup or the state before** (`scripts/restore.sh`): staged, validated,
+  swapped by renaming, verified; `--rollback` / `--cleanup`. Proven by a real drill with a fault in
+  every step (`tests/test_v098_backup_restore.py`).
+- Operations: `/health/live`, `/health/ready`, request id in every error, upload-log drill-down,
+  key rotation (`scripts/rotate_secret_key.py`), a complete data export.
+- Release gate: linter, bandit, pip-audit, coverage floors, the tested tree is the zipped tree;
+  `scripts/mutation_check.py`; API contract snapshot.
+- Docs: `docs/ARCHITECTURE.md`, `docs/RUNBOOKS.md`, `docs/DATA_PROTECTION.md`, `docs/QUALITY.md`.
+
+### V0.9.7 — verifiable: release gate, reference laps, data quality, operations
+
+- **Release gate** (`scripts/release_check.py`, `.github/workflows/ci.yml`, `constraints.txt`): the
+  whole suite in a reproducible environment (pinned versions, also in the Docker images), strict —
+  a missing dependency is an infrastructure error (exit 6), a skipped test a failure; a report per
+  release. A database filled at every older schema is migrated to head and read by the current code.
+- **Reference laps with known values** (`tests/helpers/reference_lap.py`): a 2 kHz simulation is the
+  truth; recorded like LMU/the client (50 Hz frames, 60 Hz polls, `lap_dist` at 5 Hz), analysed by
+  the real code. Braking/throttle points and apex within one sample spacing, minimum/exit speed and
+  corner times/deltas within derived bounds; faults (duplicate polls, gaps, NaN, jitter, spikes,
+  restarts, truncated files) tested; a golden file ties result changes to the cache versions.
+  Found and fixed: a few NaN speed samples hid every corner; a restart inside a file was analysed as
+  a lap.
+- **Data quality per lap** (`server/telemetry_health.py`, `GET /telemetry/analysis/laps/{id}/health`,
+  tile "Data quality"): channels, frame rate, gaps, time/distance monotonic, `lap_dist` update rate,
+  speed vs distance, duration vs lap time, implausible values, resolution of a braking point.
+- **Hints with their measuring accuracy**: every corner point carries its resolution (`res`); a
+  difference only becomes a hint above it, shown as ±. Corners can be ordered by time lost. Stint
+  Analyzer: 95 % ranges for degradation and the fuel effect, consistency with the trend removed.
+- **Operations**: every upload attempt recorded (`upload_events`, migration 0016) with outcome,
+  reason, request id, lap id, duration; admin tab "Operations"; `scripts/consistency_check.py`
+  (database vs files, dry run by default); a permission matrix test derived from the app's own API
+  description; `scripts/load_test.py` (read-only).
+
+### V0.9.6 — clearer, simpler, faster (overview & usability pass)
+
+- **Menu in groups** (My garage · Analysis · Racing, account and download at the foot), brand
+  "Garage16" everywhere. **Fonts self-hosted** (`web/fonts`, SIL OFL) — no request to Google.
+- **Pages load on demand** (`router.js`, dynamic `import()`): the landing page loads 9 JS files /
+  ~130 KB instead of 50 / ~580 KB.
+- **Dashboard**: quick actions (analyse last lap, you vs. Garage16 Best, Stint Analyzer), bests per
+  track with "vs. Garage16 Best", team side by side, the lap list filtered in the browser; the three
+  requests and the team records run in parallel.
+- **Record feeds** (dashboard, driver, team; `web/js/activity.js`): one row per lap with every
+  record as a badge, the car model, a link into the analysis (`lap_id`, `car_model` added to
+  `/drivers/{id}/public`, `/teams/{id}/activity`, `/leaderboard/recent`).
+- **Leaderboard** shows a table at once (busiest track and class), reloads on every change, keeps
+  the choice in the address, shows the gap to P1. Team leaderboard likewise.
+- **Team page**: results first, people next, settings folded; sections load in parallel; one
+  overview card. **Account page**: often-used first, credentials / sessions / data folded.
+- **LapTime Analyzer**: compact toolbar; lap picker grouped per track, best lap marked, whole row
+  clickable. **Circuits**: undriven tracks as one compact list. Tables scroll inside their box on
+  phones; nothing is wider than the screen. Caddy compresses with zstd or gzip.
+
+### V0.9.5 — the LapTime Analyzer on a grid, every channel at telemetry rate
+
+- **Grid layout** (`web/js/analysis/layout.js` v2, `grid.js`, `tile_catalog.js`, `tile_picker.js`):
+  tiles on a 12-column grid with fixed rows; move by the handle (ghost: green = free, amber = tiles
+  in the way move down), resize at the corner, arrow keys / Shift+arrows; side panel **What for? →
+  Kind → Tile** with search, live preview of the real tile and ready-made sizes, drag onto the grid
+  or place automatically; or draw a box on empty cells and choose from the tiles that fit. Phones
+  stack the tiles. V0.9.1–V0.9.4 layouts are migrated in their order.
+- **Track surface behind the racing lines** (`server/track_surface.py`,
+  `GET /telemetry/analysis/track-surface`): asphalt, edges and kerbs rebuilt from LMU's
+  `path_lateral` / `track_edge` / surface type of several laps; a car-width band around every lap.
+- **Distance axis at telemetry rate** (`server/distance_axis.py`): `lap_dist` (LMU's scoring value,
+  possibly refreshed only ~5×/s) is kept where it advances; the samples in between are placed by the
+  integrated speed (exact at every `lap_dist` update). Before, those samples were dropped. Repeated
+  polls of one telemetry frame are dropped. `orientation.*.distance_axis` in `/compare` reports
+  how many samples carried a fresh `lap_dist`.
+- Corner metrics: pedal points (braking, back on throttle, 50 %, full throttle, turn-in)
+  interpolated between samples; peak deceleration = highest 0.1 s average; means over time.
+  Analysis cache version 6, insights v4 (`scripts.revalidate_laps --apply` recomputes them).
 
 ### V0.9.4 — two dashboards: LapTime Analyzer and Stint Analyzer
 
@@ -651,6 +756,9 @@ defaults apply otherwise. Full list with production notes: `.env.example`.
 | `LMU_GARAGE_MIN_CLIENT_VERSION` | Uploads from an older `client_version` are rejected with 400 | `0.5.3` |
 | `LMU_GARAGE_LOG_FORMAT` | `text` or `json` | `text` |
 | `LMU_GARAGE_DB_POOL_SIZE` / `LMU_GARAGE_DB_MAX_OVERFLOW` | PostgreSQL connection pool sizing (ignored for SQLite) | 5 / 10 |
+| `LMU_GARAGE_INTEGRITY_KEY` | V0.9.9: key of the server's MACs over stored laps and the audit log (`server/integrity.py`); comma-separated for rotation (first signs, all verify). Empty = derived from `LMU_GARAGE_SECRET_KEY`. | empty |
+| `LMU_GARAGE_AUDIT_RETENTION_DAYS` | V0.9.9: days the audit log is kept (minimum 30). | 365 |
+| `LMU_GARAGE_TRUSTED_PROXIES` | V0.9.8: whose `X-Forwarded-For` is believed (addresses / networks, or `private`); read from the right, so a header the visitor writes himself never changes the address the rate limits count (`server/client_ip.py`). docker-compose sets `private` (the app publishes no port). Empty = the socket address. | empty (compose: `private`) |
 | `LMU_GARAGE_RATELIMIT_*_MAX` / `_WINDOW` | Per-bucket rate limits (register/upload/team_join/link_code/report) — see `server/rate_limit.py` | see that module |
 | `CADDY_SITE_ADDRESS` | Reverse proxy access variant switch — `:80` (Tunnel) or a real domain (direct/VPS) | `:80` |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Only used with `--profile tunnel` (Variant A) | unset |
@@ -688,8 +796,28 @@ a driver and all their data. See `server/routers/admin.py`.
 
 ## Running tests
 
+**The release gate (V0.9.7)** — what decides whether a state may be released:
+
 ```
-pip install -r requirements-dev.txt -r server/requirements.txt -r client/requirements.txt
+bash scripts/setup_test_env.sh          # .venv with the exact versions of constraints.txt + jsdom
+. .venv/bin/activate
+python -m scripts.release_check         # whole suite, strict: a skipped test is a failure
+python -m scripts.release_check --zip Garage16_Lmu_V0_9_7.zip   # ... and the archive, only if green
+```
+
+It first checks the environment (every Python package, Node + jsdom, tkinter, bash/gzip,
+xvfb-run, caddy) and stops with **exit code 6 — "environment incomplete, nothing was tested"**
+when something is missing, instead of letting those tests skip themselves into a green-looking
+run. Installed versions are compared with `constraints.txt` (the versions the Docker images
+install). The report lands in `release/TEST_REPORT.md` (+ JUnit XML, `environment.json` with a
+hash over the released files) and goes into the release archive. `.github/workflows/ci.yml` runs
+the same gate on every push, plus the suite against PostgreSQL and the Docker image builds; the
+client build (`build-client.yml`) only starts after it passed.
+
+A quick local run without the gate is still just:
+
+```
+pip install -r requirements-dev.txt -r server/requirements.txt -r client/requirements.txt -c constraints.txt
 pytest
 ```
 

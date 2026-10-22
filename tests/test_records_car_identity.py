@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from tests.helpers.lapfile import with_signals
 
 
 def _register(client, name="Driver"):
@@ -39,7 +40,7 @@ def _upload_lap(
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
-        n = 50
+        n = int(lap_time * 20) + 1  # V0.9.9: a checkable frame rate (server/lap_decision.py)
         lap_dist_m = 4500.0
         speed = lap_dist_m / lap_time  # must match lap_dist/lap_time or validation rejects the lap
         df = pd.DataFrame({
@@ -49,6 +50,7 @@ def _upload_lap(
             "rpm": np.full(n, 6000.0), "fuel": np.linspace(50, 48, n),
         })
         parquet_path = tmp_dir / "lap.parquet"
+        df = with_signals(df)  # V0.9.9: the track-limits signals a 0.9.4 client records
         df.to_parquet(parquet_path, index=False)
         meta = {
             "track_name": track_name, "car_name": car_name, "car_class": car_class,

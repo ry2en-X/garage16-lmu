@@ -4,6 +4,14 @@ Garage16 contains no source code copied from the projects below. They are listed
 because their work informed parts of V0.9.0, and so that the origin of each idea or
 fact is traceable.
 
+## Fonts — Oswald and IBM Plex Mono (SIL Open Font License 1.1), V0.9.6
+
+Bundled in `web/fonts/` (Latin subset, WOFF2, from the Fontsource packages
+`@fontsource-variable/oswald` 5.2.8 and `@fontsource/ibm-plex-mono` 5.2.7), so the web app does not
+load them from Google. Oswald: Copyright 2016 The Oswald Project Authors. IBM Plex Mono: Copyright
+2017 IBM Corp. Both under the SIL Open Font License 1.1 — full texts in `web/fonts/OFL-Oswald.txt`
+and `web/fonts/OFL-IBM-Plex-Mono.txt`. The fonts are unmodified.
+
 ## ApexDash — idea and feature list (MIT)
 
 <https://github.com/AlexiMarin/ApexDash> — Copyright (c) 2026 ApexDash Contributors.

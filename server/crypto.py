@@ -34,7 +34,7 @@ from __future__ import annotations
 import logging
 import os
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 
 from .config import settings
 
@@ -48,10 +48,24 @@ logger = logging.getLogger("lmu_garage.crypto")
 _DEV_ONLY_FALLBACK_KEY = b"c2FtcGxlLWRldi1vbmx5LWtleS1kby1ub3QtdXNlISE="
 
 
-def _load_key() -> bytes:
+def _load_keys() -> list:
+    """V0.9.8: LMU_GARAGE_SECRET_KEY may hold several comma-separated keys — the FIRST encrypts,
+    all of them decrypt. That is how the key is rotated without locking anybody out
+    (docs/RUNBOOKS.md, "Schlüssel wechseln"): new key in front, old key behind it, restart,
+    `python -m scripts.rotate_secret_key --apply` re-encrypts every stored secret with the new
+    key, then the old key is removed."""
     raw = os.environ.get("LMU_GARAGE_SECRET_KEY")
     if raw:
-        return raw.encode()
+        keys = [k.strip().encode() for k in raw.split(",") if k.strip()]
+        if keys:
+            return keys
+    return [_load_key()]
+
+
+def _load_key() -> bytes:
+    raw = os.environ.get("LMU_GARAGE_SECRET_KEY")
+    if raw and raw.strip(","):
+        return raw.split(",")[0].strip().encode()
 
     if settings.is_production:
         raise RuntimeError(
@@ -70,7 +84,26 @@ def _load_key() -> bytes:
     return _DEV_ONLY_FALLBACK_KEY
 
 
-_fernet = Fernet(_load_key())
+def build(keys) -> MultiFernet:
+    """A MultiFernet for the given keys (the first encrypts). A malformed key fails here, at start."""
+    return MultiFernet([Fernet(k) for k in keys])
+
+
+_fernet = build(_load_keys())
+
+
+def rotate_secret(ciphertext: str) -> str:
+    """Re-encrypts one stored secret with the current (first) key — unchanged plaintext."""
+    return _fernet.rotate(ciphertext.encode()).decode()
+
+
+def current_key_decrypts(ciphertext: str) -> bool:
+    """True when the FIRST key alone can read this value (it needs no rotation)."""
+    try:
+        Fernet(_load_keys()[0]).decrypt(ciphertext.encode())
+        return True
+    except InvalidToken:
+        return False
 
 
 def encrypt_secret(plaintext: str) -> str:

@@ -24,7 +24,6 @@ pandas parquet engine) to actually parse the uploaded bytes.
 from __future__ import annotations
 
 import io
-import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, Union
@@ -118,8 +117,11 @@ def validate_telemetry_file(
     channel later — the analysis reports "could not be read" for it instead of
     crashing. Pass full_check=True to decode every column as before.
     """
+    from .telemetry_analysis import check_limits
+
     try:
         parquet = pq.ParquetFile(path)
+        check_limits(parquet)
         present = set(parquet.schema_arrow.names)
         columns = None if full_check else sorted(REQUIRED_COLUMNS & present)
         table = parquet.read(columns=columns)
@@ -139,9 +141,12 @@ def validate_and_read(path: Union[str, Path], metadata: LapMetadata, extra_colum
     an invalid result and an empty dict, exactly like validate_telemetry_file."""
     from .telemetry_analysis import AnalysisError, read_raw
 
+    from .telemetry_analysis import check_limits
+
     wanted = list(dict.fromkeys([*sorted(REQUIRED_COLUMNS), *extra_columns]))
     try:
         parquet = pq.ParquetFile(path)
+        check_limits(parquet)          # V0.9.9: before anything is decoded
         columns = read_raw(Path(path), wanted, parquet)
     except (AnalysisError, Exception) as exc:  # noqa: BLE001 — any parse failure means "not usable"
         return ValidationResult(is_valid=False, reasons=[f"telemetry file could not be parsed: {exc}"]), {}

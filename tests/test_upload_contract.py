@@ -9,7 +9,6 @@ LapMetadata (extra="forbid") rejected every upload with 400.
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 from server.schemas import LapMetadata
 

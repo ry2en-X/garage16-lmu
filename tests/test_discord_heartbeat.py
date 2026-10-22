@@ -2,7 +2,6 @@
 docker-compose.yml's HEALTHCHECK uses, since a bot process has no port to
 probe directly."""
 
-import os
 import tempfile
 from pathlib import Path
 

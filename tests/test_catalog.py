@@ -8,6 +8,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from tests.helpers.lapfile import with_signals
+import itertools
+
+_UPLOAD_SEQ = itertools.count(1)  # every upload in the process gets its own bytes
 
 
 def _register(client, name):
@@ -22,14 +26,14 @@ def _upload(client, account, track, car_name, car_class, car_model, lap_time=90.
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
-        n = 50
+        n = int(lap_time * 20) + 1  # V0.9.9: a checkable frame rate (server/lap_decision.py)
         # Tiny, deterministic perturbation so distinct (track, car, model)
-        # combos never produce byte-identical parquet content — otherwise
+        # uploads never produce byte-identical parquet content — otherwise
         # the server's real, correct upload-idempotency check (same
         # driver + same telemetry hash = duplicate, see P0-4b) would
         # silently collapse two genuinely different test uploads into
         # one, which is a test-fixture problem, not a product bug.
-        salt = (hash((track, car_name, car_model)) % 1000) / 10000.0
+        salt = (next(_UPLOAD_SEQ) % 1000) / 10000.0  # V0.9.9: a counter, not hash() (seed-dependent collisions)
         speed_ms = 50.0 + salt
         df = pd.DataFrame({
             "t": np.linspace(0, lap_time, n), "lap_dist": np.linspace(0, speed_ms * lap_time, n),
@@ -38,6 +42,7 @@ def _upload(client, account, track, car_name, car_class, car_model, lap_time=90.
             "rpm": np.full(n, 6000.0), "fuel": np.linspace(50, 48, n),
         })
         parquet_path = tmp_dir / "lap.parquet"
+        df = with_signals(df)  # V0.9.9: the track-limits signals a 0.9.4 client records
         df.to_parquet(parquet_path, index=False)
         meta_path = tmp_dir / "lap.json"
         meta_path.write_text(json.dumps({
@@ -122,7 +127,7 @@ def test_catalog_excludes_laps_without_class_or_model(client):
     account = _register(client, "Old Client Driver")
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
-        n = 50
+        n = int(90.0 * 20) + 1  # V0.9.9: a checkable frame rate (server/lap_decision.py)
         df = pd.DataFrame({
             "t": np.linspace(0, 90.0, n), "lap_dist": np.linspace(0, 4500, n),
             "speed": np.full(n, 50.0), "throttle": np.full(n, 0.8), "brake": np.zeros(n),
@@ -130,6 +135,7 @@ def test_catalog_excludes_laps_without_class_or_model(client):
             "rpm": np.full(n, 6000.0), "fuel": np.linspace(50, 48, n),
         })
         parquet_path = tmp_dir / "lap.parquet"
+        df = with_signals(df)  # V0.9.9: the track-limits signals a 0.9.4 client records
         df.to_parquet(parquet_path, index=False)
         meta_path = tmp_dir / "lap.json"
         # No car_class/car_model key at all — pre-V0.6.3 client.

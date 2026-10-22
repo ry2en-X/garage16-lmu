@@ -25,6 +25,8 @@ SAME_IN_BOTH_LANGUAGES = {
     "Lap ID:", "Layout", "Leaderboard", "Leaderboards →", "PBs", "Status", "System", "Team Best", "Teams",
     # V0.9.3: the usual German statistics words
     "Median", "Trend",
+    # V0.9.7: "Uploads" is the usual German word too (admin operations tab)
+    "Uploads",
     "Teams →", "Version", "ok", "{0}: {1} s @ {2}",
     # V0.9.4: the two dashboards keep their names; "Stint", "Tank", "Position" are German words too
     "LapTime Analyzer", "Stint Analyzer", "Stint", "Stints", "Stint {0}", "Tank", "Tank (L)", "Position", "Name", "{0} min",

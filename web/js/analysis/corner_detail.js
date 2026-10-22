@@ -87,8 +87,10 @@ export function historySentences(corner, rows) {
 export function renderLine(widget, ctx) {
   const map = createLineMap(ctx.mapState || ctx.state, {
     fetchLine: ctx.fetchLine,
+    trackSurface: ctx.trackSurface,
     selection: ctx.selection,
     viewState: ctx.state,
+    height: Number.isFinite(widget.boxHeight) ? Math.max(widget.boxHeight - 215, 200) : undefined,
   });
   return { element: el("div", { class: "card" }, [el("h2", {}, t("Racing lines")), map.element]), destroy: () => map.destroy() };
 }

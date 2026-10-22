@@ -78,7 +78,7 @@ def _db() -> Session:
 # the loop (logged, not re-raised) still updates it, since the process
 # itself is alive and will retry; only a genuine hang or crash lets the
 # file go stale.
-_HEARTBEAT_PATH = os.environ.get("LMU_GARAGE_BOT_HEARTBEAT_PATH", "/tmp/discord_bot_heartbeat")
+_HEARTBEAT_PATH = os.environ.get("LMU_GARAGE_BOT_HEARTBEAT_PATH", "/tmp/discord_bot_heartbeat")  # nosec B108 — the container's own /tmp, read by its healthcheck
 
 
 def _touch_heartbeat() -> None:

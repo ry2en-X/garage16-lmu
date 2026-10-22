@@ -14,7 +14,6 @@ import time
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from client.lmu.structs import TelemInfoV01, VehicleScoringInfoV01
 from client.telemetry.async_saver import AsyncLapSaver

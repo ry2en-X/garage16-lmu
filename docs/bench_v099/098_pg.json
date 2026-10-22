@@ -1,0 +1,57 @@
+{
+  "version": "0.9.8",
+  "python": "3.12.3",
+  "machine": "x86_64",
+  "processor": "x86_64",
+  "cpus": 2,
+  "database": "postgresql",
+  "laps": 40,
+  "threads": 4,
+  "repeat": 5,
+  "file_bytes": {
+    "normal": 8017525,
+    "long": 19854007
+  },
+  "rows": {
+    "normal": 12600,
+    "long": 32400
+  },
+  "hash_mb_s": 380.7,
+  "check_ms": {
+    "normal": 95.6,
+    "long": 103.4
+  },
+  "check_peak_mb": {
+    "normal": 8.7,
+    "long": 19.2
+  },
+  "upload": {
+    "laps_per_s": 9.32,
+    "p50_ms": 95.8,
+    "p95_ms": 133.6,
+    "sql_per_upload": 12.0,
+    "write_lock_p50_ms": 75.9,
+    "write_lock_p95_ms": 101.1
+  },
+  "parallel": {
+    "laps_per_s": 10.44,
+    "errors": 0
+  },
+  "read_ms": {
+    "first": 10.2,
+    "again": 9.2
+  },
+  "db": {
+    "laps": 80,
+    "bytes": {
+      "laps": 565248,
+      "record_events": 98304,
+      "upload_events": 139264
+    },
+    "bytes_per_lap": {
+      "laps": 7066,
+      "record_events": 1229,
+      "upload_events": 1741
+    }
+  }
+}
