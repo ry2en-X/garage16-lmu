@@ -61,6 +61,9 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: files
+          # V1.0: only the client packages — the test job (ci.yml) also leaves a "test-report"
+          # artifact, whose folders made the release upload fail ("files/release: is a directory")
+          pattern: garage16-client-windows-*
           merge-multiple: true
       - name: Create the GitHub release with both editions
         env:
@@ -82,4 +85,4 @@ jobs:
           From 1.0 on you connect the client with the **email and password of your Garage16 account** — no token to copy.
           Step-by-step guide: the "Setup guide" page of your Garage16 website (`#/setup`).
           NOTES
-          gh release create "$TAG" files/* --repo "$GITHUB_REPOSITORY" --title "Garage16 client ${TAG#client-v}" --notes-file notes.md
+          gh release create "$TAG" files/*.exe files/*.zip --repo "$GITHUB_REPOSITORY" --title "Garage16 client ${TAG#client-v}" --notes-file notes.md
