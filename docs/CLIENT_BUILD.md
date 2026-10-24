@@ -1,5 +1,12 @@
 # Client-Paket bauen und verteilen (für den Admin)
 
+> **Ab V1.0:** Das Repository ist öffentlich, ein Tag `client-vX.Y.Z` baut beide Installer und legt
+> das Release an — die Download-Knöpfe der Website zeigen ohne `.env`-Eintrag automatisch auf das
+> neueste Release (`…/releases/latest/download/Garage16-Client-Setup.exe`). Schritt für Schritt:
+> `docs/ADMIN_GUIDE.md`, „Neu in V1.0“, Teil B. Der Client meldet sich mit E-Mail und Passwort an.
+> Die Variable `GARAGE16_SERVER_URL` muss auf die Adresse zeigen, unter der der Server wirklich
+> erreichbar ist — solange garage16.de noch auf den Webspace zeigt, die Tunnel-Adresse.
+
 > **Ab V0.9.2 in zwei Varianten** (gleicher Code, gleiche App):
 >
 > | Variante | Installer | Portable | Analyse |
@@ -115,8 +122,10 @@ den neuen Server ist, braucht er das Update wie oben.
 - [ ] Installer läuft durch, ohne nach Administrator-Rechten zu fragen
 - [ ] Nach dem Start: **Fenster** "Connect Garage16 to your account",
       Server-Adresse ist bereits vorausgefüllt (wenn eingebacken)
-- [ ] Mit Auth-Token/Client-Secret verbinden → Hauptfenster,
-      "Waiting for LMU to start..."
+- [ ] Mit **E-Mail und Passwort** verbinden (V1.0) → Hauptfenster,
+      "Waiting for LMU to start..."; Links „Create an account“, „Setup guide“, „Privacy & legal“
+      öffnen die Website
+- [ ] Haken „Use an auth token instead (advanced)“ → Token/Secret-Felder erscheinen
 - [ ] LMU starten → "Connected to LMU shared memory."
 - [ ] Eine Runde fahren → erscheint im Aktivitätsfenster und im Web-Leaderboard
 - [ ] Zweites Mal `Garage16-Client-Setup.exe` ausführen → Update in Place,

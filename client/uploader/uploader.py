@@ -46,7 +46,7 @@ from client.telemetry.recorder import LapRecorder
 
 logger = logging.getLogger("lmu_garage.uploader")
 
-CLIENT_VERSION = "0.9.4"
+CLIENT_VERSION = "1.0.0"
 DEFAULT_BACKEND_URL = "https://api.example-lmu-garage.invalid"  # placeholder, replace with real backend
 UPLOAD_ENDPOINT = "/telemetry/upload"
 MAX_RETRIES = 5

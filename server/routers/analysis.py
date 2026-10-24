@@ -862,6 +862,10 @@ def racing_line(
 # V0.9.5: the track itself behind the lines (server/track_surface.py). Besides the laps on the
 # map, a few more recent valid laps of the same layout fill in the edges those laps never drove on.
 SURFACE_EXTRA_LAPS = 6
+# V0.9.9.3: part of the surface's cache key and ETag only — the sign decision changed, and browsers
+# still holding V0.9.5-V0.9.9's empty answer must not get it confirmed with 304. The other analysis
+# answers are unchanged, so ANALYSIS_CACHE_VERSION (and their golden reference) stays.
+SURFACE_VERSION = 2
 
 
 @router.get("/track-surface")
@@ -878,9 +882,10 @@ def track_surface(
 
     Built from LMU's path_lateral / track_edge / surface type of the laps on the map plus up to
     SURFACE_EXTRA_LAPS recent valid laps of the same layout (only geometry is returned — nothing
-    about those laps or their drivers). -> {"surface": {...} | null, "mirrored"}; null when the
-    laps were recorded without these fields (client < 0.9) or the data cannot be read reliably."""
-    from ..track_surface import SURFACE_COLUMNS_KEYS, build_surface
+    about those laps or their drivers). -> {"surface": {...} | null, "mirrored", "reason"}; null when
+    the laps were recorded without these fields (client < 0.9) or the data cannot be read reliably —
+    "reason" says which (V0.9.9.3; null when there is a surface)."""
+    from ..track_surface import SURFACE_COLUMNS_KEYS, build_surface_why
 
     extra_ids = _parse_extra(extra, lap_a, lap_b)
     lap_a_row, path_a, _ = _open_lap(db, lap_a, viewer)
@@ -902,7 +907,7 @@ def track_surface(
             rows.append((row.id, row, _telemetry_file(row)))
         except HTTPException:
             continue          # file gone: just one lap fewer
-    cache_key = AnalysisCache.make_key("surface", tuple(sorted(r.telemetry_hash or str(i) for i, r, _p in rows)), rows[0][1].telemetry_hash,
+    cache_key = AnalysisCache.make_key("surface", SURFACE_VERSION, tuple(sorted(r.telemetry_hash or str(i) for i, r, _p in rows)), rows[0][1].telemetry_hash,
                                        rows[1][1].telemetry_hash if lap_b is not None else None)
     etag = AnalysisCache.etag_for(cache_key, "")
     headers = {"ETag": etag, "Cache-Control": PRIVATE_REVALIDATE, "Vary": VARY_AUTH}
@@ -919,8 +924,8 @@ def track_surface(
                     raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Lap {lap_id} cannot be analysed.")
         # the same mirror decision as /compare and /line, so the surface lies under the lines
         mirror, _info = resolve_mirror(loaded[lap_a], loaded.get(lap_b) if lap_b is not None else None)
-        surface = build_surface(list(loaded.values()), mirror)
-        body = _compact_json({"surface": surface, "mirrored": mirror})
+        surface, reason = build_surface_why(list(loaded.values()), mirror)
+        body = _compact_json({"surface": surface, "mirrored": mirror, "reason": reason})
         analysis_cache.put(cache_key, body)
     return Response(content=body, media_type="application/json", headers=headers)
 

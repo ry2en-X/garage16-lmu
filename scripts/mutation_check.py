@@ -93,9 +93,8 @@ EQUIVALENT = {
     ("distance_axis", "distance_axis", "line 131: > -> >="): "an advance of exactly 1e-6 m does not occur",
     ("distance_axis", "distance_axis", "line 132: > -> >="): "rows with running maximum -inf are already unusable",
     ("client_ip", "_ip", "line 57: 1 -> 2"): "split(':', 2) of 'a.b.c.d:port' gives the same first part",
-    ("write_lock", "maintenance_active", "line 70: > -> >="): "an age of exactly MARKER_STALE_S (a float) is not observable",
-    ("write_lock", "writing", "line 87: 436 -> 437"): "the lock file's mode (0o664 vs 0o665): the execute bit changes nothing",
-    ("write_lock", "writing", "line 95: >= -> >"): "the deadline reached to the exact float is not observable",
+    ("write_lock", "maintenance_active", "line 91: > -> >="): "an age of exactly MARKER_STALE_S (a float) is not observable",
+    ("write_lock", "writing", "line 116: >= -> >"): "the deadline reached to the exact float is not observable",
     # V0.9.9
     ("upload_limits", "check_limits", "line 160: 1024 -> 1025"): "the MiB figure in the error message only (the limit is compared in bytes)",
     ("upload_limits", "check_limits", "line 160: 1024 -> 1025 #2"): "the same figure, the second factor of 1024 * 1024",

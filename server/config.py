@@ -14,6 +14,27 @@ from typing import Optional
 from .client_ip import parse_trusted
 
 
+# V1.0: the public GitHub repository whose releases carry the Windows installers. Empty
+# (LMU_GARAGE_GITHUB_REPO=) = no default download links.
+DEFAULT_GITHUB_REPO = "ry2en-X/garage16-lmu"
+
+
+def _github_repo() -> str:
+    return os.environ.get("LMU_GARAGE_GITHUB_REPO", DEFAULT_GITHUB_REPO).strip().strip("/")
+
+
+def _github_asset(filename: str) -> Optional[str]:
+    """Direct link to a file of the newest (non-pre-)release: GitHub redirects
+    /releases/latest/download/<name> to the newest release that has a file of that name."""
+    repo = _github_repo()
+    return f"https://github.com/{repo}/releases/latest/download/{filename}" if repo else None
+
+
+def _github_release_page() -> Optional[str]:
+    repo = _github_repo()
+    return f"https://github.com/{repo}/releases/latest" if repo else None
+
+
 @dataclass
 class Settings:
     database_url: str = field(
@@ -175,15 +196,49 @@ class Settings:
     # Purely informational — advertised in UPDATE_REQUIRED responses and
     # GET /health; the server never serves or verifies any download
     # itself. Unset = the message just says to ask whoever runs the server.
+    # V1.0: unset = the newest GitHub release of LMU_GARAGE_GITHUB_REPO (see below), so the
+    # download buttons fetch the installer itself without any .env entry.
     client_download_url: Optional[str] = field(
-        default_factory=lambda: os.environ.get("LMU_GARAGE_CLIENT_DOWNLOAD_URL") or None
+        default_factory=lambda: os.environ.get("LMU_GARAGE_CLIENT_DOWNLOAD_URL")
+        or _github_asset("Garage16-Client-Setup.exe")
     )
     # V0.9.2: the client comes in two editions — "Client" (analysis opens in the
     # browser; LMU_GARAGE_CLIENT_DOWNLOAD_URL above) and "Client + analysis app"
     # (analysis in its own window; this one). Both are shown side by side on the
     # website's download page, and a too-old client is sent to its own edition.
     client_app_download_url: Optional[str] = field(
-        default_factory=lambda: os.environ.get("LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL") or None
+        default_factory=lambda: os.environ.get("LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL")
+        or _github_asset("Garage16-Client-Analysis-Setup.exe")
+    )
+    # V1.0: the page with every download of the newest release (fallback link under the buttons).
+    client_release_page_url: Optional[str] = field(
+        default_factory=lambda: os.environ.get("LMU_GARAGE_CLIENT_RELEASE_PAGE_URL")
+        or _github_release_page()
+    )
+
+    # --- V1.0: open registration and the legal pages ---
+    # Without a registration secret a production server refuses to start — unless this says on
+    # purpose that ANYBODY may create an account (on the website's sign-up form, which requires
+    # accepting the terms and confirming the minimum age).
+    open_registration: bool = field(
+        default_factory=lambda: os.environ.get("LMU_GARAGE_OPEN_REGISTRATION", "").strip().lower()
+        in ("1", "true", "yes")
+    )
+    # Minimum age for an account (terms of use, privacy policy; the sign-up form asks for it).
+    min_age: int = field(default_factory=lambda: int(os.environ.get("LMU_GARAGE_MIN_AGE", 16)))
+    # The operator shown in the legal notice (Impressum) and the privacy policy. Kept in .env, not in
+    # the code: the repository is public and other instances have other operators. Address lines
+    # are separated by "|", e.g. "Musterstraße 1|12345 Musterstadt".
+    operator_name: Optional[str] = field(
+        default_factory=lambda: (os.environ.get("LMU_GARAGE_OPERATOR_NAME") or "").strip() or None
+    )
+    operator_address: list = field(
+        default_factory=lambda: [
+            line.strip() for line in os.environ.get("LMU_GARAGE_OPERATOR_ADDRESS", "").split("|") if line.strip()
+        ]
+    )
+    operator_email: Optional[str] = field(
+        default_factory=lambda: (os.environ.get("LMU_GARAGE_OPERATOR_EMAIL") or "").strip() or None
     )
 
     # V0.9.3.1: track-limits heuristics that may invalidate a lap on their own (comma
@@ -246,14 +301,22 @@ settings = Settings()
 # permission for the path (which it correctly does, since it has no
 # reason to ever write there).
 
-if settings.registration_secret is None:
-    if settings.is_production:
+def check_registration_settings(cfg: Settings) -> None:
+    """V1.0: a production server needs EITHER a registration secret (closed circle) OR an explicit
+    LMU_GARAGE_OPEN_REGISTRATION=1 (anybody may sign up on the website). Neither = refuse to start,
+    so a forgotten setting never opens the server by accident."""
+    if cfg.registration_secret is None and not cfg.open_registration and cfg.is_production:
         raise RuntimeError(
-            "LMU_GARAGE_REGISTRATION_SECRET is not set and LMU_GARAGE_ENV is not "
-            "'development' — refusing to start. Set a registration secret before "
-            "exposing this server beyond localhost, or set LMU_GARAGE_ENV=development "
-            "for local-only use."
+            "Neither LMU_GARAGE_REGISTRATION_SECRET nor LMU_GARAGE_OPEN_REGISTRATION=1 is set and "
+            "LMU_GARAGE_ENV is not 'development' — refusing to start. Set a registration secret "
+            "(only people who know it can sign up), or LMU_GARAGE_OPEN_REGISTRATION=1 (anybody can "
+            "sign up on the website), or LMU_GARAGE_ENV=development for local-only use."
         )
+
+
+check_registration_settings(settings)
+
+if settings.registration_secret is None and not settings.open_registration:
     logging.getLogger("lmu_garage.config").warning(
         "LMU_GARAGE_REGISTRATION_SECRET is not set — /accounts/register is open "
         "to anyone who can reach this server. Fine for solo/localhost dev; set "

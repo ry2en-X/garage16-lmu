@@ -94,6 +94,28 @@
       "title": "Teams",
       "type": "array"
      },
+     "terms_accepted_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Terms Accepted At"
+     },
+     "terms_version": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Terms Version"
+     },
      "upload_log": {
       "default": [],
       "items": {
@@ -567,6 +589,58 @@
      "new_password"
     ],
     "title": "ChangePasswordRequest",
+    "type": "object"
+   },
+   "DesktopLoginRequest": {
+    "description": "POST /accounts/desktop-login (V1.0) \u2014 the desktop client's \"Connect\" with email + password.",
+    "properties": {
+     "email": {
+      "maxLength": 254,
+      "minLength": 3,
+      "title": "Email",
+      "type": "string"
+     },
+     "password": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Password",
+      "type": "string"
+     }
+    },
+    "required": [
+     "email",
+     "password"
+    ],
+    "title": "DesktopLoginRequest",
+    "type": "object"
+   },
+   "DesktopLoginResponse": {
+    "description": "The desktop client's credentials. The auth token is NEW (the previous one stops working \u2014\nonly one PC is connected at a time); the client secret is the account's existing one.",
+    "properties": {
+     "auth_token": {
+      "title": "Auth Token",
+      "type": "string"
+     },
+     "client_secret": {
+      "title": "Client Secret",
+      "type": "string"
+     },
+     "display_name": {
+      "title": "Display Name",
+      "type": "string"
+     },
+     "driver_id": {
+      "title": "Driver Id",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "driver_id",
+     "display_name",
+     "auth_token",
+     "client_secret"
+    ],
+    "title": "DesktopLoginResponse",
     "type": "object"
    },
    "DiscordLinkStatusOut": {
@@ -1149,6 +1223,40 @@
     "title": "LeaderboardEntry",
     "type": "object"
    },
+   "LegalInfoOut": {
+    "description": "GET /legal (V1.0) \u2014 what the legal pages fill in: the operator (from .env; null when not\nconfigured), the minimum age, the version of the terms and whether anybody may sign up.",
+    "properties": {
+     "min_age": {
+      "title": "Min Age",
+      "type": "integer"
+     },
+     "operator": {
+      "anyOf": [
+       {
+        "$ref": "#/components/schemas/OperatorOut"
+       },
+       {
+        "type": "null"
+       }
+      ]
+     },
+     "registration": {
+      "title": "Registration",
+      "type": "string"
+     },
+     "terms_version": {
+      "title": "Terms Version",
+      "type": "string"
+     }
+    },
+    "required": [
+     "min_age",
+     "terms_version",
+     "registration"
+    ],
+    "title": "LegalInfoOut",
+    "type": "object"
+   },
    "LinkCodeResponse": {
     "properties": {
      "code": {
@@ -1217,6 +1325,38 @@
      "display_name"
     ],
     "title": "LoginResponse",
+    "type": "object"
+   },
+   "OperatorOut": {
+    "properties": {
+     "address": {
+      "default": [],
+      "items": {
+       "type": "string"
+      },
+      "title": "Address",
+      "type": "array"
+     },
+     "email": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Email"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name"
+    ],
+    "title": "OperatorOut",
     "type": "object"
    },
    "PasswordResetConfirmRequest": {
@@ -1717,6 +1857,46 @@
      "new_password"
     ],
     "title": "SetPasswordRequest",
+    "type": "object"
+   },
+   "SignupRequest": {
+    "description": "POST /accounts/signup (V1.0) \u2014 the website's sign-up form: driver name, email, password, and\nthe two confirmations the terms require. Creates the account WITH email and password (the\ndesktop client then signs in with them, POST /accounts/desktop-login), so nobody has to copy\ntokens any more.",
+    "properties": {
+     "accept_terms": {
+      "default": false,
+      "title": "Accept Terms",
+      "type": "boolean"
+     },
+     "confirm_min_age": {
+      "default": false,
+      "title": "Confirm Min Age",
+      "type": "boolean"
+     },
+     "display_name": {
+      "maxLength": 60,
+      "minLength": 1,
+      "title": "Display Name",
+      "type": "string"
+     },
+     "email": {
+      "maxLength": 254,
+      "minLength": 3,
+      "title": "Email",
+      "type": "string"
+     },
+     "password": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Password",
+      "type": "string"
+     }
+    },
+    "required": [
+     "display_name",
+     "email",
+     "password"
+    ],
+    "title": "SignupRequest",
     "type": "object"
    },
    "StatusResponse": {
@@ -2599,6 +2779,48 @@
      }
     },
     "summary": "Change Password",
+    "tags": [
+     "accounts"
+    ]
+   }
+  },
+  "/accounts/desktop-login": {
+   "post": {
+    "description": "The desktop client's \"Connect\" with email + password (V1.0). Issues a NEW auth token \u2014\nthe previous one stops working, so one PC is connected at a time (connecting a second PC\ndisconnects the first; it says so and offers \"Reconnect account\u2026\") \u2014 and returns the\naccount's existing client secret, so laps already waiting on this PC still upload. Same\ngeneric failure as /login (no hint which emails have accounts).",
+    "operationId": "desktop_login_accounts_desktop_login_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/DesktopLoginRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/DesktopLoginResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Desktop Login",
     "tags": [
      "accounts"
     ]
@@ -3770,6 +3992,66 @@
      }
     },
     "summary": "Set Password",
+    "tags": [
+     "accounts"
+    ]
+   }
+  },
+  "/accounts/signup": {
+   "post": {
+    "description": "The website's sign-up form (V1.0): one step instead of register \u2192 copy token and secret \u2192\nset email and password. Creates the account with email and password, records the accepted\nterms (server/routers/legal.py TERMS_VERSION), sends the verification email and signs the\nbrowser in (session cookie, like /login). The desktop client connects with the same email\nand password (POST /accounts/desktop-login) \u2014 no token to copy.",
+    "operationId": "signup_accounts_signup_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "x-registration-secret",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "X-Registration-Secret"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SignupRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LoginResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Signup",
     "tags": [
      "accounts"
     ]
@@ -6276,6 +6558,27 @@
     "summary": "Recent Activity",
     "tags": [
      "leaderboard"
+    ]
+   }
+  },
+  "/legal": {
+   "get": {
+    "operationId": "legal_info_legal_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/LegalInfoOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Legal Info",
+    "tags": [
+     "legal"
     ]
    }
   },
@@ -9978,7 +10281,7 @@
   },
   "/telemetry/analysis/track-surface": {
    "get": {
-    "description": "V0.9.5 \u2014 asphalt, both edges and the kerbs of the layout, in the map's coordinates.\n\nBuilt from LMU's path_lateral / track_edge / surface type of the laps on the map plus up to\nSURFACE_EXTRA_LAPS recent valid laps of the same layout (only geometry is returned \u2014 nothing\nabout those laps or their drivers). -> {\"surface\": {...} | null, \"mirrored\"}; null when the\nlaps were recorded without these fields (client < 0.9) or the data cannot be read reliably.",
+    "description": "V0.9.5 \u2014 asphalt, both edges and the kerbs of the layout, in the map's coordinates.\n\nBuilt from LMU's path_lateral / track_edge / surface type of the laps on the map plus up to\nSURFACE_EXTRA_LAPS recent valid laps of the same layout (only geometry is returned \u2014 nothing\nabout those laps or their drivers). -> {\"surface\": {...} | null, \"mirrored\", \"reason\"}; null when\nthe laps were recorded without these fields (client < 0.9) or the data cannot be read reliably \u2014\n\"reason\" says which (V0.9.9.3; null when there is a surface).",
     "operationId": "track_surface_telemetry_analysis_track_surface_get",
     "parameters": [
      {

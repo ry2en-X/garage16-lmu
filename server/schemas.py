@@ -59,6 +59,52 @@ class LoginRequest(BaseModel):
     password: str = Field(min_length=1, max_length=200)
 
 
+class SignupRequest(BaseModel):
+    """POST /accounts/signup (V1.0) — the website's sign-up form: driver name, email, password, and
+    the two confirmations the terms require. Creates the account WITH email and password (the
+    desktop client then signs in with them, POST /accounts/desktop-login), so nobody has to copy
+    tokens any more."""
+
+    display_name: str = Field(min_length=1, max_length=60)
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=200)   # strength: security.py
+    accept_terms: bool = False      # terms of use + privacy policy read and accepted
+    confirm_min_age: bool = False   # at least LMU_GARAGE_MIN_AGE years old
+
+
+class DesktopLoginRequest(BaseModel):
+    """POST /accounts/desktop-login (V1.0) — the desktop client's "Connect" with email + password."""
+
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class DesktopLoginResponse(BaseModel):
+    """The desktop client's credentials. The auth token is NEW (the previous one stops working —
+    only one PC is connected at a time); the client secret is the account's existing one."""
+
+    driver_id: int
+    display_name: str
+    auth_token: str
+    client_secret: str
+
+
+class OperatorOut(BaseModel):
+    name: str
+    address: List[str] = []
+    email: Optional[str] = None
+
+
+class LegalInfoOut(BaseModel):
+    """GET /legal (V1.0) — what the legal pages fill in: the operator (from .env; null when not
+    configured), the minimum age, the version of the terms and whether anybody may sign up."""
+
+    operator: Optional[OperatorOut] = None
+    min_age: int
+    terms_version: str
+    registration: str               # "open" | "secret" | "development"
+
+
 class WhoAmIOut(BaseModel):
     """GET /accounts/me — the only thing missing before V0.7.2's dashboard
     rework: a way to resolve "my own driver_id" from just a valid
@@ -830,6 +876,9 @@ class AccountExport(BaseModel):
     # V0.9.9: sha256 / size / request of every stored original, and the audit events of the driver
     lap_files: List[dict] = []
     audit_events: List[dict] = []
+    # V1.0: when and which version of the terms the driver accepted (null: account from before V1.0)
+    terms_accepted_at: Optional[str] = None
+    terms_version: Optional[str] = None
 
 
 class AdminReviewDecision(BaseModel):

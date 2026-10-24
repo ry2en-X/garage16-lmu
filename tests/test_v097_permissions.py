@@ -38,6 +38,9 @@ PUBLIC = {
     ("POST", "/accounts/logout"),                                 # harmless without a session
     # signing up / in and the e-mail flows: public by nature (rate limited)
     ("POST", "/accounts/register"),
+    ("POST", "/accounts/signup"),                                 # V1.0: the website's sign-up form
+    ("POST", "/accounts/desktop-login"),                          # V1.0: the desktop client's connect
+    ("GET", "/legal"),                                            # V1.0: operator data for the legal pages
     ("POST", "/accounts/login"),
     ("POST", "/accounts/app-session/activate"),
     ("POST", "/accounts/password-reset/request"),

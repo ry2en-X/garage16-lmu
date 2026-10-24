@@ -85,6 +85,8 @@ async function request(path, { method = "GET", params, body, auth = false, admin
     try {
       const data = await res.json();
       detail = data.detail || detail;
+      // FastAPI's validation errors are a list of {msg, ...}
+      if (Array.isArray(detail)) detail = detail.map((d) => (d && d.msg) || String(d)).join("; ");
     } catch {
       /* body wasn't JSON */
     }
@@ -143,6 +145,22 @@ export const api = {
       auth: true,
       body: { email, new_password: newPassword, current_password: currentPassword || undefined },
     });
+  },
+
+  // V1.0: the one-step sign-up form (name, email, password, terms, minimum age) — signs this
+  // browser in with a session cookie. registrationSecret only if the server is not open.
+  signup({ displayName, email, password, acceptTerms, confirmMinAge, registrationSecret }) {
+    const headers = registrationSecret ? { "X-Registration-Secret": registrationSecret } : undefined;
+    return request("/accounts/signup", {
+      method: "POST",
+      headers,
+      body: { display_name: displayName, email, password, accept_terms: !!acceptTerms, confirm_min_age: !!confirmMinAge },
+    });
+  },
+
+  // V1.0: operator details, minimum age and registration mode for the legal pages
+  legal() {
+    return request("/legal");
   },
 
   login(email, password) {

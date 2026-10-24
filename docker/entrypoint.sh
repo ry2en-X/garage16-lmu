@@ -82,6 +82,10 @@ fi
 # (migrations, the server process) runs as `garage`, not root.
 : "${LMU_GARAGE_STORAGE_DIR:=/app/server_telemetry_storage}"
 mkdir -p "$LMU_GARAGE_STORAGE_DIR"
+# V0.9.9.3: the backup's write lock file (server/write_lock.py) exists BEFORE anything else can
+# create it — created by root (the backup helper) it blocked every upload with PermissionError.
+touch "$LMU_GARAGE_STORAGE_DIR/.garage16-write.lock"
+chmod 664 "$LMU_GARAGE_STORAGE_DIR/.garage16-write.lock"
 chown -R garage:garage "$LMU_GARAGE_STORAGE_DIR"
 
 echo "[entrypoint] Running migrations (alembic upgrade head)..."

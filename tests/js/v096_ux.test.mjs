@@ -19,7 +19,7 @@ for (const f of ["oswald-latin-wght.woff2", "ibm-plex-mono-latin-400.woff2", "OF
 assert.ok(html.includes("<title>Garage16</title>"));
 const shell = new JSDOM(html);
 const groups = [...shell.window.document.querySelectorAll("#navLinks .nav-group")].map((g) => [...g.querySelectorAll("a")].map((a) => a.dataset.route));
-assert.deepEqual(groups, [["dashboard", "teams"], ["analysis", "stints"], ["leaderboard", "circuits"], ["account", "download"]], "the menu in groups");
+assert.deepEqual(groups, [["dashboard", "teams"], ["analysis", "stints"], ["leaderboard", "circuits"], ["account", "download", "setup", "legal"]], "the menu in groups (V1.0: + setup guide, legal)");
 const router = readFileSync(new URL("../../web/js/router.js", import.meta.url), "utf-8");
 assert.ok(!/^import .*\.\/pages\//m.test(router), "no page module is imported up front");
 assert.ok(router.includes('import(path)'), "pages are loaded on demand");

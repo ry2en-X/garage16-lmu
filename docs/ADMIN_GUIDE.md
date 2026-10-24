@@ -68,6 +68,8 @@ Die wichtigsten Variablen (vollständige Liste mit Erklärung: `.env.example`):
 | `LMU_GARAGE_SECRET_KEY` | Verschlüsselt Client-Secrets in der DB — einmal generieren, nie ändern (sonst werden bestehende Secrets unlesbar) |
 | `LMU_GARAGE_ADMIN_TOKEN` | Dein Zugang zur Admin-Oberfläche (`#/admin`) |
 | `LMU_GARAGE_REGISTRATION_SECRET` | Verhindert, dass Fremde sich registrieren können, sobald die Instanz öffentlich erreichbar ist |
+| `LMU_GARAGE_OPEN_REGISTRATION=1` | V1.0: jeder darf sich auf der Website registrieren (statt des Kennworts; eins von beiden ist Pflicht) |
+| `LMU_GARAGE_OPERATOR_NAME` / `_ADDRESS` / `_EMAIL` | V1.0: Betreiber für Impressum und Datenschutzerklärung (Seite „Rechtliches“) |
 | `POSTGRES_PASSWORD` | Datenbank-Passwort |
 | `CADDY_SITE_ADDRESS` oder `CLOUDFLARE_TUNNEL_TOKEN` | Je nach gewählter Zugangsvariante (Abschnitt 1) |
 
@@ -187,8 +189,9 @@ Domain zeigen — sie steckt im Link, den die E-Mail enthält.
    `alembic upgrade`-Schritt nötig.
 4. Prüfen: `curl https://garage16.de/health` — `version` sollte die
    neue Versionsnummer zeigen, `db_ok: true`.
-5. **Neue Client-Version verteilen:** Paket neu bauen und die neue
-   `Garage16-Client-Setup.exe` weitergeben (`docs/CLIENT_BUILD.md`).
+5. **Neue Client-Version verteilen:** ab V1.0 einen Tag `client-vX.Y.Z` pushen — GitHub baut die
+   Installer und die Download-Knöpfe zeigen automatisch auf das neueste Release (siehe „Neu in
+   V1.0“, Teil B). Selbst gebaut: neue `Garage16-Client-Setup.exe` weitergeben (`docs/CLIENT_BUILD.md`).
    Freunde führen sie einfach erneut aus — sie aktualisiert an Ort und
    Stelle, Anmeldung und Runden bleiben. Zum Erzwingen
    `LMU_GARAGE_MIN_CLIENT_VERSION` in `.env` erhöhen und den Download-Link
@@ -220,6 +223,132 @@ Domain zeigen — sie steckt im Link, den die E-Mail enthält.
   Rate-Limit-Obergrenze `LMU_GARAGE_RATELIMIT_ANALYSIS_MAX` (Standard seit V0.9.1:
   900 pro Stunde und Fahrer/IP, vorher 300) musst du für einen Freundeskreis nicht
   anfassen.
+
+**Neu in V1.0 — offen für alle: Registrierung, Rechtliches, Downloads per Klick**
+
+- **Jeder kann sich registrieren** — mit `LMU_GARAGE_OPEN_REGISTRATION=1`. Ein Formular: Fahrername,
+  E-Mail, Passwort, „mindestens 16“ und „Nutzungsbedingungen/Datenschutz akzeptiert“. Kein
+  Registrierungs-Kennwort, kein Token-Kopieren mehr. Ohne die Zeile bleibt alles wie bisher (das
+  Formular fragt dann nach dem `LMU_GARAGE_REGISTRATION_SECRET`).
+- **Client 1.0.0** verbindet sich mit **E-Mail und Passwort** (Token/Secret nur noch unter
+  „advanced“). Ein PC zur selben Zeit: Verbinden auf einem zweiten PC trennt den ersten.
+  Alte Clients laden unverändert weiter hoch.
+- **Seite „Rechtliches“** (`#/legal`): Impressum, Datenschutzerklärung, Nutzungsbedingungen, Lizenzen
+  (DE/EN). **Name, Anschrift und E-Mail des Betreibers kommen aus der `.env`** (nicht aus dem
+  öffentlichen Repository) und erscheinen nur auf dieser Seite.
+- **Downloads ohne Konfiguration:** Sind `LMU_GARAGE_CLIENT_DOWNLOAD_URL` /
+  `LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL` leer, laden die Knöpfe direkt den Installer des neuesten
+  GitHub-Releases (`…/releases/latest/download/Garage16-Client-Setup.exe`). Dafür muss das
+  Repository **öffentlich** sein (Teil B unten).
+- **Seite „Einrichtung“** (`#/setup`): die Schritt-für-Schritt-Anleitung für neue Fahrer.
+- **Eine Migration (0018)**, rein additiv (zwei Spalten: wann und welche Fassung der Bedingungen
+  akzeptiert wurde). Das Zugriffsprotokoll von Caddy (IP-Adressen) wird jetzt nach 7 Tagen gelöscht.
+
+**Teil A — Update des NAS von V0.9.9 auf V1.0**
+
+1. **Backup** (noch im alten Ordner):
+   ```
+   ALT="/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_9/Garage16 - LMU"
+   cd "$ALT"
+   sudo ./scripts/backup.sh /volumeUSB2/usbshare/garage16-backups
+   ```
+2. **Neuen Ordner anlegen**, `Garage16_Lmu_V1_0_0.zip` per File Station hineinladen und dort
+   entpacken („Hierher extrahieren“), `.env` übernehmen:
+   ```
+   mkdir -p /volume1/homes/Moritz/garage16/Garage16_Lmu_V1_0_0
+   # … ZIP per File Station in diesen Ordner laden und dort entpacken …
+   NEU="/volume1/homes/Moritz/garage16/Garage16_Lmu_V1_0_0/Garage16 - LMU"
+   ls "$NEU"
+   sudo cp "$ALT/.env" "$NEU/.env"
+   ```
+3. **Neue Einträge in die `.env`** (Werte anpassen; Anschriftzeilen mit `|` trennen):
+   ```
+   sudo tee -a "$NEU/.env" > /dev/null <<'EOF'
+
+   # --- V1.0 ---
+   LMU_GARAGE_OPEN_REGISTRATION=1
+   LMU_GARAGE_OPERATOR_NAME=Vorname Nachname
+   LMU_GARAGE_OPERATOR_ADDRESS=Straße Hausnummer|PLZ Ort
+   LMU_GARAGE_OPERATOR_EMAIL=kontakt@example.com
+   EOF
+   sudo grep -n "CLIENT_DOWNLOAD_URL\|CLIENT_APP_DOWNLOAD_URL\|OPEN_REGISTRATION\|OPERATOR_" "$NEU/.env"
+   ```
+   Stehen bei `LMU_GARAGE_CLIENT_DOWNLOAD_URL` / `LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL` noch alte Links,
+   die Zeilen leeren (`sudo nano "$NEU/.env"`), damit die GitHub-Links greifen.
+   `LMU_GARAGE_REGISTRATION_SECRET` darf stehen bleiben.
+4. **Alten Stack stoppen** (ohne `-v`), **neuen bauen und starten** — Migration 0018 läuft dabei:
+   ```
+   cd "$ALT" && sudo docker compose --profile tunnel down
+   cd "$NEU" && sudo docker compose --profile tunnel up -d --build
+   sudo docker compose --profile tunnel ps
+   sudo docker compose exec -T server python -c "import urllib.request as u; print(u.urlopen('http://localhost:8000/health/ready').read().decode())"
+   sudo docker compose exec -T server python -c "import urllib.request as u; print(u.urlopen('http://localhost:8000/legal').read().decode())"
+   ```
+   Erwartet: `"status":"ready"`, `"version":"1.0.0"`; `/legal` zeigt deinen Namen und
+   `"registration":"open"`. Im Browser **Strg+F5**, dann prüfen: Menü → **Rechtliches** (alle vier
+   Reiter), **Konto** abgemeldet → Formular „Neuer Fahrer“, **Download** → Knöpfe zeigen auf GitHub.
+5. **Test-Registrierung:** mit einer zweiten E-Mail-Adresse ein Konto anlegen → Bestätigungs-E-Mail
+   kommt an → Einrichtungsseite erscheint. Danach im Client 1.0.0 mit dieser E-Mail verbinden.
+   Testkonto wieder löschen (Konto → Daten & Datenschutz).
+6. **Backup mit dem neuen Ordner:**
+   ```
+   sudo ./scripts/backup.sh /volumeUSB2/usbshare/garage16-backups
+   ```
+   Die tägliche Backup-Aufgabe im DSM-Aufgabenplaner zeigt noch auf den alten Ordner — **Pfad auf
+   `Garage16_Lmu_V1_0_0` ändern.**
+
+Zurück auf V0.9.9: erst die Migration zurücknehmen, dann im alten Ordner starten:
+```
+cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V1_0_0/Garage16 - LMU"
+sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" alembic downgrade 0017'
+sudo docker compose --profile tunnel down
+cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_9/Garage16 - LMU"
+sudo docker compose --profile tunnel up -d
+```
+(Die Downgrade-Zeile löscht nur die zwei neuen Spalten. Konten, die mit V1.0 angelegt wurden,
+bleiben — sie haben E-Mail und Passwort und funktionieren auch mit V0.9.9. V0.9.9 braucht aber
+wieder ein `LMU_GARAGE_REGISTRATION_SECRET` in der `.env`.)
+
+**Teil B — Repository öffentlich machen und V1.0 auf GitHub veröffentlichen**
+
+Die Download-Knöpfe laden `https://github.com/ry2en-X/garage16-lmu/releases/latest/download/…` —
+das funktioniert für Fremde nur bei einem **öffentlichen** Repository, und nur, wenn das neueste
+Release die beiden Installer enthält.
+
+1. **Vorher prüfen, dass nie eine `.env` hochgeladen wurde** (im Projektordner auf dem PC,
+   PowerShell): `git log --all --oneline -- .env` muss **leer** sein. Steht dort etwas: nicht
+   öffentlich schalten, erst melden — die Schlüssel darin müssten neu erzeugt werden.
+2. **Server-Adresse für den Client festlegen:** GitHub → Repository → Settings → Secrets and
+   variables → Actions → Variables → `GARAGE16_SERVER_URL` = die Adresse, unter der der Server
+   wirklich erreichbar ist (solange garage16.de noch auf den Webspace zeigt: die
+   trycloudflare-Adresse). Ohne die Variable wird `https://garage16.de` eingebacken.
+3. **Code hochladen** (Projektordner auf dem PC = Git-Arbeitskopie; neuen Stand hineinkopieren,
+   `.git` behalten):
+   ```
+   git add -A
+   git commit -m "Garage16 V1.0.0"
+   git push origin main
+   ```
+4. **Öffentlich schalten:** GitHub → Repository → Settings → General → ganz unten *Danger Zone* →
+   **Change repository visibility** → **Make public** → bestätigen.
+5. **Release mit den Installern bauen lassen:**
+   ```
+   git tag client-v1.0.0
+   git push origin client-v1.0.0
+   ```
+   Actions → **build-client** läuft: erst die komplette Testsuite (ci.yml, ca. 15–40 Minuten), dann
+   beide Windows-Pakete, dann das Release „Garage16 client 1.0.0“ mit vier Dateien.
+6. **Prüfen:** Releases → „Garage16 client 1.0.0“ ist als **Latest** markiert und enthält
+   `Garage16-Client-Setup.exe`, `Garage16-Client-Analysis-Setup.exe` und zwei ZIPs. Dann in einem
+   privaten Browserfenster (nicht bei GitHub angemeldet)
+   `https://github.com/ry2en-X/garage16-lmu/releases/latest/download/Garage16-Client-Setup.exe`
+   öffnen — der Download muss sofort starten. Danach auf der Website → Download beide Knöpfe testen.
+7. Schlägt Schritt 5 fehl: Actions → den roten Lauf öffnen, der erste rote Schritt sagt warum.
+   Nach einer Korrektur den Tag neu setzen:
+   `git tag -d client-v1.0.0; git push origin :refs/tags/client-v1.0.0`, dann Schritt 5 wiederholen.
+
+Spätere Client-Versionen: neuer Tag `client-v1.0.1` usw. — die Website zeigt automatisch auf das
+neueste Release, an der `.env` ändert sich nichts.
 
 **Neu in V0.9.9 — Tracklimits nachvollziehbar, Manipulationsschutz für gespeicherte Runden**
 
@@ -1056,7 +1185,9 @@ neue Adresse von dir und nutzen "Reconnect account…".
 |---|---|---|
 | `/health` antwortet nicht | `server`-Container läuft nicht | `docker compose ps`, dann `docker compose logs server` |
 | `/health` liefert `db_ok: false` | PostgreSQL nicht erreichbar | `docker compose logs db`; Container neu gestartet? `docker compose restart db server` |
-| Registrierung schlägt fehl (403) | Freund hat das "Registration secret" nicht oder falsch ins Feld beim Registrieren eingetragen | `LMU_GARAGE_REGISTRATION_SECRET` aus deiner `.env` an den Freund weitergeben (der Server verlangt es in Produktion — ohne den Wert startet er gar nicht) |
+| Registrierung schlägt fehl (403) | Ohne `LMU_GARAGE_OPEN_REGISTRATION=1` verlangt das Formular das Registrierungs-Kennwort; es fehlte oder war falsch | Für alle öffnen: `LMU_GARAGE_OPEN_REGISTRATION=1` in die `.env` (V1.0). Sonst `LMU_GARAGE_REGISTRATION_SECRET` weitergeben |
+| Server startet nicht: „Neither LMU_GARAGE_REGISTRATION_SECRET nor LMU_GARAGE_OPEN_REGISTRATION=1 …“ | Keins von beiden in der `.env` | Eins von beiden setzen (V1.0) |
+| Rechtliches zeigt „Betreiberangaben … noch nicht eingetragen“ | `LMU_GARAGE_OPERATOR_*` fehlen in der `.env` | Eintragen, `docker compose --profile tunnel up -d server` |
 | Discord-Bot postet nichts | Bot offline oder falscher Token | `docker compose logs discord_bot`; Token in `.env` prüfen |
 | Keine Verifizierungs-/Reset-Mails | SMTP nicht konfiguriert oder falsch | Abschnitt 7 oben; `docker compose logs server \| grep -i smtp` |
 | Nach Update: alte Fahrer können sich nicht einloggen | Unwahrscheinlich — Migrationen sind rückwärtskompatibel gebaut | `docker compose logs server` auf Migrationsfehler prüfen; im Zweifel `docs/ROLLBACK.md` |

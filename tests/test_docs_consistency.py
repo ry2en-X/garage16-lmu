@@ -39,8 +39,9 @@ def test_friends_guide_asks_for_no_developer_tooling():
 
 
 def test_friends_guide_covers_the_five_step_flow():
-    assert "1. Installieren → 2. Starten → 3. Account verbinden → 4. LMU starten → 5. Fahren" in FRIENDS
-    for heading in ("## 1. Installieren", "## 2. Starten", "## 3. Account verbinden", "## 4. LMU starten", "## 5. Fahren"):
+    # V1.0: account first (on the website, no secret), then download, then connect with email + password
+    assert "1. Konto anlegen → 2. Herunterladen und installieren → 3. Client verbinden → 4. LMU starten → 5. Fahren" in FRIENDS
+    for heading in ("## 1. Konto anlegen", "## 2. Herunterladen und installieren", "## 3. Client verbinden", "## 4. LMU starten", "## 5. Fahren"):
         assert heading in FRIENDS
 
 

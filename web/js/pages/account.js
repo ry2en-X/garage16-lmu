@@ -70,7 +70,7 @@ export async function renderAccount(container) {
       // about this browser's own sign-in state changes.
       securityOut.appendChild(
         el("div", { class: "credential-box" }, [
-          t("New auth token — save it and run `python -m client.main --reconfigure` to update the desktop app:"),
+          t("New auth token — the desktop client is now disconnected. Click \"Reconnect account…\" in the Garage16 window and sign in with your email and password (or paste this token there):"),
           el("code", {}, res.auth_token),
         ])
       );
@@ -88,7 +88,7 @@ export async function renderAccount(container) {
       const res = await api.rotateSecret();
       securityOut.appendChild(
         el("div", { class: "credential-box" }, [
-          t("New client secret — save it and run `python -m client.main --reconfigure` to update the desktop app:"),
+          t("New client secret — the desktop client is now disconnected. Click \"Reconnect account…\" in the Garage16 window and sign in with your email and password (or paste this secret there):"),
           el("code", {}, res.client_secret),
         ])
       );

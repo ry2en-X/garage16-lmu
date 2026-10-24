@@ -26,6 +26,14 @@ RETENTION="${BACKUP_RETENTION_DAYS:-14}"
 
 mkdir -p /backups
 rm -f "$MARKER"     # a leftover of a killed run
+# V0.9.9.3: this container runs as root — the lock file must keep the owner of the telemetry
+# directory (the server's user), or the server cannot open it and every upload fails.
+fix_lock_owner() {
+    [ -e "$LOCK" ] || : > "$LOCK"
+    chown "$(stat -c %u:%g "$DATA")" "$LOCK" 2>/dev/null || true
+    chmod 664 "$LOCK" 2>/dev/null || true
+}
+fix_lock_owner
 trap 'rm -f "$MARKER"; exit 130' INT TERM
 
 log() { echo "[backup] $(date -Iseconds) $*"; }
@@ -50,6 +58,7 @@ one_backup() {
     mkdir -p "$work" || return 1
 
     log "announcing maintenance, waiting for running uploads..."
+    fix_lock_owner
     echo backup > "$MARKER"
     # everything between here and the end of the flock runs with the write lock held exclusively
     if ! flock -x "$LOCK" sh -c '

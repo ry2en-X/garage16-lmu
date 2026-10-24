@@ -12,6 +12,7 @@
   * tests/js/i18n_pages.test.mjs           — V0.9.1: the real router and pages rendered in German, in
                                              English and on a first visit (language popup); jsdom
   * tests/js/desktop_app.test.mjs          — V0.9.2: sign-in inside the desktop app's analysis window
+  * tests/js/v100.test.mjs                — V1.0: legal pages, sign-up form, setup guide, downloads
   * tests/js/v093_analysis.test.mjs        — V0.9.3: coaching, events, histograms, tyres, track-map
                                              markers, the sessions page and the theoretical best
                                              (app_bridge.js) and the download page; jsdom
@@ -123,3 +124,13 @@ def test_v099_decision_texts_and_the_integrity_tab():
     admin Integrity tab (quarantined laps, check again, release, audit log, chain check)."""
     result = _run("v099.test.mjs")
     assert "V099-OK" in result.stdout, result.stdout + result.stderr
+
+
+@needs_jsdom
+@pytest.mark.parametrize("lang", ["en", "de"])
+def test_v100_legal_pages_sign_up_setup_guide_and_downloads(lang):
+    """V1.0: the legal pages (operator from the server, nothing invented when missing, both
+    languages), the one-step sign-up form, the setup guide and the download page's next step."""
+    result = _run("v100.test.mjs", lang)
+    assert f"V100-{lang.upper()}-OK" in result.stdout, result.stdout + result.stderr
+    assert "Error" not in result.stderr, result.stderr

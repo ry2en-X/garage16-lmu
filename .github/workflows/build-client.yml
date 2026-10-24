@@ -78,5 +78,8 @@ jobs:
 
           Switching later: install the other one over the existing installation — your login and recorded laps stay.
           The `*-Portable.zip` files are the same apps without an installer (unzip, run Garage16.exe).
+
+          From 1.0 on you connect the client with the **email and password of your Garage16 account** — no token to copy.
+          Step-by-step guide: the "Setup guide" page of your Garage16 website (`#/setup`).
           NOTES
           gh release create "$TAG" files/* --repo "$GITHUB_REPOSITORY" --title "Garage16 client ${TAG#client-v}" --notes-file notes.md

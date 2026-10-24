@@ -16,8 +16,8 @@ def test_versions_and_changelog():
     from server.main import VERSION
 
     # V0.9.9 is the current server (tests/test_v099_docs.py); the V0.9.6 entry stays
-    assert VERSION == "0.9.9"
-    assert CLIENT_VERSION == "0.9.4", "V0.9.6 changes the server and the web page only"
+    assert VERSION == "1.0.0"  # V1.0 moved both on
+    assert CLIENT_VERSION == "1.0.0", "V0.9.6 changes the server and the web page only (client 1.0.0 since V1.0)"
     assert "\n## V0.9.6 — " in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 
 

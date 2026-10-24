@@ -41,6 +41,14 @@ const SIDES = ["a", "b", "c", "d"];
 
 const v = (a, i) => (a && a[i] !== null && a[i] !== undefined ? a[i] : null);
 
+// V0.9.9.3: why the server sent no surface (server/track_surface.py REASON_*)
+function surfaceMissing(reason) {
+  if (reason === "no_surface_data") return t("No track surface: these laps were recorded without LMU's track data (client older than 0.9).");
+  if (reason === "sign_undecided") return t("No track surface: the laps do not tell reliably which side of the track is which yet — drive a few more laps on different lines.");
+  if (reason === "no_edges") return t("No track surface: LMU reported no usable track edges for these laps.");
+  return t("No track surface for these laps.");
+}
+
 // The server's surface (centre path + normals + widths per 4 m) -> what is drawn, in world
 // coordinates: { left: [[x,y]|null…], right: […], leftEst: [bool], rightEst: [bool],
 // kerbs: [{ side, i, quad: [[x,y]×4] }] } — a kerb quad spans bin i to i+1.
@@ -172,6 +180,7 @@ export function createLineMap(state, opts = {}) {
   const bandBox = el("input", { type: "checkbox", checked: "checked" });
   const trackBox = el("input", { type: "checkbox", checked: "checked" });
   let surface = null;   // V0.9.5: surfaceGeometry() of the server's track surface, once loaded
+  const trackLabel = el("label", { class: "linemap__opt", title: t("Asphalt, edges and kerbs, rebuilt from LMU's track data of several laps (approximate)") }, [trackBox, ` ${t("Track")}`]);
   const btn = (label, title, fn) => {
     const b = el("button", { type: "button", class: "btn btn--ghost linemap__btn", title }, label);
     b.addEventListener("click", fn);
@@ -195,7 +204,7 @@ export function createLineMap(state, opts = {}) {
       el("label", { class: "linemap__opt" }, [follow]),
       el("label", { class: "linemap__opt", title: t("Braking point ▲, turn-in ◆ (estimated), apex ●, full throttle ▼") }, [markersBox, ` ${t("Markers")}`]),
       el("label", { class: "linemap__opt", title: t("A faint band of {0} m (about a car's width) around every lap", [CAR_WIDTH_M]) }, [bandBox, ` ${t("Car width")}`]),
-      el("label", { class: "linemap__opt", title: t("Asphalt, edges and kerbs, rebuilt from LMU's track data of several laps (approximate)") }, [trackBox, ` ${t("Track")}`]),
+      trackLabel,
       el("span", { class: "linemap__opt" }, [t("Stretch"), " ", fromInput, " – ", toInput, " m"]),
     ]),
     corners.length ? chips : null,
@@ -709,7 +718,13 @@ export function createLineMap(state, opts = {}) {
   let alive = true;
   if (opts.trackSurface) {
     opts.trackSurface.get().then((res) => {
-      if (!alive || !res || !res.surface) return;
+      if (!alive || !res) return;
+      if (!res.surface) {
+        // V0.9.9.3: say why instead of a checkbox that silently does nothing
+        trackLabel.title = surfaceMissing(res.reason);
+        trackLabel.classList.add("linemap__opt--off");
+        return;
+      }
       surface = surfaceGeometry(res.surface);
       schedule();
     }).catch(() => { /* no surface: the lines alone, as before */ });

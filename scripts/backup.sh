@@ -81,7 +81,11 @@ trap 'exit 130' INT TERM
 
 # --- 1. announce maintenance, wait for running writes, hold the lock --------------------------
 log "Taking the write lock (running uploads finish first, new ones are asked to retry)..."
+# V0.9.9.3: this helper runs as root — the lock file must keep the owner of the volume (the
+# server's user), or the server cannot open it and every upload fails (server/write_lock.py).
 docker run -d --name "${HELPER}" -v "${TELEMETRY_VOLUME}:/data" alpine sh -c "
+    [ -e '${LOCKFILE}' ] || : > '${LOCKFILE}'
+    chown \"\$(stat -c %u:%g /data)\" '${LOCKFILE}'; chmod 664 '${LOCKFILE}'
     echo backup > '${MARKER}'
     exec flock -x '${LOCKFILE}' sh -c '
         touch \"${STATE}.locked\"

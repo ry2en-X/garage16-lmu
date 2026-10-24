@@ -16,10 +16,14 @@ So one lap yields:
   * where a wheel touched a kerb, how far from the centre that was — many laps together give
     the kerbs' position and width
 
-The sign of path_lateral (is "+" left or right?) is not documented. It is decided from the data:
-with the right sign the reconstructed centre path is SMOOTH (the racing line's swings across the
-track cancel out); with the wrong sign they double. Same idea as the sign calibration in
-telemetry_channels.py. Undecided -> no surface (never a guessed one).
+The sign of path_lateral (is "+" left or right?) is not documented. It is decided from the data
+(V0.9.9.3): with the right sign the centre paths reconstructed from DIFFERENT laps lie on top of
+each other (each lap's own line choice cancels out); with the wrong sign they scatter by twice the
+line differences. On real LMU data (Le Mans, 12 laps) that is 0.23 m against 1.12 m — unmistakable.
+The V0.9.5 test (the right sign gives the SMOOTHER centre path) is kept only as the fallback for a
+single lap: on real data path_lateral changes so slowly over 2 m that both signs are equally smooth
+(measured ratio 1.00-1.02 against the required 1.15) — that is why the surface never appeared.
+Undecided -> no surface (never a guessed one), and the endpoint says why.
 
 Everything is binned on lap_dist (the same track metre in every lap) and returned in the same
 display coordinates as the lines (track_xy with the same mirror decision).
@@ -27,7 +31,7 @@ display coordinates as the lines (track_xy with the same mirror decision).
 
 from __future__ import annotations
 
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -39,7 +43,14 @@ HALF_TRACK_WIDTH_M = 0.8       # wheel centre from the car's centre line (≈ ha
 MIN_EDGE_M, MAX_EDGE_M = 2.0, 30.0   # plausible distance centre path -> edge
 MIN_SIDE_M = 0.3               # |path_lateral| below this: the car straddles the path, side unclear
 FILL_GAP_M = 300.0             # a missing edge is interpolated across at most this much track (between two measurements: not marked)
-SIGN_MARGIN = 1.15             # the better sign must be this much smoother to be accepted
+SIGN_MARGIN = 1.15             # fallback (one lap): the better sign must be this much smoother
+CONSISTENCY_MARGIN = 2.0       # main test: the wrong sign must scatter the laps' centre paths at least twice as much
+CONSISTENCY_MIN_SPREAD_M = 0.15  # below this for BOTH signs the laps are (nearly) the same line: the test cannot tell
+CONSISTENCY_MIN_BINS = 50      # track bins driven by at least two laps
+# why there is no surface (returned by the endpoint as "reason")
+REASON_NO_DATA = "no_surface_data"        # no lap has path_lateral / track_edge (client < 0.9)
+REASON_SIGN = "sign_undecided"            # the sign of path_lateral cannot be read from these laps
+REASON_NO_EDGES = "no_edges"              # no plausible edge distance in any lap
 KERB_PAD_M = 0.25              # half a tyre: a wheel centre on the kerb means the kerb reaches a bit further
 SMOOTH_BINS = 5
 SURFACE_COLUMNS_KEYS = ("edge_margin", "wheels_on_kerb", "speed")   # catalog channels whose columns we need
@@ -102,8 +113,49 @@ def _sampled(series: LapSeries, mirror: bool) -> Optional[dict]:
     return {"d": grid, "x": x, "y": y, "nx": n[0], "ny": n[1], "pl": pl, "te": te, "kerb": kerb}
 
 
-def decide_sign(laps: Sequence[dict]) -> Optional[float]:
-    """+1 if path_lateral > 0 means LEFT of the centre path, -1 if right, None if the data cannot tell."""
+def _consistency(laps: Sequence[dict], sign: float) -> Optional[float]:
+    """Median scatter (m) of the centre paths of several laps with this sign, per 4 m of track."""
+    start = min(float(lap["d"][0]) for lap in laps)
+    end = max(float(lap["d"][-1]) for lap in laps)
+    count = int(np.floor((end - start) / BIN_M)) + 1
+    cxs, cys = [], []
+    for lap in laps:
+        cx = lap["x"] - sign * lap["pl"] * lap["nx"]
+        cy = lap["y"] - sign * lap["pl"] * lap["ny"]
+        ok = np.isfinite(cx) & np.isfinite(cy)
+        b = np.clip(np.round((lap["d"][ok] - start) / BIN_M).astype(int), 0, count - 1)
+        n = np.bincount(b, minlength=count).astype(float)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            cxs.append(np.where(n > 0, np.bincount(b, cx[ok], count) / n, np.nan))
+            cys.append(np.where(n > 0, np.bincount(b, cy[ok], count) / n, np.nan))
+    X, Y = np.array(cxs), np.array(cys)
+    have = np.isfinite(X) & np.isfinite(Y)
+    shared = have.sum(axis=0) >= 2
+    if shared.sum() < CONSISTENCY_MIN_BINS:
+        return None
+    X, Y, have = X[:, shared], Y[:, shared], have[:, shared]
+    with np.errstate(invalid="ignore"):
+        mx, my = np.nanmean(X, axis=0), np.nanmean(Y, axis=0)
+        dist = np.hypot(X - mx, Y - my)
+        per_bin = np.nanmean(np.where(have, dist, np.nan), axis=0)
+    per_bin = per_bin[np.isfinite(per_bin)]
+    return float(np.median(per_bin)) if per_bin.size else None
+
+
+def _sign_by_consistency(laps: Sequence[dict]) -> Optional[float]:
+    if len(laps) < 2:
+        return None
+    plus, minus = _consistency(laps, 1.0), _consistency(laps, -1.0)
+    if plus is None or minus is None or max(plus, minus) < CONSISTENCY_MIN_SPREAD_M:
+        return None
+    if plus * CONSISTENCY_MARGIN <= minus:
+        return 1.0
+    if minus * CONSISTENCY_MARGIN <= plus:
+        return -1.0
+    return None
+
+
+def _sign_by_smoothness(laps: Sequence[dict]) -> Optional[float]:
     rough = {1.0: [], -1.0: []}
     for lap in laps:
         for s in (1.0, -1.0):
@@ -122,6 +174,14 @@ def decide_sign(laps: Sequence[dict]) -> Optional[float]:
     return None
 
 
+def decide_sign(laps: Sequence[dict]) -> Optional[float]:
+    """+1 if path_lateral > 0 means LEFT of the centre path, -1 if right, None if the data cannot tell.
+    Several laps: their centre paths must agree (V0.9.9.3). Only when that cannot decide (one lap,
+    or laps on exactly the same line): the smoothness test of V0.9.5."""
+    sign = _sign_by_consistency(laps)
+    return sign if sign is not None else _sign_by_smoothness(laps)
+
+
 def _fill(values: np.ndarray, est: np.ndarray, length_bins: int) -> None:
     """Interpolates NaN gaps of at most `length_bins` bins (in place) between two measurements of the
     same edge. Not marked as estimated: a track's width changes slowly, and both ends are measured."""
@@ -134,14 +194,18 @@ def _fill(values: np.ndarray, est: np.ndarray, length_bins: int) -> None:
 
 
 def build_surface(series_list: Sequence[LapSeries], mirror: bool) -> Optional[dict]:
-    """The track surface from several laps of the SAME layout, or None (no lap has the columns,
-    or the sign of path_lateral cannot be decided)."""
+    """The track surface from several laps of the SAME layout, or None (see build_surface_why)."""
+    return build_surface_why(series_list, mirror)[0]
+
+
+def build_surface_why(series_list: Sequence[LapSeries], mirror: bool) -> Tuple[Optional[dict], Optional[str]]:
+    """(surface, None) or (None, reason) — REASON_NO_DATA, REASON_SIGN or REASON_NO_EDGES."""
     laps = [s for s in (_sampled(series, mirror) for series in series_list) if s is not None]
     if not laps:
-        return None
+        return None, REASON_NO_DATA
     sign = decide_sign(laps)
     if sign is None:
-        return None
+        return None, REASON_SIGN
     start = min(float(lap["d"][0]) for lap in laps)
     end = max(float(lap["d"][-1]) for lap in laps)
     count = int(np.floor((end - start) / BIN_M)) + 1
@@ -189,7 +253,7 @@ def build_surface(series_list: Sequence[LapSeries], mirror: bool) -> Optional[di
     wr[only_l], wr_est[only_l] = wl[only_l], True
     wl, wr = _moving_mean(wl, SMOOTH_BINS), _moving_mean(wr, SMOOTH_BINS)
     if not np.isfinite(wl).any():
-        return None
+        return None, REASON_NO_EDGES
     n = _left_normals(cx, cy)
 
     def kerbs(lists, width):
@@ -209,8 +273,8 @@ def build_surface(series_list: Sequence[LapSeries], mirror: bool) -> Optional[di
     kr_in, kr_out = kerbs(kerb_right, wr)
     r = lambda v: json_series(v, 2)  # noqa: E731
     return {
-        "bin": BIN_M, "start": round(start, 2), "count": count, "laps": len(laps),
+        "bin": BIN_M, "sign": int(sign), "start": round(start, 2), "count": count, "laps": len(laps),
         "cx": r(cx), "cy": r(cy), "nx": json_series(n[0], 4), "ny": json_series(n[1], 4),
         "wl": r(wl), "wr": r(wr), "wl_est": [int(v) for v in wl_est], "wr_est": [int(v) for v in wr_est],
         "kl_in": r(kl_in), "kl_out": r(kl_out), "kr_in": r(kr_in), "kr_out": r(kr_out),
-    }
+    }, None

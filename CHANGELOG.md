@@ -1,5 +1,70 @@
 # Changelog
 
+## V1.0.0 — Open for everyone: sign-up, legal pages, one-click downloads
+
+Server `1.0.0`, desktop client `1.0.0`. **One additive migration (0018)**: two nullable columns on
+`drivers` (`terms_accepted_at`, `terms_version`). Rollback: `alembic downgrade 0017`
+(docs/ADMIN_GUIDE.md, "Neu in V1.0"). Old clients (from 0.5.3) keep uploading unchanged.
+
+### Sign-up for everyone
+- **`POST /accounts/signup`** — one form on the website: driver name, email, password, "I am at least
+  16" and "I accept the terms of use and have read the privacy policy". Creates the account with
+  email and password, records when and which version of the terms was accepted
+  (`server/routers/legal.py` `TERMS_VERSION`), sends the verification email and signs the browser in.
+  Before, a new driver registered, copied an auth token and a client secret shown once, then set an
+  email and password in a second step.
+- **`LMU_GARAGE_OPEN_REGISTRATION=1`** lets anybody sign up. A production server now needs a
+  registration secret **or** this setting and still refuses to start with neither. With a secret
+  and without open registration the form asks for the secret (as before).
+- `POST /accounts/register` (token-only accounts) is kept for admins, scripts and tests; on an open
+  production server without a secret it is refused, so it cannot bypass the terms.
+- Minimum age `LMU_GARAGE_MIN_AGE` (default 16).
+
+### The desktop client signs in with email and password (client 1.0.0)
+- **`POST /accounts/desktop-login`** hands the client its credentials: a new auth token (one PC at a
+  time — the previous one is disconnected and offers "Reconnect account…") and the account's
+  existing client secret, so laps still waiting on the PC upload. Same generic error as the web
+  login, rate limited like it, refuses locked accounts.
+- The connect window asks for server address, email and password. Pasting token and secret is folded
+  away under "Use an auth token instead (advanced)" (accounts without a password, servers older than
+  1.0 — the window says so when the server does not know the new endpoint). Links in the window:
+  create an account, setup guide, privacy & legal (only plain http(s) addresses are opened).
+
+### Legal pages
+- New page **Legal** (`#/legal`, menu and front page): legal notice (§ 5 DDG), privacy policy (GDPR
+  Art. 13 — every stored field, purpose, legal basis, retention, recipients incl. Cloudflare,
+  ALL-INKL, GitHub, Gmail, Discord, cookies and browser storage, rights), terms of use (minimum age,
+  fair play, availability, liability, "not an official product of Studio 397 / LMU") and licences
+  (fonts OFL, ApexDash MIT, shared-memory sources). German and English; the German text is binding.
+- The operator's name, address and email come from `.env` (`LMU_GARAGE_OPERATOR_NAME`,
+  `_ADDRESS` with `|` between lines, `_EMAIL`) through the new public `GET /legal` (sent with
+  `X-Robots-Tag: noindex`), never from the public repository. Not configured = the page says so.
+- The reverse proxy's access log (it contains IP addresses) is kept 7 days (`roll_keep_for 168h`),
+  as the privacy policy states.
+
+### Downloads and setup guide
+- Without any `.env` entry the download buttons now fetch the installers of the newest GitHub
+  release directly: `https://github.com/ry2en-X/garage16-lmu/releases/latest/download/Garage16-Client-Setup.exe`
+  and `…/Garage16-Client-Analysis-Setup.exe` (`LMU_GARAGE_GITHUB_REPO`, empty = off; explicit
+  `LMU_GARAGE_CLIENT_*_DOWNLOAD_URL` still win). `GET /health` also reports
+  `client_release_page_url` (all files of the release, offered under the buttons) and
+  `registration` (`open` / `secret` / `development`).
+- New page **Setup guide** (`#/setup`): account → download → install (SmartScreen) → connect with
+  email and password → LMU → see your times, plus the common problems. The sign-up form leads there,
+  the download page points to it after a click, the client's connect window links it.
+- Account page: rotating the token or secret now explains "Reconnect account…" in the Garage16
+  window instead of a developer command.
+- Validation errors from the server are shown as text in the web app (were "[object Object]").
+
+### Tests
+- `tests/test_v100_signup.py` (sign-up, confirmations, secret/open modes, the refused `/register`,
+  desktop login incl. token replacement and locked accounts, `GET /legal`, start-up rule, download
+  defaults tied to the installer names in `packaging/garage16.iss`), `tests/test_v100_client_login.py`
+  (input checks, links, login against the real server over HTTP, a pre-1.0 server, the real Tk window
+  signing in), `tests/js/v100.test.mjs` (legal page in both languages with and without operator,
+  sign-up form, setup guide, download page). The permission matrix lists the three new public
+  endpoints.
+
 ## V0.9.9 — Track limits you can follow, stored laps you can trust
 
 Server `0.9.9`; desktop client unchanged (`0.9.4`). **One additive migration (0017)**: three nullable
@@ -30,6 +95,27 @@ version 3, decision version 1. Inventory and work log: `docs/V0_9_9_BESTANDSAUFN
   and the reverse proxy never started. `/health/live` and `/health/ready` are now exempt like
   `/health` (they carry no details). Present since V0.9.8. Regression test
   `tests/test_v0992_healthcheck_https.py` ties the exempt paths to the probe in docker-compose.yml.
+
+### V0.9.9.3 fix (found on the NAS with the first Le Mans session; same version number, archive rebuilt)
+- **Uploads failed with 500 after the first backup.** `.garage16-write.lock` was created first by the
+  backup's helper container (root) as root:root 0644; the server (user `garage`) opens it `O_RDWR`
+  and got PermissionError on every upload (the client kept the laps and resent them after a manual
+  `chown`). Three layers now: `docker/entrypoint.sh` creates the file as `garage` before the server
+  starts; `scripts/backup.sh` and `docker/backup-loop.sh` give an existing file the owner of the
+  telemetry directory before taking the lock; `server/write_lock.py` opens a lock file it cannot
+  write read-only (flock needs no write access, shared and exclusive locks still exclude each other).
+- **The track surface never appeared on real data** (`{"surface": null}` for every lap since V0.9.5).
+  The sign of `path_lateral` was decided by which sign gives the smoother centre path; on real LMU
+  data both are equally smooth (measured ratio 1.00–1.02 on 8 Le Mans laps, 1.15 required). The sign
+  is now decided by the laps agreeing: with the right sign the centre paths of different laps lie on
+  top of each other (12 Le Mans laps: 0.23 m scatter against 1.12 m with the wrong sign; required:
+  factor 2). The smoothness test remains the fallback for a single lap; laps on exactly the same line
+  are never guessed. `/telemetry/analysis/track-surface` now returns `"reason"`
+  (`no_surface_data` / `sign_undecided` / `no_edges`) when there is no surface, the map's „Track"
+  option shows it as a tooltip, and the surface's cache key / ETag carries `SURFACE_VERSION = 2` so
+  browsers drop the old empty answer (the other analysis answers and `ANALYSIS_CACHE_VERSION` are
+  unchanged). Tests: `tests/test_v0993_track_surface_real.py` (data shaped like the real laps; the
+  old code returns no surface on it).
 
 ### P0 — the track-limit decision
 - `server/lap_decision.py` (new) completes the pipeline input → time axis → position → track limits

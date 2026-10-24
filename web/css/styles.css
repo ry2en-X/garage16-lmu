@@ -864,6 +864,7 @@ button.delta-fact { cursor: pointer; }
 .linemap__controls { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin-bottom: 6px; font-size: 13px; }
 .linemap__btn { padding: 4px 10px; min-width: 34px; }
 .linemap__opt { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.linemap__opt--off { opacity: 0.55; cursor: help; }
 .linemap__follow, .linemap__range, .cdetail__select, .delta-widget__mode, .corners__order, .ops__period select {
   background: var(--panel-raised); border: 1px solid var(--hairline); color: var(--text); font-family: var(--font-mono); font-size: 13px; padding: 4px 6px;
 }
@@ -1035,3 +1036,42 @@ select, input, textarea { max-width: 100%; }
 .ops-timeline { display: flex; align-items: flex-end; gap: 2px; height: 64px; margin: 4px 0 12px; overflow-x: auto; }
 .ops-timeline__bar { flex: 0 0 8px; background: var(--valid); position: relative; display: flex; align-items: flex-end; }
 .ops-timeline__failed { display: block; width: 100%; background: var(--signal); }
+
+/* V1.0 — legal pages, sign-up form, setup guide */
+.nav-group--foot a.nav-legal { font-size: 12px; color: var(--text-muted); }
+.legal-tabs { margin-bottom: 16px; flex-wrap: wrap; }
+.legal-text { max-width: 860px; line-height: 1.6; }
+.legal-text h2 { font-size: 1.05rem; margin: 26px 0 8px; }
+.legal-text h2:first-of-type { margin-top: 4px; }
+.legal-text p, .legal-text li { color: var(--text); }
+.legal-text ul { padding-left: 1.2em; }
+.legal-operator { font-style: normal; border-left: 2px solid var(--signal); padding: 6px 0 6px 14px; margin: 8px 0 12px; }
+.legal-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin: 8px 0 12px; }
+.legal-table th, .legal-table td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--hairline); }
+.legal-table th { color: var(--text-muted); font-family: var(--font-display); font-weight: 400; letter-spacing: 0.03em; white-space: nowrap; }
+.legal-links { list-style: none; padding: 0; display: flex; gap: 6px 18px; flex-wrap: wrap; }
+@media (max-width: 640px) { .legal-table { min-width: 560px; } }
+
+.check-row { display: flex; gap: 10px; align-items: flex-start; margin: 10px 0; cursor: pointer; line-height: 1.45; }
+.check-row input { margin-top: 3px; flex: 0 0 auto; accent-color: var(--signal); width: 16px; height: 16px; }
+.signup-card .btn { margin-top: 8px; }
+.advanced-signin { margin-top: 16px; }
+.advanced-signin > summary { cursor: pointer; color: var(--text-muted); font-size: 0.9rem; }
+.advanced-signin[open] > summary { margin-bottom: 12px; }
+.advanced-signin > .card { margin: 0; padding: 0; border: 0; background: none; }
+
+.setup-step h2 { display: flex; align-items: center; gap: 12px; margin: 0 0 10px; }
+.setup-step__num { flex: 0 0 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--signal); color: var(--signal); font-family: var(--font-mono); font-size: 0.95rem; }
+.setup-step--done .setup-step__num { border-color: var(--valid); color: var(--valid); }
+.setup-list { padding-left: 1.3em; line-height: 1.6; }
+.setup-list li + li { margin-top: 4px; }
+.setup-downloads { margin: 12px 0 4px; flex-wrap: wrap; }
+.setup-faq__row { display: grid; grid-template-columns: minmax(12em, 1fr) 2fr; gap: 6px 18px; align-items: start; }
+@media (max-width: 640px) { .setup-faq__row { grid-template-columns: 1fr; } }
+.download-next { margin-top: 16px; }
+
+.site-footer { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 40px; padding-top: 14px; border-top: 1px solid var(--hairline); font-size: 0.82rem; color: var(--text-muted); }
+.site-footer a { color: var(--text-muted); }
+.site-footer span { flex: 1 1 100%; }
+/* the hidden attribute wins over component display rules (e.g. the sign-up form's secret field) */
+[hidden] { display: none !important; }

@@ -24,7 +24,7 @@ export async function renderLanding(container) {
       ] : [
         el("a", { href: "#/account", class: "btn" }, t("Get Garage16")),
         el("a", { href: "#/leaderboard", class: "btn btn--ghost" }, t("Explore Leaderboards")),
-        el("a", { href: "#/download", class: "btn btn--ghost" }, t("Download the client")),
+        el("a", { href: "#/setup", class: "btn btn--ghost" }, t("How it works")),
       ]),
     ])
   );
@@ -66,6 +66,14 @@ export async function renderLanding(container) {
       _feature(t("Discord Integration"), t("Link your driver to Discord for personal-best and team-record announcements as they happen.")),
     ])
   );
+
+  // V1.0: the legal pages, one click from the front page
+  container.appendChild(el("footer", { class: "site-footer" }, [
+    el("a", { href: "#/legal" }, t("Legal notice")),
+    el("a", { href: "#/legal?tab=privacy" }, t("Privacy")),
+    el("a", { href: "#/legal?tab=terms" }, t("Terms of use")),
+    el("span", {}, t("Garage16 is a private hobby project and not affiliated with Studio 397 or Le Mans Ultimate.")),
+  ]));
 }
 
 function _feature(title, body) {

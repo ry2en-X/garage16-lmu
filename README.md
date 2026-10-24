@@ -5,7 +5,7 @@ desktop client reads shared memory and uploads laps, a FastAPI server
 stores and evaluates them (PR/WR/TEAM_BEST), a Discord bot announces
 records, and a static web app shows leaderboards/teams.
 
-**Current version: server 0.9.9 / desktop client 0.9.4.** The instance runs at **https://garage16.de**. See `CHANGELOG.md` for what changed and
+**Current version: server 1.0.0 / desktop client 1.0.0.** The instance runs at **https://garage16.de**. See `CHANGELOG.md` for what changed and
 `docs/` for deployment, privacy, and LMU-verification protocols.
 
 **Running Garage16 or playing on it?** Two short, practical guides —

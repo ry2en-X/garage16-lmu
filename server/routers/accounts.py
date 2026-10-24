@@ -19,18 +19,20 @@ What changed vs. the original dev-only version:
 
 from __future__ import annotations
 
+import hmac
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Query, Request, Response, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..audit import for_driver as audit_for_driver
 from ..auth import get_current_driver
 from ..config import settings
 from ..write_lock import RETRY_AFTER_S, MaintenanceActive, writing
-from ..crypto import encrypt_secret
+from ..crypto import decrypt_secret, encrypt_secret
 from ..database import get_db
 from ..email_provider import get_email_provider
 from .. import discord_link
@@ -53,6 +55,8 @@ from ..schemas import (
     AccountExport,
     ChangePasswordRequest,
     DiscordLinkStatusOut,
+    DesktopLoginRequest,
+    DesktopLoginResponse,
     DisplayNameUpdateRequest,
     DriverRegisterResponse,
     EmailVerificationConfirmRequest,
@@ -66,6 +70,7 @@ from ..schemas import (
     RotateTokenResponse,
     SessionOut,
     SetPasswordRequest,
+    SignupRequest,
     StatusResponse,
     WhoAmIOut,
 )
@@ -119,11 +124,36 @@ def _send_verification_email(db: Session, driver: Driver, email: str) -> None:
     )
 
 
+def _secret_matches(x_registration_secret: Optional[str]) -> bool:
+    return bool(x_registration_secret) and hmac.compare_digest(
+        x_registration_secret.encode(), settings.registration_secret.encode()
+    )
+
+
 def _check_registration_secret(x_registration_secret: Optional[str]) -> None:
+    """POST /register (token-only accounts — admin tooling and tests since V1.0). With a secret
+    configured it needs the secret. Without one it is open only on a development server: on an
+    open production server (LMU_GARAGE_OPEN_REGISTRATION=1) accounts are created through
+    /accounts/signup, which records the acceptance of the terms — /register must not bypass it."""
     if settings.registration_secret is None:
-        return  # gating disabled — open registration (see config.py warning at startup)
-    if not x_registration_secret or x_registration_secret != settings.registration_secret:
+        if settings.is_production:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Please create your account on the website's sign-up page.")
+        return  # development: open (see config.py warning at startup)
+    if not _secret_matches(x_registration_secret):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing or invalid registration secret.")
+
+
+def _check_signup_allowed(x_registration_secret: Optional[str]) -> None:
+    """POST /signup: open when the operator opened registration (or on a development server
+    without a secret); otherwise the registration secret is required, as before."""
+    if settings.open_registration:
+        return
+    if settings.registration_secret is None:
+        if settings.is_production:  # unreachable: config refuses to start like this
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Registration is closed on this server.")
+        return
+    if not _secret_matches(x_registration_secret):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This server only accepts new drivers with its registration secret.")
 
 
 @router.post("/register", response_model=DriverRegisterResponse)
@@ -154,6 +184,99 @@ def register_driver(
         display_name=driver.display_name,
         auth_token=token,
         client_secret=secret,
+    )
+
+
+@router.post("/signup", response_model=LoginResponse)
+def signup(
+    body: SignupRequest,
+    request: Request,
+    response: Response,
+    x_registration_secret: Optional[str] = Header(None),
+    db: Session = Depends(get_db),
+    _rl: None = Depends(rate_limit("register")),
+) -> LoginResponse:
+    """The website's sign-up form (V1.0): one step instead of register → copy token and secret →
+    set email and password. Creates the account with email and password, records the accepted
+    terms (server/routers/legal.py TERMS_VERSION), sends the verification email and signs the
+    browser in (session cookie, like /login). The desktop client connects with the same email
+    and password (POST /accounts/desktop-login) — no token to copy."""
+    from .legal import TERMS_VERSION
+
+    _check_signup_allowed(x_registration_secret)
+    if not body.accept_terms:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Please accept the terms of use and the privacy policy.")
+    if not body.confirm_min_age:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Garage16 accounts are only for people aged {settings.min_age} or older.",
+        )
+    display_name = body.display_name.strip()
+    if not display_name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "display_name must not be blank.")
+    email = normalize_email(body.email)
+    if not is_valid_email(email):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "That doesn't look like a valid email address.")
+    try:
+        validate_password_strength(body.password)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    if db.query(Driver).filter(Driver.email == email).one_or_none() is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "That email address already has an account — sign in, or use \"Forgot password?\".",
+        )
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    driver = Driver(
+        display_name=display_name,
+        email=email,
+        email_verified=False,
+        password_hash=hash_password(body.password),
+        token_hash=hash_token(generate_token()),   # nobody sees it; the client gets its own at desktop-login
+        client_secret=encrypt_secret(generate_secret()),
+        terms_accepted_at=now,
+        terms_version=TERMS_VERSION,
+    )
+    db.add(driver)
+    try:
+        db.commit()
+    except IntegrityError:   # the same email signed up twice at the same moment
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, "That email address already has an account.")
+    db.refresh(driver)
+    _send_verification_email(db, driver, email)
+    raw_session_token = create_session(db, driver, user_agent=request.headers.get("user-agent"))
+    db.commit()
+    _set_session_cookie(response, raw_session_token)
+    return LoginResponse(driver_id=driver.id, display_name=driver.display_name)
+
+
+@router.post("/desktop-login", response_model=DesktopLoginResponse)
+def desktop_login(
+    body: DesktopLoginRequest,
+    response: Response,
+    db: Session = Depends(get_db),
+    _rl: None = Depends(rate_limit("login")),
+) -> DesktopLoginResponse:
+    """The desktop client's "Connect" with email + password (V1.0). Issues a NEW auth token —
+    the previous one stops working, so one PC is connected at a time (connecting a second PC
+    disconnects the first; it says so and offers "Reconnect account…") — and returns the
+    account's existing client secret, so laps already waiting on this PC still upload. Same
+    generic failure as /login (no hint which emails have accounts)."""
+    email = normalize_email(body.email)
+    driver = db.query(Driver).filter(Driver.email == email).one_or_none()
+    if driver is None or driver.password_hash is None or not verify_password(body.password, driver.password_hash):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
+    if driver.is_locked:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This account has been locked.")
+    token = _issue_fresh_token(driver, db)
+    response.headers["Cache-Control"] = "no-store"
+    return DesktopLoginResponse(
+        driver_id=driver.id,
+        display_name=driver.display_name,
+        auth_token=token,
+        client_secret=decrypt_secret(driver.client_secret),
     )
 
 
@@ -810,6 +933,8 @@ def export_my_data(
                     "uploaded_at": _iso(lap.uploaded_at), "request_id": lap.upload_request_id,
                     "review_status": lap.review_status} for lap in laps],
         audit_events=audit_for_driver(db, driver.id),
+        terms_accepted_at=_iso(driver.terms_accepted_at),
+        terms_version=driver.terms_version,
     )
 
 

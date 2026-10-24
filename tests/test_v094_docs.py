@@ -26,9 +26,9 @@ def test_versions_and_changelog():
     from server.main import VERSION
 
     # V0.9.5 is the current server (tests/test_v095_docs.py); the desktop client stays 0.9.4
-    assert CLIENT_VERSION == "0.9.4" and VERSION == "0.9.9"
+    assert CLIENT_VERSION == "1.0.0" and VERSION == "1.0.0"  # V1.0 moved both on
     assert "\n## V0.9.4 — " in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert '#define AppVersion "0.9.4"' in (ROOT / "packaging/version.iss").read_text(encoding="utf-8")
+    assert '#define AppVersion "1.0.0"' in (ROOT / "packaging/version.iss").read_text(encoding="utf-8")
 
 
 def test_the_protocol_has_the_stint_point_and_the_probe_records_it():

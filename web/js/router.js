@@ -23,6 +23,9 @@ const routes = {
   sessions: page("./pages/stints.js", "renderStints"),
   circuits: page("./pages/circuits.js", "renderCircuits"),
   download: page("./pages/download.js", "renderDownload"),
+  // V1.0: the setup guide and the legal pages (both public)
+  setup: page("./pages/setup.js", "renderSetup"),
+  legal: page("./pages/legal.js", "renderLegal"),
   teams: page("./pages/teams.js", "renderTeams"),
   account: page("./pages/account.js", "renderAccount"),
   admin: page("./pages/admin.js", "renderAdmin"),

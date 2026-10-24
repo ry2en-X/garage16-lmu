@@ -67,6 +67,7 @@ def test_upload_from_an_old_client_gets_a_structured_426(client, monkeypatch):
 
     monkeypatch.setattr(settings, "min_client_version", "9.9.9")
     monkeypatch.setattr(settings, "client_download_url", "https://example.com/garage16")
+    monkeypatch.setattr(settings, "client_app_download_url", None)   # V1.0: defaults to GitHub otherwise
     account = _register(client)
     with tempfile.TemporaryDirectory() as tmp:
         meta_path = _write_recorded_lap(Path(tmp))

@@ -22,6 +22,14 @@ all on the same host kernel, so `flock` works across containers).
 Reading is never blocked: the analysis, leaderboards and pages keep working during a backup.
 
 Without fcntl (Windows dev machines) the lock is a no-op — the server only runs on Linux.
+
+V0.9.9.3 — who owns the lock file: the first process that opens it creates it. On the NAS that was
+the backup's helper container (root), so the file was root:root 0644 and the server (user garage)
+could no longer open it for writing — EVERY upload failed with 500 PermissionError until the file
+was chown'ed by hand. Three layers now: the entrypoint creates the file as garage before the server
+starts; both backup scripts give an existing file the owner of the telemetry directory; and the
+server opens a file it cannot write READ-ONLY (flock works on a read-only descriptor, shared and
+exclusive alike), so a wrongly owned lock file can never block uploads again.
 """
 
 from __future__ import annotations
@@ -47,6 +55,19 @@ RETRY_AFTER_S = 120
 MARKER_STALE_S = float(os.environ.get("LMU_GARAGE_MAINTENANCE_STALE_S", 2 * 3600))
 
 logger = logging.getLogger("lmu_garage.write_lock")
+
+
+def _open_lock(base: Path) -> int:
+    """The lock file's descriptor. Created if missing; opened read-only if it exists but belongs
+    to someone else (flock does not need write access) — V0.9.9.3."""
+    path = base / LOCK_NAME
+    try:
+        return os.open(path, os.O_RDWR | os.O_CREAT, 0o664)
+    except PermissionError:
+        fd = os.open(path, os.O_RDONLY)          # still PermissionError if not even readable
+        logger.warning("The write lock file %s is not writable by this process (wrong owner?) — "
+                       "using it read-only. Fix: chown it to the server user.", path)
+        return fd
 
 
 class MaintenanceActive(Exception):
@@ -84,7 +105,7 @@ def writing(root: Optional[Path] = None, *, wait_s: float = 0.0) -> Iterator[Non
     base.mkdir(parents=True, exist_ok=True)
     if maintenance_active(base):
         raise MaintenanceActive()
-    fd = os.open(base / LOCK_NAME, os.O_RDWR | os.O_CREAT, 0o664)
+    fd = _open_lock(base)
     try:
         deadline = time.monotonic() + wait_s
         while True:
@@ -113,7 +134,7 @@ def exclusive(root: Optional[Path] = None, *, timeout_s: float = 300.0) -> Itera
     base.mkdir(parents=True, exist_ok=True)
     marker = base / MARKER_NAME
     marker.write_text(str(os.getpid()), encoding="utf-8")
-    fd = os.open(base / LOCK_NAME, os.O_RDWR | os.O_CREAT, 0o664)
+    fd = _open_lock(base)
     try:
         if fcntl is not None:
             deadline = time.monotonic() + timeout_s

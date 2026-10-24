@@ -17,14 +17,14 @@ def test_versions_and_changelog():
     from client.uploader.uploader import CLIENT_VERSION
     from server.main import VERSION
 
-    assert VERSION == "0.9.9"
-    assert CLIENT_VERSION == "0.9.4", "V0.9.9 changes the server and the web page only"
+    assert VERSION == "1.0.0"  # V1.0 moved both on
+    assert CLIENT_VERSION == "1.0.0", "V0.9.9 changes the server and the web page only (client 1.0.0 since V1.0)"
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert changelog.split("\n## ", 2)[1].startswith("V0.9.9")
+    assert "\n## V0.9.9" in changelog and changelog.index("\n## V1.0.0") < changelog.index("\n## V0.9.9")
     entry = changelog.split("\n## V0.9.9", 1)[1].split("\n## V0.9.8", 1)[0]
     for needle in ("0017", "Known limits", "held", "INTEGRITY_FAILED", "downgrade 0016"):
         assert needle in entry, needle
-    assert "server 0.9.9 / desktop client 0.9.4" in (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "server 1.0.0 / desktop client 1.0.0" in (ROOT / "README.md").read_text(encoding="utf-8")
 
 
 def test_the_update_backs_up_first_signs_the_laps_and_has_a_way_back_over_the_migration():
@@ -40,8 +40,9 @@ def test_the_update_backs_up_first_signs_the_laps_and_has_a_way_back_over_the_mi
 
 def test_the_migration_is_the_head_additive_and_reversible():
     versions = sorted(p.name for p in (ROOT / "alembic/versions").glob("0*.py"))
-    assert versions[-1].startswith("0017_")
-    text = (ROOT / "alembic/versions" / versions[-1]).read_text(encoding="utf-8")
+    [mine] = [v for v in versions if v.startswith("0017_")]
+    assert versions[versions.index(mine) + 1:] in ([], [v for v in versions if v.startswith("0018_")]), "V1.0 added 0018"
+    text = (ROOT / "alembic/versions" / mine).read_text(encoding="utf-8")
     upgrade = text.split("def upgrade", 1)[1].split("def downgrade", 1)[0]
     downgrade = text.split("def downgrade", 1)[1]
     assert "add_column" in upgrade and "create_table" in upgrade and "drop" not in upgrade.lower()

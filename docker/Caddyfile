@@ -65,7 +65,7 @@
     #     app's real OpenAPI paths and the frontend's calls, and (when a
     #     Caddy binary is available) runs the real proxy in front of the real
     #     app. Add a new router prefix -> add it here.
-    @api path /accounts/* /telemetry/* /leaderboard/* /teams /teams/* /drivers/* /invitations/* /admin/* /health
+    @api path /accounts/* /telemetry/* /leaderboard/* /teams /teams/* /drivers/* /invitations/* /admin/* /health /legal
     handle @api {
         reverse_proxy server:8000 {
             header_up X-Forwarded-Proto https
@@ -99,10 +99,12 @@
 
     encode zstd gzip
 
+    # V1.0: the access log holds IP addresses — kept 7 days (privacy policy, section 4)
     log {
         output file /data/access.log {
             roll_size 50MB
             roll_keep 5
+            roll_keep_for 168h
         }
     }
 }

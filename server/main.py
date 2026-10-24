@@ -29,11 +29,12 @@ from sqlalchemy import text
 from . import request_context
 from .config import settings
 from .database import Base, SessionLocal, engine
-from .routers import accounts, admin, analysis, drivers, leaderboard, stints, teams, telemetry
+from .routers import accounts, admin, analysis, drivers, leaderboard, legal, stints, teams, telemetry
+from .routers.legal import registration_mode
 from .routers.teams import invitations_router
 from .versioning import is_client_outdated
 
-VERSION = "0.9.9"
+VERSION = "1.0.0"
 
 
 def _configure_logging() -> None:
@@ -217,6 +218,7 @@ app.include_router(teams.router)
 app.include_router(invitations_router)
 app.include_router(admin.router)
 app.include_router(drivers.router)
+app.include_router(legal.router)
 
 
 @app.get("/health")
@@ -259,6 +261,9 @@ def health(client_version: Optional[str] = Query(default=None, max_length=32)) -
         # V0.9.2: the "Client + analysis app" edition (see config.py) — the website's download
         # page offers both, and an outdated app-edition client points its user here.
         **({"client_app_download_url": settings.client_app_download_url} if settings.client_app_download_url else {}),
+        # V1.0: every download of the newest release, and how a new driver gets an account
+        **({"client_release_page_url": settings.client_release_page_url} if settings.client_release_page_url else {}),
+        "registration": registration_mode(settings),
     }
 
 

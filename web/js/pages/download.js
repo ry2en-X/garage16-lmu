@@ -37,10 +37,14 @@ export async function renderDownload(container) {
   container.appendChild(el("p", { class: "subtitle" },
     t("The desktop client records your laps in Le Mans Ultimate and uploads them to Garage16. For Windows 10 and 11. Choose how you want to look at your analysis:")));
 
-  let links = { standard: null, analysis: null };
+  let links = { standard: null, analysis: null, all: null };
   try {
     const health = await api.health();
-    links = { standard: safeLink(health.client_download_url), analysis: safeLink(health.client_app_download_url) };
+    links = {
+      standard: safeLink(health.client_download_url),
+      analysis: safeLink(health.client_app_download_url),
+      all: safeLink(health.client_release_page_url),   // V1.0: every file of the newest release
+    };
   } catch (err) {
     container.appendChild(el("div", { class: "notice notice--error" }, err.message));
   }
@@ -73,7 +77,24 @@ export async function renderDownload(container) {
     }),
   ]));
 
+  // V1.0: what to do once the file is there — the setup guide; shown more prominently after a click
+  const next = el("div", { class: "notice download-next" }, [
+    t("After downloading: "),
+    el("a", { href: "#/setup" }, t("follow the setup guide")),
+    t(" — install, sign in with your Garage16 email and password, start Le Mans Ultimate, drive."),
+  ]);
+  container.querySelectorAll("a[data-download]").forEach((a) => a.addEventListener("click", () => {
+    next.classList.add("notice--success");
+    next.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+  }));
+  container.appendChild(next);
+
   container.appendChild(el("div", { class: "card download-notes" }, [
+    links.all ? el("p", {}, [
+      t("Download does not start? "),
+      el("a", { href: links.all, target: "_blank", rel: "noopener" }, t("All downloads on GitHub")),
+      t(" — also the portable ZIP versions without an installer."),
+    ]) : null,
     el("p", {}, t("Changing your mind later is easy: install the other download over the existing one. Your login and your recorded laps stay.")),
     el("p", {}, t("With the analysis app you can still choose the browser at any time: a tick box in the Garage16 window.")),
     inDesktopApp() ? el("p", { class: "subtitle" }, t("You are looking at this page in the Garage16 analysis app.")) : null,

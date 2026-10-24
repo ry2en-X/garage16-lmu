@@ -1,28 +1,41 @@
-# Garage16 — Leitfaden für Fahrer
+# Garage16 — Leitfaden für Fahrer (V1.0)
 
-Kein Python, kein Terminal, keine Konfigurationsdateien. Der Ablauf:
+Kein Python, kein Terminal, keine Konfigurationsdateien, nichts zu kopieren. Der Ablauf:
 
-**1. Installieren → 2. Starten → 3. Account verbinden → 4. LMU starten → 5. Fahren**
+**1. Konto anlegen → 2. Herunterladen und installieren → 3. Client verbinden → 4. LMU starten → 5. Fahren**
 
-Wenn etwas nicht klappt: ganz unten steht eine Liste der Meldungen, die
+Die gleiche Anleitung steht auch auf der Website unter **Einrichtung**
+(`#/setup`). Wenn etwas nicht klappt: ganz unten steht eine Liste der Meldungen, die
 du sehen kannst, und was du dann tust.
 
-## 1. Installieren
+## 1. Konto anlegen (ab V1.0 ohne Kennwort vom Admin)
 
-Du bekommst von deinem Admin (dem, der Garage16 betreibt) drei Dinge:
+1. Die Garage16-Website öffnen (**`https://garage16.de`**, bzw. die Adresse, die dir der Betreiber
+   nennt) → **Konto** (oder auf der Startseite **Get Garage16**).
+2. Im Kasten **„Neuer Fahrer“**: Fahrernamen (steht so in den Bestenlisten), E-Mail und ein
+   Passwort (mindestens 10 Zeichen, zweimal) eingeben.
+3. Haken bei **„Ich bin mindestens 16 Jahre alt“** und **„Ich akzeptiere die Nutzungsbedingungen
+   und habe die Datenschutzerklärung gelesen“** (beide Texte sind verlinkt) → **Konto erstellen**.
+4. Du bist sofort angemeldet und landest auf der Einrichtungsseite. In deinem Postfach liegt eine
+   Bestätigungs-E-Mail — den Link innerhalb von 48 Stunden anklicken (Spam-Ordner prüfen).
 
-- die Setup-Datei (oder einen Download-Link dazu — auf **garage16.de → Download**
-  stehen beide nebeneinander, ab 0.9.2). Du wählst **eine** davon:
-  - **Client** — `Garage16-Client-Setup.exe`: zeichnet deine Runden auf und lädt sie
-    hoch. Die Analyse öffnet sich in deinem Browser.
-  - **Client + Analysetool** — `Garage16-Client-Analysis-Setup.exe`: dasselbe, und die
-    Analyse öffnet sich in einem **eigenen Fenster** — ganz ohne Browser, aber mit
-    denselben Daten wie auf der Website (alles kommt immer vom Server).
-  Umentscheiden geht jederzeit: einfach die andere Datei über die vorhandene
-  installieren. Deine Anmeldung und deine Runden bleiben.
-- die **Web-Adresse** von Garage16: **`https://garage16.de`**
-- das **Registration secret** (ein Kennwort, das nur zum Anlegen deines
-  Accounts nötig ist — ohne es lässt der Server keine Fremden herein)
+Betreibt jemand einen geschlossenen Garage16-Server, fragt das Formular zusätzlich nach einem
+**Registrierungs-Kennwort** — das bekommst du dann von ihm.
+
+## 2. Herunterladen und installieren
+
+Auf der Website unter **Download** (oder auf der Einrichtungsseite) wählst du **eine** von zwei
+Varianten — der Knopf lädt die Setup-Datei direkt herunter:
+
+- **Client** — `Garage16-Client-Setup.exe`: zeichnet deine Runden auf und lädt sie
+  hoch. Die Analyse öffnet sich in deinem Browser.
+- **Client + Analysetool** — `Garage16-Client-Analysis-Setup.exe`: dasselbe, und die
+  Analyse öffnet sich in einem **eigenen Fenster** — ganz ohne Browser, aber mit
+  denselben Daten wie auf der Website (alles kommt immer vom Server).
+
+Umentscheiden geht jederzeit: einfach die andere Datei über die vorhandene installieren. Deine
+Anmeldung und deine Runden bleiben. Startet der Download nicht, gibt es unter den Knöpfen den Link
+**„Alle Downloads auf GitHub“**.
 
 Doppelklick auf die Setup-Datei, den Assistenten durchklicken. Du
 brauchst dafür **keine Administrator-Rechte**. Wenn du magst, setz die
@@ -32,44 +45,32 @@ wenn ich mich bei Windows anmelde".
 > **Windows zeigt eine Warnung** ("Der Computer wurde durch Windows
 > geschützt" / SmartScreen)? Das ist bei neuen, nicht digital signierten
 > Programmen normal. Klick auf **Weitere Informationen → Trotzdem
-> ausführen**. Wenn du der Quelle nicht traust, frag vorher deinen Admin.
+> ausführen**.
 
 Voraussetzungen: Windows 10/11 und Le Mans Ultimate.
 
-## 2. Starten
+## 3. Client verbinden
 
-Garage16 aus dem Startmenü (oder vom Desktop) öffnen. Beim allerersten
-Start öffnet sich ein Fenster **"Connect Garage16 to your account"**.
+Garage16 aus dem Startmenü (oder vom Desktop) öffnen. Beim allerersten Start öffnet sich das
+Fenster **"Connect Garage16 to your account"**:
 
-## 3. Account verbinden
-
-Zuerst brauchst du einen Account — der wird im **Browser** angelegt:
-
-1. Die Web-Adresse von deinem Admin öffnen.
-2. **"Get Garage16"** → im Kasten **"New driver"** deinen Fahrernamen
-   eingeben und das **Registration secret** von deinem Admin ins Feld
-   "Registration secret" einfügen → **Register**. (Meldet der Server
-   "forbidden"/403, war das Secret falsch oder leer.)
-3. **Wichtig:** Jetzt werden **Auth token** und **Client secret**
-   angezeigt — und **nur dieses eine Mal**. Beide kopieren (sie sind lang;
-   markieren und kopieren, nicht abtippen).
-4. Danach unter *Account* → *Email & Password* eine E-Mail und ein
-   Passwort setzen, damit du dich später normal einloggen und ein
-   vergessenes Passwort zurücksetzen kannst. Die Bestätigungs-E-Mail
-   musst du nicht sofort anklicken; ohne bestätigte Adresse funktioniert
-   "Passwort vergessen" aber nicht zuverlässig.
-
-Dann zurück ins Garage16-Fenster:
-
-- **Server address:** ist meist schon ausgefüllt. Falls nicht: die
-  Web-Adresse von deinem Admin.
-- **Auth token** und **Client secret:** einfügen.
+- **Server address:** ist schon ausgefüllt. Falls nicht: die Adresse der Garage16-Website.
+- **Email** und **Password:** die deines Garage16-Kontos aus Schritt 1.
 - **Connect** klicken.
 
-Kann Garage16 den Server nicht erreichen, steht im Fenster "Couldn't reach
-that server…". Adresse und Internetverbindung prüfen; ein zweiter Klick
-speichert deine Eingaben trotzdem (praktisch, wenn der Server nur gerade
-offline ist).
+Unten im Fenster führen Links zur Registrierung, zur Einrichtungsanleitung und zur
+Datenschutzerklärung.
+
+**Ein PC zur selben Zeit:** Verbindest du Garage16 auf einem zweiten PC, wird der erste getrennt
+und zeigt **„Reconnect account…“** — dort einfach wieder mit E-Mail und Passwort anmelden.
+
+Meldungen im Fenster:
+- *"Email or password is wrong…"* — genau die Daten von der Website verwenden; Passwort vergessen →
+  Website → Konto → „Passwort vergessen?“.
+- *"Couldn't reach that server…"* — Adresse und Internetverbindung prüfen.
+- *"…older than Garage16 1.0…"* — der Server ist noch nicht auf 1.0; dann den Haken **„Use an auth
+  token instead (advanced)“** setzen und Auth token + Client secret einfügen (Website → Konto →
+  „Zugangsdaten des Desktop-Clients“ → neu erzeugen).
 
 ## 4. LMU starten
 
@@ -130,8 +131,8 @@ warten und einen neuen Code erzeugen).
 
 ## Updates und Serverumzug — was du davon merkst
 
-- **Neue Garage16-Version:** Deinen Admin nach der neuen
-  `Garage16-Client-Setup.exe` fragen und sie einfach **erneut ausführen**.
+- **Neue Garage16-Version:** Website → **Download** → die Setup-Datei laden und einfach
+  **erneut ausführen**.
   Sie aktualisiert an Ort und Stelle; Anmeldung und aufgezeichnete Runden
   bleiben erhalten.
 - **Der Admin zieht auf einen neuen Server um:** Du musst nichts tun.
@@ -146,7 +147,7 @@ warten und einen neuen Code erzeugen).
 |---|---|---|
 | **Gelbes Banner:** "Can't reach the Garage16 server right now — your laps are saved and will upload automatically once it's back." | Server offline oder deine Verbindung hakt | Nichts. Deine Runden sind sicher gespeichert und werden automatisch nachgeladen. Hält es lange an: Admin fragen |
 | **Gelbes Banner:** "A new version of Garage16 … is required. … Your recorded laps are kept and will upload after you update." (evtl. mit Knopf **Open download page**) | Dein Garage16 ist zu alt für den Server | Knopf klicken bzw. neue Setup-Datei vom Admin holen und ausführen. Gefahrene Runden gehen nicht verloren |
-| **Gelbes Banner:** "Garage16 rejected your login (it may have been reset or revoked). Click "Reconnect account…" …" | Auth token/Client secret gelten nicht mehr (z. B. zurückgesetzt) | **Reconnect account…** klicken, aktuelle Werte von der Account-Seite der Website eintragen |
+| **Gelbes Banner:** "Garage16 rejected your login (it may have been reset or revoked). Click "Reconnect account…" …" | Die Anmeldung des Clients gilt nicht mehr (z. B. auf einem anderen PC verbunden oder auf der Website erneuert) | **Reconnect account…** klicken und mit E-Mail und Passwort anmelden |
 | **Gelbes Banner:** "This server may have moved to …, but the connection isn't secure enough to switch automatically. Please ask whoever runs your Garage16 server for updated connection details." | Der Server zieht um, aber die alte Verbindung ist nicht per HTTPS gesichert — deshalb wechselt Garage16 aus Sicherheitsgründen nicht selbst | Admin nach der neuen Adresse fragen, dann **Reconnect account…** und die neue Server-Adresse eintragen |
 | "Waiting for LMU to start..." (bleibt) | LMU läuft nicht, oder Shared Memory ist aus | LMU starten; Einstellung prüfen |
 | Runde ist rot / "invalid" | Die Plausibilitätsprüfung hat die Runde beanstandet (z. B. Abkürzung) | Normal — nur gültige Runden zählen fürs Leaderboard |

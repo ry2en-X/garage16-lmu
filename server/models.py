@@ -69,6 +69,10 @@ class Driver(Base):
     client_secret = Column(String, nullable=False)
     discord_user_id = Column(String, unique=True, nullable=True, index=True)
     created_at = Column(DateTime, default=_utcnow)
+    # V1.0: acceptance of the terms of use / privacy policy at sign-up (server/legal.py
+    # TERMS_VERSION). Null for accounts created before V1.0 or through the admin-only /register.
+    terms_accepted_at = Column(DateTime, nullable=True)
+    terms_version = Column(String(32), nullable=True)
 
     laps = relationship("Lap", back_populates="driver")
 

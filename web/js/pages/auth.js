@@ -88,68 +88,14 @@ export function renderAuth(container) {
     el(
       "p",
       { class: "subtitle" },
-      t("Sign in with email + password if you've set one, register a new driver profile, or restore a session with a saved token.")
+      t("Sign in with your email and password, or create a new driver account below.")
     )
   );
 
   container.appendChild(renderLoginCard());
 
-  // --- register ---
-  const registerCard = el("div", { class: "card" });
-  registerCard.appendChild(el("h2", {}, t("New driver")));
-
-  const nameField = el("div", { class: "field" }, [
-    el("label", { for: "displayName" }, t("Display name")),
-    el("input", { id: "displayName", type: "text", placeholder: t("e.g. Mika H.") }),
-  ]);
-  const regSecretField = el("div", { class: "field" }, [
-    el("label", { for: "regSecret" }, t("Registration secret (only if this server requires one)")),
-    el("input", { id: "regSecret", type: "password", placeholder: t("leave blank if you don't have one") }),
-  ]);
-  const registerBtn = el("button", { class: "btn" }, t("Register"));
-  const registerOut = el("div");
-
-  registerBtn.addEventListener("click", async () => {
-    const name = nameField.querySelector("input").value.trim();
-    const regSecret = regSecretField.querySelector("input").value.trim();
-    if (!name) return;
-    registerBtn.disabled = true;
-    registerOut.innerHTML = "";
-    try {
-      const res = await api.registerDriver(name, regSecret || undefined);
-      // V0.7.2: this auth_token is the DESKTOP CLIENT's credential (see
-      // server/security.py) — it is deliberately NOT persisted as this
-      // browser's ongoing web session (that would be exactly the
-      // localStorage-token pattern this version moves away from, see
-      // state.js). It's set here only transiently, for the current page
-      // load, so the "Email & Password" card below can use it once to
-      // attach real login credentials to this brand-new driver — after
-      // that, use "Sign in" above like any other visit.
-      store.setSession({ driverId: res.driver_id, displayName: res.display_name, authToken: res.auth_token });
-      registerOut.appendChild(el("div", { class: "notice notice--success" }, t("Registered.")));
-      const box = el("div", { class: "credential-box" }, [
-        t("Save this client secret now — it's shown once and needed to configure the desktop recorder client:"),
-        el("code", {}, res.client_secret),
-      ]);
-      registerOut.appendChild(box);
-      registerOut.appendChild(
-        el(
-          "div",
-          { class: "notice", style: "margin-top:12px;" },
-          t("You're set up as a driver now. Head to Account → Email & Password to set a password — that's what lets you sign in on this or any browser afterwards, instead of pasting a token.")
-        )
-      );
-    } catch (err) {
-      registerOut.appendChild(el("div", { class: "notice notice--error" }, err.message));
-    } finally {
-      registerBtn.disabled = false;
-    }
-  });
-
-  registerCard.appendChild(nameField);
-  registerCard.appendChild(regSecretField);
-  registerCard.appendChild(registerBtn);
-  registerCard.appendChild(registerOut);
+  // --- sign up (V1.0): one form — name, email, password, minimum age, terms ---
+  container.appendChild(renderSignupCard());
 
   // --- restore session ---
   const restoreCard = el("div", { class: "card" });
@@ -190,6 +136,91 @@ export function renderAuth(container) {
   restoreCard.appendChild(restoreBtn);
   restoreCard.appendChild(restoreOut);
 
-  container.appendChild(registerCard);
-  container.appendChild(restoreCard);
+  // The old way in (a desktop-client token pasted into the browser) — folded away, still there
+  // for drivers from before V1.0 who never set a password.
+  container.appendChild(el("details", { class: "card advanced-signin" }, [
+    el("summary", {}, t("Advanced: sign in with a saved auth token")),
+    restoreCard,
+  ]));
+}
+
+// "I accept the {0} and have read the {1}." -> text with the two links in place (the word order
+// differs between the languages, so the sentence is translated whole)
+function withLinks(sentence, links) {
+  return sentence.split(/(\{\d+\})/).filter(Boolean).map((part) => {
+    const m = /^\{(\d+)\}$/.exec(part);
+    return m && links[Number(m[1])] ? links[Number(m[1])] : part;
+  });
+}
+
+function checkbox(id, labelChildren) {
+  return el("label", { class: "check-row", for: id }, [
+    el("input", { id, type: "checkbox" }),
+    el("span", {}, labelChildren),
+  ]);
+}
+
+function renderSignupCard() {
+  const card = el("div", { class: "card signup-card" });
+  card.appendChild(el("h2", {}, t("New driver")));
+  card.appendChild(el("p", { class: "subtitle" },
+    t("Create your Garage16 account. You use the same email and password in the desktop client — nothing to copy.")));
+
+  const field = (id, label, attrs = {}) => el("div", { class: "field" }, [
+    el("label", { for: id }, label),
+    el("input", { id, ...attrs }),
+  ]);
+  const nameField = field("displayName", t("Driver name (shown in the leaderboards)"), { type: "text", maxlength: "60", autocomplete: "nickname", placeholder: t("e.g. Mika H.") });
+  const emailField = field("signupEmail", t("Email"), { type: "email", maxlength: "254", autocomplete: "email" });
+  const pwField = field("signupPw", t("Password (at least 10 characters)"), { type: "password", maxlength: "200", autocomplete: "new-password" });
+  const pw2Field = field("signupPw2", t("Repeat password"), { type: "password", maxlength: "200", autocomplete: "new-password" });
+  const secretField = field("regSecret", t("Registration secret"), { type: "password", placeholder: t("from whoever runs this server") });
+  secretField.hidden = true;
+
+  const ageText = el("span", {}, t("I am at least {0} years old.", [16]));
+  const ageBox = el("label", { class: "check-row", for: "signupAge" }, [el("input", { id: "signupAge", type: "checkbox" }), ageText]);
+  const termsBox = checkbox("signupTerms", withLinks(t("I accept the {0} and have read the {1}."), [
+    el("a", { href: "#/legal?tab=terms", target: "_blank", rel: "noopener" }, t("terms of use")),
+    el("a", { href: "#/legal?tab=privacy", target: "_blank", rel: "noopener" }, t("privacy policy")),
+  ]));
+
+  const button = el("button", { class: "btn" }, t("Create account"));
+  const out = el("div");
+
+  // what this server expects: open sign-up, or a registration secret; and the minimum age
+  api.legal().then((info) => {
+    if (info.registration === "secret") secretField.hidden = false;
+    if (info.min_age) ageText.textContent = t("I am at least {0} years old.", [info.min_age]);
+  }).catch(() => { /* the form works without it; the server says what is missing */ });
+
+  const value = (f) => f.querySelector("input").value;
+  button.addEventListener("click", async () => {
+    out.innerHTML = "";
+    const problem = (msg) => out.appendChild(el("div", { class: "notice notice--error" }, msg));
+    const displayName = value(nameField).trim();
+    const email = value(emailField).trim();
+    const password = value(pwField);
+    if (!displayName) return problem(t("Please enter a driver name."));
+    if (!email || !email.includes("@")) return problem(t("Please enter your email address."));
+    if (password.length < 10) return problem(t("The password needs at least 10 characters."));
+    if (password !== value(pw2Field)) return problem(t("The two passwords are not the same."));
+    if (!ageBox.querySelector("input").checked) return problem(t("Please confirm your age."));
+    if (!termsBox.querySelector("input").checked) return problem(t("Please accept the terms of use and the privacy policy."));
+    button.disabled = true;
+    try {
+      const res = await api.signup({
+        displayName, email, password, acceptTerms: true, confirmMinAge: true,
+        registrationSecret: secretField.hidden ? undefined : value(secretField).trim() || undefined,
+      });
+      store.setSession({ driverId: res.driver_id, displayName: res.display_name, viaCookie: true });
+      window.location.hash = "#/setup?welcome=1";
+    } catch (err) {
+      problem(err.message);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  [nameField, emailField, pwField, pw2Field, secretField, ageBox, termsBox, button, out].forEach((n) => card.appendChild(n));
+  return card;
 }

@@ -47,6 +47,7 @@ globalThis.fetch = async (url) => {
   if (p === "/telemetry/analysis/circuits") return json({ venues: [{ venue: "Le Mans", lap_count: 0, layouts: [] }] });
   if (p === "/telemetry/analysis/channels") return json({ channels: [], default: [] });
   if (p === "/health") return json({ status: "ok", version: "0.9.2", client_download_url: "https://dl.example/Garage16-Client-Setup.exe" });
+  if (p === "/legal") return json({ operator: { name: "Erika Mustermann", address: ["Musterstraße 1", "12345 Musterstadt"], email: "erika@example.com" }, min_age: 16, terms_version: "2026-10-24", registration: "open" });
   unexpected.push(p);
   return json({ detail: "not mocked" }, 404);
 };
@@ -63,7 +64,8 @@ const WORDS = {
   en: {
     // V0.9.2: "Download" added to the menu (the two client editions, pages/download.js)
     // V0.9.4: two dashboards — "LapTime Analyzer" (#/analysis) and "Stint Analyzer" (#/stints)
-    nav: ["Dashboard", "Teams", "LapTime Analyzer", "Stint Analyzer", "Leaderboard", "Circuits", "Account", "Download"], status: "signed in as Mika",
+    // V1.0: "Setup guide" and "Legal" at the foot of the menu
+    nav: ["Dashboard", "Teams", "LapTime Analyzer", "Stint Analyzer", "Leaderboard", "Circuits", "Account", "Download", "Setup guide", "Legal"], status: "signed in as Mika",
     pages: {
       "#/": ["Your LMU Data. Your Records. Your Team.", "Recent Activity", "Explore Leaderboards", "What Garage16 Does"],
       "#/teams": ["Your teams", "3 member(s) — admin", "invite: ABCD", "Create a team", "Join a team"],
@@ -74,11 +76,15 @@ const WORDS = {
       "#/circuits": ["Circuits", "Find a track", "No laps yet — be the first!"],
       "#/analysis": ["LapTime Analyzer", "Quick start", "You vs. Garage16 Best", "You vs. Team Best", "You vs. My Best", "Choose Lap 1"],
       "#/download": ["Download Garage16", "Client + analysis app", "Download Client", "The analysis in its own window — no browser needed", "Not available yet"],
+      "#/setup": ["Set up Garage16", "Done — you are signed in.", "Connect the client to your account", "If something does not work"],
+      "#/legal": ["Legal notice", "Information pursuant to § 5", "Erika Mustermann", "Musterstraße 1"],
+      "#/legal?tab=privacy": ["Who is responsible?", "garage16_session", "Cloudflare, Inc."],
+      "#/legal?tab=terms": ["Fair play", "at least 16 years old"],
       "#/nowhere": ["Page not found"],
     },
   },
   de: {
-    nav: ["Dashboard", "Teams", "LapTime Analyzer", "Stint Analyzer", "Leaderboard", "Strecken", "Konto", "Download"], status: "angemeldet als Mika",
+    nav: ["Dashboard", "Teams", "LapTime Analyzer", "Stint Analyzer", "Leaderboard", "Strecken", "Konto", "Download", "Einrichtung", "Rechtliches"], status: "angemeldet als Mika",
     pages: {
       "#/": ["Deine LMU-Daten. Deine Rekorde. Dein Team.", "Letzte Aktivität", "Leaderboards ansehen", "Was Garage16 kann"],
       "#/teams": ["Deine Teams", "3 Mitglied(er) — Admin", "Einladung: ABCD", "Team erstellen", "Einem Team beitreten"],
@@ -89,6 +95,10 @@ const WORDS = {
       "#/circuits": ["Strecken", "Strecke finden", "Noch keine Runden — sei der Erste!"],
       "#/analysis": ["LapTime Analyzer", "Schnellstart", "Du vs. Garage16 Best", "Du vs. Team Best", "Du vs. Meine Beste", "Runde 1 wählen"],
       "#/download": ["Garage16 herunterladen", "Client + Analysetool", "Client herunterladen", "Die Analyse im eigenen Fenster — ganz ohne Browser", "Noch nicht verfügbar"],
+      "#/setup": ["Garage16 einrichten", "Erledigt — du bist angemeldet.", "Client mit deinem Konto verbinden", "Wenn etwas nicht klappt"],
+      "#/legal": ["Impressum", "Angaben gemäß § 5", "Erika Mustermann", "Musterstraße 1"],
+      "#/legal?tab=privacy": ["Wer ist verantwortlich?", "garage16_session", "Cloudflare, Inc."],
+      "#/legal?tab=terms": ["Fair Play", "mindestens 16 Jahre alt"],
       "#/nowhere": ["Seite nicht gefunden"],
     },
   },

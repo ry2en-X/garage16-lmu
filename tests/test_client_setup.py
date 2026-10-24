@@ -266,9 +266,11 @@ def test_real_setup_dialog_collects_credentials_without_a_terminal(tmp_path):
 
             def fake_mainloop(self):
                 entries = [w for w in walk(self) if isinstance(w, ttk.Entry)]
-                assert len(entries) == 3, len(entries)
+                # V1.0: server, email, password, then the folded-away token and secret
+                assert len(entries) == 5, len(entries)
+                [w for w in walk(self) if isinstance(w, ttk.Checkbutton)][0].invoke()   # "Use an auth token instead"
                 entries[0].delete(0, "end"); entries[0].insert(0, "{server.url}")
-                entries[1].insert(0, "my-token"); entries[2].insert(0, "my-secret")
+                entries[3].insert(0, "my-token"); entries[4].insert(0, "my-secret")
                 [w for w in walk(self) if isinstance(w, ttk.Button)][0].invoke()
 
             tk.Tk.mainloop = fake_mainloop
