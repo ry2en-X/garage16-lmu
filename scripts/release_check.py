@@ -303,6 +303,7 @@ def coverage_shortfalls(cov_json: Path, floors_file: Path) -> tuple:
 
 def build_zip(out: Path, report_dir: Path, prefix: str, tree: Path = ROOT) -> int:
     count = 0
+    out.parent.mkdir(parents=True, exist_ok=True)   # V1.0: CI passes release-archive/…, which did not exist yet
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
         for rel in released_files(tree):
             archive.write(tree / rel, f"{prefix}/{rel.as_posix()}")
