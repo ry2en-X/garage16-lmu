@@ -282,7 +282,7 @@ Domain zeigen — sie steckt im Link, den die E-Mail enthält.
    cd "$NEU" && sudo docker compose --profile tunnel up -d --build
    sudo docker compose --profile tunnel ps
    sudo docker compose exec -T server python -c "import urllib.request as u; print(u.urlopen('http://localhost:8000/health/ready').read().decode())"
-   sudo docker compose exec -T server python -c "import urllib.request as u; print(u.urlopen('http://localhost:8000/legal').read().decode())"
+   sudo docker compose exec -T server python -c "import urllib.request as u; r=u.Request('http://localhost:8000/legal', headers={'X-Forwarded-Proto':'https'}); print(u.urlopen(r).read().decode())"
    ```
    Erwartet: `"status":"ready"`, `"version":"1.0.0"`; `/legal` zeigt deinen Namen und
    `"registration":"open"`. Im Browser **Strg+F5**, dann prüfen: Menü → **Rechtliches** (alle vier

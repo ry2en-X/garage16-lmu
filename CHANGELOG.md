@@ -56,6 +56,16 @@ Server `1.0.0`, desktop client `1.0.0`. **One additive migration (0018)**: two n
   window instead of a developer command.
 - Validation errors from the server are shown as text in the web app (were "[object Object]").
 
+### First CI run on GitHub (fixed before the release)
+- `opentelemetry-api` 1.44.0 → **1.45.1** (CVE-2026-114603, found by pip-audit; pulled in by FastAPI).
+- The release gate in `ci.yml` runs as root (`sudo -E`): the backup/restore drill extracts an Alpine
+  root file system and reads the root-owned backups it makes, which the runner user cannot. The
+  workspace is handed back to the runner afterwards.
+- `tests/test_v097_operations.py` makes the read-only stored file writable before changing it (as
+  root the 0440 never mattered). `tests/test_v100_analysis_units.py` keeps `server/telemetry_analysis.py`
+  above its coverage floor.
+- docs/ADMIN_GUIDE.md: the `/legal` check inside the container sends `X-Forwarded-Proto: https`.
+
 ### Tests
 - `tests/test_v100_signup.py` (sign-up, confirmations, secret/open modes, the refused `/register`,
   desktop login incl. token replacement and locked accounts, `GET /legal`, start-up rule, download

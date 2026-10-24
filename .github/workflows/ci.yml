@@ -80,11 +80,18 @@ jobs:
       - name: Release gate — whole suite, strict (incl. the real backup/restore drill), archive from the tested tree
         env:
           GARAGE16_TEST_PG_ADMIN_URL: postgresql://garage16_test:test_password_123@localhost:5432/postgres
-        run: python -m scripts.release_check --report-dir release --zip release-archive/Garage16_Lmu.zip --zip-prefix "Garage16 - LMU"
+        # V1.0: as root (passwordless sudo on the runner) — the backup/restore drill extracts an Alpine
+        # root file system, uses mount namespaces and chroot and reads the root-owned backups it makes
+        # (as on the NAS, where backup.sh runs with sudo). As the "runner" user the drill could not
+        # create its folders inside that root file system (the first real CI run showed it).
+        run: sudo -E env "PATH=$PATH" python -m scripts.release_check --report-dir release --zip release-archive/Garage16_Lmu.zip --zip-prefix "Garage16 - LMU"
       - name: Release gate again on a clean copy extracted from the archive (V0.9.9)
         env:
           GARAGE16_TEST_PG_ADMIN_URL: postgresql://garage16_test:test_password_123@localhost:5432/postgres
-        run: python -m scripts.release_check --verify-archive release-archive/Garage16_Lmu.zip --report-dir release-verify
+        run: sudo -E env "PATH=$PATH" python -m scripts.release_check --verify-archive release-archive/Garage16_Lmu.zip --report-dir release-verify
+      - name: Give the workspace back to the runner user (the gate ran as root)
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" .
       - name: PostgreSQL — migration chain and suite
         run: bash scripts/test_against_postgres.sh postgresql://garage16_test:test_password_123@localhost:5432/garage16_test
       - name: Report

@@ -99,6 +99,7 @@ def test_consistency_finds_every_kind_of_drift_and_the_dry_run_changes_nothing(c
         changed = Path(laps[ids[1]].telemetry_path)
         data = bytearray(changed.read_bytes())
         data[len(data) // 2] ^= 0xFF                                                   # changed content
+        changed.chmod(0o640)   # stored originals are read-only (0440); as root that never showed
         changed.write_bytes(bytes(data))
         laps[ids[2]].lap_stats = {**laps[ids[2]].lap_stats, "version": INSIGHTS_VERSION - 1}   # old figures
         # a row pointing at nothing — possible on SQLite (foreign keys not enforced); PostgreSQL

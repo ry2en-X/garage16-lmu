@@ -1,4 +1,4 @@
-# constraints.txt — the exact versions Garage16 was tested with (V0.9.7, updated V0.9.8: + quality tools, V0.9.9: + hypothesis, certifi 2026.10.19 for PYSEC-2026-4320).
+# constraints.txt — the exact versions Garage16 was tested with (V0.9.7, updated V0.9.8: + quality tools, V0.9.9: + hypothesis, certifi 2026.10.19 for PYSEC-2026-4320; V1.0: opentelemetry-api 1.45.1 for CVE-2026-114603).
 #
 # The requirements files (server/, discord_bot/, client/, requirements-dev.txt) keep saying what the
 # code NEEDS (">=" ranges). This file says what was TESTED: every package of the dependency tree
@@ -53,7 +53,7 @@ mdurl==0.1.2
 msgpack==1.2.3
 multidict==7.1.0
 numpy==2.5.3
-opentelemetry-api==1.44.0
+opentelemetry-api==1.45.1
 packageurl-python==0.17.6
 packaging==26.3
 pandas==3.0.5
