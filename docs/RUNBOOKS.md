@@ -1,7 +1,8 @@
-# Runbooks — was tun, wenn … (V0.9.9)
+# Runbooks — was tun, wenn … (V1.0.1)
 
 Für jedes Szenario: woran man es erkennt, wie man die Ursache findet, was sicher hilft. Befehle
-laufen im Projektordner auf dem Server (NAS: `/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_9/Garage16 - LMU`).
+laufen im Projektordner der laufenden Version auf dem Server (NAS:
+`/volume1/homes/Moritz/garage16/Garage16_Lmu_<Version>/Garage16 - LMU`, z. B. `…_V1_0_1/…`).
 
 Befehle, die im Server-Container mit der echten Datenbank laufen müssen, brauchen die Datenbank-URL
 (`docker compose exec` erbt sie nicht). Im Folgenden steht dafür `RUN_IN_SERVER`:
@@ -14,7 +15,9 @@ RUN_IN_SERVER() { sudo docker compose exec -T server sh -c "LMU_GARAGE_DB_URL=\"
 
 ```
 sudo docker compose --profile tunnel ps                     # alle "healthy"?
-curl -s https://garage16.de/health/ready                    # 200 + "ready"; sonst steht in "checks", was fehlt
+sudo docker compose exec -T server python -c "import urllib.request as u; print(u.urlopen('http://localhost:8000/health/ready').read().decode())"
+                                                            # "ready"; sonst steht in "checks", was fehlt
+curl -s https://<öffentliche Adresse>/health/ready          # dasselbe von außen (Tunnel, Proxy)
 ```
 `/health/live` = der Prozess antwortet · `/health/ready` = Datenbank und Telemetrie-Speicher
 nutzbar (503 sonst) · `warnings` darin: `MAINTENANCE` (Backup läuft), `DISK_LOW`.
@@ -134,7 +137,7 @@ Meldet Schritt 3 „unreadable“: dieser Fahrer startet seinen Client einmal mi
 
 Die Grenzen zählen pro echter Client-Adresse (`LMU_GARAGE_TRUSTED_PROXIES`, `server/client_ip.py`)
 und pro Fahrer. Teilen sich viele Fahrer eine Adresse (LAN-Party), die passende Grenze in `.env`
-anheben (`LMU_GARAGE_RATELIMIT_<BUCKET>_MAX`, Liste im README) und `up -d server`. Hinter dem Tunnel
+anheben (`LMU_GARAGE_RATELIMIT_<BUCKET>_MAX`, Liste in `docs/DEPLOYMENT.md`) und `up -d server`. Hinter dem Tunnel
 zählt die Adresse, die Cloudflare gesehen hat — nicht die des Tunnels.
 
 ## 10. Daten eines Fahrers löschen (DSGVO)
@@ -241,3 +244,60 @@ verändert; „key“: mit unbekanntem Schlüssel signiert). Den Kettenkopf aus 
 Backups vergleichen (`audit_head`): stimmt er mit der Zeile gleicher ID heute überein, ist alles bis
 dahin unverändert. Es ist ein Sicherheitsvorfall: Zugriff auf Server/Datenbank prüfen, Passwörter
 und Schlüssel wechseln, den Zustand sichern (Backup), nichts „reparieren“.
+
+## 18. Die Quick-Tunnel-Adresse hat sich geändert
+
+**Erkennen:** Website unter der alten `….trycloudflare.com`-Adresse nicht erreichbar, Clients zeigen
+„Can't reach the Garage16 server right now“, der Stack selbst ist aber `healthy` (`ps`, `/health/ready`
+von innen). Passiert, wenn der Quick-Tunnel-Container neu erstellt wurde (nicht beim bloßen
+Neustart des Stacks).
+
+**Ursache finden / neue Adresse:**
+```
+sudo docker ps --format '{{.Names}}  {{.Status}}' | grep -i tunnel
+sudo docker logs quicktunnel 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1
+```
+
+**Was hilft:**
+1. Die neue Adresse in die `.env`: `LMU_GARAGE_FRONTEND_URL` und `LMU_GARAGE_CORS_ORIGINS` (sonst
+   zeigen Bestätigungs- und Reset-Links auf die alte Adresse), dann
+   `sudo docker compose --profile tunnel up -d server`.
+2. GitHub → Variables → `GARAGE16_SERVER_URL` auf die neue Adresse und einen neuen Client-Tag
+   bauen (`docs/ADMIN_GUIDE.md`, Kapitel 11) — sonst backen neue Installer die alte Adresse ein.
+3. Allen Fahrern die neue Adresse schicken: im Client **Reconnect account…** → neue Adresse,
+   E-Mail, Passwort. (Ein automatischer Umzug über `LMU_GARAGE_MIGRATED_TO` geht hier nicht — die
+   alte Adresse antwortet nicht mehr.) Ihre aufgezeichneten Runden bleiben auf dem PC und werden
+   danach hochgeladen.
+4. Dauerhaft vermeiden: den Quick-Tunnel-Container nie löschen/neu erstellen; besser auf einen
+   Named Tunnel mit eigener Domain umziehen (`docs/ADMIN_GUIDE.md`, Kapitel 10).
+
+## 19. Ein Fahrer kann den Client nicht verbinden („confirm your email“, „terms“, „error (409)“)
+
+**Erkennen:** Fahrer meldet eine dieser Meldungen beim **Connect**.
+
+**Was hilft:**
+- *E-Mail nicht bestätigt:* Fahrer öffnet den Link aus der Mail oder sendet ihn auf der Website
+  unter Konto neu. Kommt nichts an: `sudo docker compose logs server | grep -i smtp`. Notfalls von
+  Hand bestätigen (nur, wenn du sicher bist, dass die Adresse ihm gehört):
+  `sudo docker compose exec -T db psql -U garage16 -d garage16 -c "UPDATE drivers SET email_verified = true, email_verified_at = now() WHERE email = 'adresse@example.com';"`
+- *Bedingungen geändert:* Haken im Client-Fenster setzen (Client 1.0.1) oder auf der Website
+  anmelden und im Dialog zustimmen.
+- *„error (409)“ mit Client 1.0.0:* einer der beiden Fälle; auf der Website anmelden zeigt, welcher.
+
+## 20. Eine Runde wartet wegen Fair Play
+
+**Erkennen:** Admin → Track-Limit-Prüfung zeigt „New driver (… official laps before): this lap beats
+the Garage16 Best of …“; der Fahrer fragt, warum seine Zeit nicht im Leaderboard steht.
+
+**Was hilft:** Runde im LapTime Analyzer gegen das bisherige Garage16 Best vergleichen
+(Bremspunkte, Linie, Tempo, Datenqualität). Plausibel → **„Runde zählt“** (Bestzeiten und
+Discord-Meldung folgen sofort). Nicht plausibel → **„Runde ungültig machen“** mit Grund; bei
+Verdacht auf Manipulation zusätzlich Runbook 14. Abschalten: `LMU_GARAGE_NEW_DRIVER_REVIEW_LAPS=0`.
+
+## 21. Ein Konto wird gesperrt / ein PC soll getrennt werden
+
+- **Konto sperren:** Admin → Fahrer → sperren (gilt sofort für alle PCs und den Browser).
+- **Einen PC trennen:** der Fahrer selbst unter Konto → Verbundene PCs. Als Admin (z. B. gestohlener
+  Laptop): `sudo docker compose exec -T db psql -U garage16 -d garage16 -c "UPDATE device_tokens SET revoked_at = now() WHERE driver_id = <ID> AND revoked_at IS NULL;"` — trennt alle PCs dieses
+  Fahrers; er verbindet sich danach mit E-Mail und Passwort neu (Passwort dabei ändern lassen).
+

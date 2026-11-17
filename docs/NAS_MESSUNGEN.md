@@ -1,7 +1,14 @@
-# V0.9.9 — was nur auf dem NAS (und in LMU) geht: genaue Anleitung
+# Messungen auf der NAS und mit echten LMU-Runden (seit V0.9.9)
+
+> **Stand V1.0.1:** Entstanden zum Update auf V0.9.9. Die Teile **A–C** (Messung vor dem Update,
+> Update, Prüfung der gespeicherten Runden) gehörten zu diesem Update und sind erledigt — für ein
+> Update auf die aktuelle Version gilt `docs/ADMIN_GUIDE.md`, Kapitel 8. Die Teile **D–F**
+> (gekennzeichnete echte Runden, Messungen, Restore-Übung) sind weiter gültig und mit jeder Version
+> wiederholbar: in den Befehlen statt `Garage16_Lmu_V0_9_9` den aktuellen Ordner einsetzen
+> (`NEU` unten). In `docs/QUALITY.md` steht, welche dieser Messungen noch offen sind.
 
 Alles, was ohne deinen NAS und ohne echte LMU-Runden prüfbar war, ist erledigt und im Protokoll
-(`docs/V0_9_9_PROTOKOLL.md`). Diese Anleitung deckt den Rest ab. Jeder Teil sagt:
+(`docs/archive/V0_9_9_PROTOKOLL.md`). Diese Anleitung deckt den Rest ab. Jeder Teil sagt:
 **was** du tust, **was** du sehen solltest, **was** du tust, wenn es anders aussieht, und **was** du
 mir zurückschickst. Wenn ein Schritt scheitert: nicht improvisieren, sondern den Abschnitt
 „Wenn es nicht klappt“ des Teils befolgen und die Ausgabe aufschreiben (Vorlage ganz unten).

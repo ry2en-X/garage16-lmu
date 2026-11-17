@@ -21,7 +21,9 @@ from ..config import Settings, settings
 from ..schemas import LegalInfoOut, OperatorOut
 
 # The date the current legal texts took effect. Change it together with web/js/legal/*.js.
-TERMS_VERSION = "2026-10-24"
+# V1.0.1 (2026-10-26): privacy policy — the PC's name per connected PC, the deletion of unconfirmed
+# sign-ups, the hashed email in the sign-in limits, the fair-play review; everybody accepts once more.
+TERMS_VERSION = "2026-10-26"
 
 router = APIRouter(tags=["legal"])
 

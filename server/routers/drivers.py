@@ -100,12 +100,19 @@ def driver_public_profile(driver_id: int, db: Session = Depends(get_db)) -> Driv
         .where(ranked.c.rank == 1)
         .order_by(ranked.c.lap_time.asc())
     ).all()
-    personal_records = [
-        DriverPersonalRecordOut(
-            track_name=t, car_name=c, car_class=cc, car_model=cm, lap_time=lt, set_at=up.isoformat()
-        )
-        for t, c, cc, cm, lt, up in pr_rows
-    ]
+    # V1.0.1: the Garage16 Best of each (track, class) these records are in — "Your Best" shows one
+    # row per class, so a GT3 lap is measured against the GT3 record, never against a Hypercar.
+    # One query for every pair (no request per row); same lap set as the class leaderboard.
+    class_best = _class_bests(db, {(t, cc) for t, _c, cc, _cm, _lt, _up in pr_rows if cc})
+    personal_records = []
+    for t, c, cc, cm, lt, up in pr_rows:
+        best = class_best.get((t, cc))
+        personal_records.append(DriverPersonalRecordOut(
+            track_name=t, car_name=c, car_class=cc, car_model=cm, lap_time=lt, set_at=up.isoformat(),
+            class_best_time=best[0] if best else None,
+            class_best_driver_id=best[1] if best else None,
+            class_best_driver_name=best[2] if best else None,
+        ))
 
     activity_rows = db.execute(
         select(RecordEvent, Lap.car_model)
@@ -138,3 +145,27 @@ def driver_public_profile(driver_id: int, db: Session = Depends(get_db)) -> Driv
         total_laps=total_laps or 0, tracks_driven=tracks_driven or 0, cars_driven=cars_driven or 0,
         personal_records=personal_records, recent_activity=recent_activity, teams=teams,
     )
+
+
+def _class_bests(db: Session, pairs: set) -> dict:
+    """{(track_name, car_class): (lap_time, driver_id, display_name)} — the fastest official lap
+    of anybody per pair, i.e. the class leaderboard's P1 (ties: the older lap id, as there)."""
+    if not pairs:
+        return {}
+    tracks = sorted({track for track, _cls in pairs})
+    ranked = (
+        select(
+            Lap.track_name, Lap.car_class, Lap.lap_time, Lap.driver_id,
+            func.row_number()
+            .over(partition_by=(Lap.track_name, Lap.car_class), order_by=(Lap.lap_time.asc(), Lap.id.asc()))
+            .label("rank"),
+        )
+        .where(official_filter(), Lap.track_name.in_(tracks), Lap.car_class.is_not(None))
+        .subquery()
+    )
+    rows = db.execute(
+        select(ranked.c.track_name, ranked.c.car_class, ranked.c.lap_time, ranked.c.driver_id, Driver.display_name)
+        .join(Driver, Driver.id == ranked.c.driver_id)
+        .where(ranked.c.rank == 1)
+    ).all()
+    return {(t, cc): (lt, did, name) for t, cc, lt, did, name in rows if (t, cc) in pairs}

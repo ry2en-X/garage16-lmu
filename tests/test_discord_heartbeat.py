@@ -5,12 +5,15 @@ probe directly."""
 import tempfile
 from pathlib import Path
 
+import pytest
+
 
 def test_touch_heartbeat_creates_file(monkeypatch):
     with tempfile.TemporaryDirectory() as tmp:
         heartbeat_path = Path(tmp) / "heartbeat"
         monkeypatch.setenv("LMU_GARAGE_BOT_HEARTBEAT_PATH", str(heartbeat_path))
 
+        pytest.importorskip("discord")  # V1.0.1: skip, not fail, where discord.py is not installed
         import discord_bot.bot as bot_module
         import importlib
         importlib.reload(bot_module)  # picks up the new env var for _HEARTBEAT_PATH
@@ -28,6 +31,7 @@ def test_touch_heartbeat_does_not_raise_on_unwritable_path(monkeypatch):
     """A best-effort signal must never crash the bot over a filesystem hiccup."""
     monkeypatch.setenv("LMU_GARAGE_BOT_HEARTBEAT_PATH", "/nonexistent-dir/heartbeat")
 
+    pytest.importorskip("discord")  # V1.0.1: skip, not fail, where discord.py is not installed
     import discord_bot.bot as bot_module
     import importlib
     importlib.reload(bot_module)

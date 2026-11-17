@@ -1,0 +1,7 @@
+# Garage16 (V1.0.1). The pages themselves may be indexed; the API and the operator's details may not.
+User-agent: *
+Disallow: /accounts/
+Disallow: /admin/
+Disallow: /telemetry/
+Disallow: /legal
+Allow: /

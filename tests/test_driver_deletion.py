@@ -84,6 +84,17 @@ def _populate_everything(client) -> dict:
     # link_codes
     assert client.post("/accounts/discord/link-code", headers=_auth(subject)).status_code == 200
 
+    # device_tokens (V1.0.1): a PC connected with email + password (email confirmed first)
+    db = SessionLocal()
+    try:
+        db.query(Driver).filter(Driver.id == subject["driver_id"]).update({"email_verified": True})
+        db.commit()
+    finally:
+        db.close()
+    connected = client.post("/accounts/desktop-login", json={"email": "subject@example.com", "password": "correct horse battery",
+                                                             "accept_terms": True, "device_name": "Rig"})
+    assert connected.status_code == 200, connected.text
+
     # laps + record_events (uploading a first lap sets a record)
     lap = _upload_lap(client, subject)
     # lap_reports: someone reports Subject's lap, and Subject reports someone else's

@@ -487,6 +487,10 @@ async function renderReviewTab(token) {
           el("span", { class: "tag" }, formatDate(lap.uploaded_at)),
         ]),
         el("ul", { class: "review__findings" }, findings.map((f) => el("li", { "data-code": f.code }, findingLine(f)))),
+        // V1.0.1: held because a new driver beat the Garage16 Best of others (server/fair_play.py)
+        lap.validation && lap.validation.fair_play ? el("div", { class: "notice", "data-fair-play": "1" },
+          t("New driver ({0} official laps before): this lap beats the Garage16 Best of {1}. Check it in the analysis before it counts.",
+            [lap.validation.fair_play.official_laps_before, formatLapTime(lap.validation.fair_play.garage16_best_before)])) : null,
         el("div", { class: "inline-form", style: "margin-top:8px;" }, [
           el("a", { class: "btn btn--ghost", href: `#/analysis?a=${lap.id}` }, t("Analyse")),
           el("button", { class: "btn", onclick: () => decide("invalidate") }, t("Invalidate lap")),

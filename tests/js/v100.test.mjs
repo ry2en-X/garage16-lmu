@@ -18,7 +18,7 @@ let legal = { operator: null, min_age: 16, terms_version: "2026-10-24", registra
 let health = { status: "ok", client_download_url: "https://github.com/o/r/releases/latest/download/Garage16-Client-Setup.exe",
   client_app_download_url: "https://github.com/o/r/releases/latest/download/Garage16-Client-Analysis-Setup.exe",
   client_release_page_url: "https://github.com/o/r/releases/latest", registration: "open" };
-let signupAnswer = { status: 200, body: { driver_id: 9, display_name: "Rita" } };
+let signupAnswer = { status: 202, body: { status: "check_email" } };   // V1.0.1
 const posted = [];
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(url, "http://x");
@@ -112,23 +112,26 @@ card.querySelector("#signupAge").checked = true;
 assert.ok((await press()).includes(de ? "akzeptiere die Nutzungsbedingungen" : "accept the terms of use"));
 assert.equal(posted.length, 0, "nothing is sent before the form is complete");
 card.querySelector("#signupTerms").checked = true;
-signupAnswer = { status: 409, body: { detail: "That email address already has an account." } };
-assert.ok((await press()).includes("already has an account"));
+signupAnswer = { status: 409, body: { detail: "That driver name is already taken — please choose another one." } };
+assert.ok((await press()).includes("already taken"));
 signupAnswer = { status: 422, body: { detail: [{ msg: "String should have at most 60 characters" }] } };
 assert.ok((await press()).includes("at most 60 characters"), "validation lists are shown as text");
-signupAnswer = { status: 200, body: { driver_id: 9, display_name: "Rita" } };
+signupAnswer = { status: 202, body: { status: "check_email" } };
 card.querySelector("button.btn").click();
 await sleep(200);
 assert.deepEqual(posted.at(-1).body, { display_name: "Rita", email: "rita@example.com", password: "Correct-Horse-42", accept_terms: true, confirm_min_age: true });
 assert.equal(posted.at(-1).headers["X-Registration-Secret"], undefined);
-assert.equal(window.location.hash, "#/setup?welcome=1", "after sign-up: the setup guide");
-assert.equal(JSON.parse(localStorage.getItem("lmu_garage_session")).viaCookie, true);
+// V1.0.1: not signed in — "check your email", with the address, and a link to the setup guide
+assert.equal(window.location.hash, "#/account", "after sign-up: stays, asks to confirm the email");
+assert.equal(localStorage.getItem("lmu_garage_session"), null, "not signed in before the email is confirmed");
+assert.ok(text(card).includes("rita@example.com") && text(card).includes(de ? "Fast geschafft" : "Almost done"));
+assert.ok(card.querySelector('a[href="#/setup?welcome=1"]'));
 
 // ---------------------------------------------------------------- setup guide
-body = text(app());
+body = await go("#/setup?welcome=1");
 assert.ok(body.includes(de ? "Dein Konto ist fertig" : "Your account is ready"));
 assert.equal(app().querySelectorAll(".setup-step").length, 6);
-assert.ok(app().querySelector('.setup-step[data-step="1"]').classList.contains("setup-step--done"));
+assert.ok(!app().querySelector('.setup-step[data-step="1"]').classList.contains("setup-step--done"), "signed out: step 1 still open");
 assert.ok(body.includes("https://garage16.example"), "the server address is the page's own origin");
 assert.equal(app().querySelector('[data-download="standard"]').getAttribute("href"), health.client_download_url);
 assert.equal(app().querySelector('[data-download="analysis"]').getAttribute("href"), health.client_app_download_url);

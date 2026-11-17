@@ -21,6 +21,13 @@ def format_update_required_message(min_version: Optional[str], download_url: Opt
     return " ".join(lines)
 
 
+def format_update_available_message(latest_version: Optional[str], download_url: Optional[str]) -> str:
+    """V1.0.1: an OPTIONAL update (GET /health latest_client_version) — this client keeps working."""
+    head = f"Garage16 v{latest_version} is available." if latest_version else "A newer Garage16 is available."
+    tail = f"Download it here: {download_url}" if download_url else "Ask whoever runs your Garage16 server for it."
+    return f"{head} This version keeps working — updating is recommended. {tail}"
+
+
 def is_safe_download_url(url: Optional[str]) -> bool:
     """The download link comes from the SERVER (LMU_GARAGE_CLIENT_DOWNLOAD_URL
     in /health and 426 responses), so it's treated as untrusted input

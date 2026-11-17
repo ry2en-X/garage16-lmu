@@ -230,6 +230,7 @@ def test_real_frozen_build_runs_and_follows_a_migration_over_https(tmp_path):
 
 
 def test_attach_parent_console_is_a_noop_outside_frozen_windows(monkeypatch):
+    pytest.importorskip("tkinter")  # client.main opens the window module
     import client.main as main_module
 
     assert main_module._attach_parent_console() is False  # source run / Linux

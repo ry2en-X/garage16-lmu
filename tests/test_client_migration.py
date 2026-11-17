@@ -470,6 +470,7 @@ def test_case_f_auth_still_works_after_migration_against_the_real_upload_endpoin
 # ---------------------------------- manual `--follow-migration` fallback
 
 def test_follow_migration_updates_config_for_https_servers(isolated_config, servers, capsys):
+    pytest.importorskip("tkinter")  # client.main opens the window module (V1.0.1: skip, not fail, without it)
     from client.main import follow_migration
 
     new = servers(OK_HEALTH)
@@ -487,6 +488,7 @@ def test_follow_migration_manual_command_may_follow_a_plain_http_source(isolated
     """The manual flag is the documented path for old HTTP-only (LAN)
     servers: typing the command IS the consent the automatic path needs
     HTTPS for. The new server must still answer."""
+    pytest.importorskip("tkinter")  # client.main opens the window module (V1.0.1: skip, not fail, without it)
     from client.main import follow_migration
 
     new = servers(OK_HEALTH)
@@ -498,6 +500,7 @@ def test_follow_migration_manual_command_may_follow_a_plain_http_source(isolated
 
 
 def test_follow_migration_still_refuses_an_unreachable_target(isolated_config, servers, capsys):
+    pytest.importorskip("tkinter")  # client.main opens the window module (V1.0.1: skip, not fail, without it)
     from client.main import follow_migration
 
     old_http = servers({**OK_HEALTH, "migrated_to": f"https://127.0.0.1:{free_port()}"}, tls=False)
@@ -510,6 +513,7 @@ def test_follow_migration_still_refuses_an_unreachable_target(isolated_config, s
 
 
 def test_follow_migration_is_a_no_op_when_no_migration_is_signaled(isolated_config, servers, capsys):
+    pytest.importorskip("tkinter")  # client.main opens the window module (V1.0.1: skip, not fail, without it)
     from client.main import follow_migration
 
     old = servers(OK_HEALTH)
@@ -521,6 +525,7 @@ def test_follow_migration_is_a_no_op_when_no_migration_is_signaled(isolated_conf
 
 
 def test_follow_migration_reports_failure_when_server_unreachable(isolated_config, capsys):
+    pytest.importorskip("tkinter")  # client.main opens the window module (V1.0.1: skip, not fail, without it)
     from client.main import follow_migration
 
     _persist(isolated_config, _cfg(f"http://127.0.0.1:{free_port()}"))

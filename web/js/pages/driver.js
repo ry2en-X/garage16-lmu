@@ -6,10 +6,11 @@ import { renderActivityList } from "../activity.js";
 import { el, formatLapTime, formatDate, recordTypeLabel, roleLabel } from "../format.js";
 
 import { t } from "../i18n.js";
+import { loadTrackNames, trackLabel } from "../tracks.js";
 export async function renderDriverProfile(container, driverId) {
   let profile;
   try {
-    profile = await api.driverProfile(driverId);
+    [profile] = await Promise.all([api.driverProfile(driverId), loadTrackNames()]);
   } catch (err) {
     container.appendChild(el("div", { class: "notice notice--error" }, err.message));
     return;
@@ -50,7 +51,7 @@ export async function renderDriverProfile(container, driverId) {
   } else {
     const rows = profile.personal_records.map((r) =>
       el("tr", {}, [
-        el("td", {}, r.track_name),
+        el("td", {}, trackLabel(r.track_name)),
         el("td", {}, r.car_name),
         el("td", {}, r.car_class || "—"),
         el("td", {}, el("span", { class: "lap-time" }, formatLapTime(r.lap_time))),

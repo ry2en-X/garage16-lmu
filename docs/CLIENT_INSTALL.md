@@ -23,10 +23,14 @@ py -m client.main
 ```
 
 Beim ersten Start öffnet sich ein **Fenster** ("Connect Garage16 to your
-account") und fragt nach Server-Adresse, Auth-Token und Client-Secret —
-kein Terminal-Assistent mehr (seit V0.8.6). Beides bekommst du auf der
-Account-Seite der Web-App; das **Client-Secret wird nur einmal
-angezeigt**.
+account") und fragt nach Server-Adresse, **E-Mail und Passwort** deines
+Garage16-Kontos (seit V1.0; die E-Mail muss bestätigt sein, seit V1.0.1).
+Auth-Token und Client-Secret von Hand gehen weiter unter „Use an auth token
+instead (advanced)“. Die Zugangsdaten landen in
+`~/.lmu_garage/client_config.json` — unter Windows verschlüsselt (V1.0.1,
+`client/secret_store.py`). Gegen einen lokalen Entwicklungsserver:
+`http://localhost:8000` eintragen; ohne SMTP steht der Bestätigungslink im
+Server-Log, oder den Server mit `LMU_GARAGE_REQUIRE_EMAIL_VERIFICATION=0` starten.
 
 Entwickler-Optionen:
 
@@ -34,7 +38,7 @@ Entwickler-Optionen:
 |---|---|
 | `py -m client.main --version` | Version, konfigurierter Server, Datenordner, Logdatei (nichts Geheimes — auch als Support-Ausgabe brauchbar) |
 | `py -m client.main --reconfigure` | Einrichtungsfenster erneut öffnen (Friends nutzen den Button "Reconnect account…") |
-| `py -m client.main --follow-migration` | Serverumzug **von Hand** folgen — nötig nur für einen alten Server ohne HTTPS; ansonsten folgt die laufende App automatisch (siehe README, "Moving the server later") |
+| `py -m client.main --follow-migration` | Serverumzug **von Hand** folgen — nötig nur für einen alten Server ohne HTTPS; ansonsten folgt die laufende App automatisch (siehe `docs/DEPLOYMENT.md`, "Moving the server later") |
 
 Ohne Fenster (Skripte/CI) geht Konfiguration weiterhin über die
 Umgebungsvariablen `LMU_GARAGE_API_URL`, `LMU_GARAGE_AUTH_TOKEN`,

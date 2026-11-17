@@ -24,7 +24,9 @@ from client.update_notice import format_update_required_message
 from tests.local_servers import FakeGarageServer
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-needs_xvfb = pytest.mark.skipif(shutil.which("xvfb-run") is None, reason="xvfb-run not available — GUI tests skipped, not faked")
+# V1.0.1: also skipped (not failed) where Python has no tkinter (e.g. a server-only Python)
+needs_xvfb = pytest.mark.skipif(shutil.which("xvfb-run") is None or __import__("importlib.util").util.find_spec("tkinter") is None,
+                                reason="xvfb-run or tkinter not available — GUI tests skipped, not faked")
 
 
 @pytest.fixture

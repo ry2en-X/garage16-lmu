@@ -12,11 +12,12 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_every_script_the_admin_runs_in_the_server_container_is_in_the_image():
-    guide = (ROOT / "docs/ADMIN_GUIDE.md").read_text(encoding="utf-8")
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    # V1.0.1: the guide, the README, the technical reference and the archived update steps
+    texts = [(ROOT / name).read_text(encoding="utf-8") for name in (
+        "docs/ADMIN_GUIDE.md", "README.md", "docs/DEPLOYMENT.md", "docs/RUNBOOKS.md", "docs/archive/UPDATES_V0_9_BIS_V1_0.md")]
     dockerfile = (ROOT / "docker/Dockerfile.server").read_text(encoding="utf-8")
     in_container = set()
-    for text in (guide, readme):
+    for text in texts:
         for line in text.splitlines():
             if "exec" in line and "server" in line:
                 in_container.update(re.findall(r"python -m scripts\.([a-z_]+)", line))
@@ -27,7 +28,7 @@ def test_every_script_the_admin_runs_in_the_server_container_is_in_the_image():
 
 
 def test_the_pc_probe_named_in_the_guide_exists_and_needs_no_server():
-    guide = (ROOT / "docs/ADMIN_GUIDE.md").read_text(encoding="utf-8")
+    guide = (ROOT / "docs/archive/UPDATES_V0_9_BIS_V1_0.md").read_text(encoding="utf-8")
     assert "py -m scripts.car_identity_probe" in guide
     source = (ROOT / "scripts/car_identity_probe.py").read_text(encoding="utf-8")
     assert "from server.car_identity import" in source
@@ -35,7 +36,7 @@ def test_the_pc_probe_named_in_the_guide_exists_and_needs_no_server():
 
 
 def test_the_update_steps_name_the_real_nas_folders_and_back_up_first():
-    guide = (ROOT / "docs/ADMIN_GUIDE.md").read_text(encoding="utf-8")
+    guide = (ROOT / "docs/archive/UPDATES_V0_9_BIS_V1_0.md").read_text(encoding="utf-8")
     section = guide.split("**Neu in V0.9.3", 1)[1].split("**Neu in V0.9.2", 1)[0]
     assert "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_3" in section
     assert section.index("backup.sh") < section.index("up -d --build"), "back up before the migration runs"

@@ -38,6 +38,7 @@ import { notice } from "../analysis/widgets.js";
 import { T } from "../analysis/strings.js";
 
 import { t } from "../i18n.js";
+import { loadTrackNames, trackLabel } from "../tracks.js";
 const GRID_STEP_M = 2;
 const QUICK_MODES = ["wr", "team_best", "my_best"];
 
@@ -73,6 +74,8 @@ export function parseAnalysisExtras(hash = window.location.hash) {
     ref: pick("ref"),
     track: text("track"),
     model: text("model"),
+    // V1.0.1: "class" compares with the fastest lap of the whole class (dashboard "Your Best")
+    scope: params.get("scope") === "class" ? "class" : null,
     note: note && Object.prototype.hasOwnProperty.call(T.note, note) ? note : null,
   };
 }
@@ -100,6 +103,7 @@ function redirect(a, b, extra) {
 // ----------------------------------------------------------------------------
 
 export async function renderAnalysis(container) {
+  loadTrackNames(); // V1.0.1: readable track names (tracks.js) — not awaited, never blocks the page
   container.classList.add("panel--wide");
   if (!store.isSignedIn()) {
     renderSignInPrompt(container, t("Sign in to analyse laps."));
@@ -113,7 +117,7 @@ export async function renderAnalysis(container) {
 
   // --- "You vs ...": the server pairs my lap with the right reference
   if (!a && !b && extras.quick) {
-    await runQuick(container, extras.quick, { track: extras.track, carModel: extras.model });
+    await runQuick(container, extras.quick, { track: extras.track, carModel: extras.model, scope: extras.scope });
     return;
   }
 
@@ -140,7 +144,7 @@ export async function renderAnalysis(container) {
       return;
     }
     const lap = info.lap;
-    container.appendChild(notice(t("Lap 2: {0} — {1}, {2} ({3}). Now choose Lap 1 to compare it against.", [lap.driver_name, lap.track_name, formatLapTime(lap.lap_time), lap.car_model || lap.car_name])));
+    container.appendChild(notice(t("Lap 2: {0} — {1}, {2} ({3}). Now choose Lap 1 to compare it against.", [lap.driver_name, trackLabel(lap.track_name), formatLapTime(lap.lap_time), lap.car_model || lap.car_name])));
     renderLapPicker(container, {
       title: t("Choose Lap 1"),
       context: { track: lap.track_name, carClass: lap.car_class, carModel: lap.car_model },
@@ -192,7 +196,7 @@ export async function renderAnalysis(container) {
 // are the fastest" means nothing unless it says where.
 function quickMessage(mode, res) {
   const message = res.reason === "already_best" ? T.alreadyBest[mode] : referenceMessage(mode, res.reason);
-  return res.lap_a && res.lap_a.track_name ? t("At {0}: {1}", [res.lap_a.track_name, message]) : message;
+  return res.lap_a && res.lap_a.track_name ? t("At {0}: {1}", [trackLabel(res.lap_a.track_name), message]) : message;
 }
 
 function quickStartCard() {
@@ -224,11 +228,11 @@ function quickStartCard() {
   ]);
 }
 
-async function runQuick(container, mode, { track, carModel }) {
+async function runQuick(container, mode, { track, carModel, scope }) {
   const status = notice(T.quickRunning);
   container.appendChild(status);
   try {
-    const res = await api.analysisQuick({ mode, track, carModel });
+    const res = await api.analysisQuick({ mode, track, carModel, scope: scope || undefined });
     if (res.found) {
       redirect(res.lap_a.id, res.lap_b.id, res.already_best ? { note: `already_best_${mode}` } : {});
       return;

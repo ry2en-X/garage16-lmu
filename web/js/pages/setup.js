@@ -30,7 +30,7 @@ export async function renderSetup(container) {
     t("From zero to your first lap on the leaderboard in about five minutes. You need Windows 10 or 11 and Le Mans Ultimate.")));
   if (query.get("welcome") === "1") {
     container.appendChild(el("div", { class: "notice notice--success" },
-      t("Your account is ready. We have sent you an email to confirm your address — please click the link in it within 48 hours (check the spam folder too).")));
+      t("Your account is ready. We have sent you an email to confirm your address — please click the link in it within 48 hours (check the spam folder too). The desktop client connects once it is confirmed.")));
   }
 
   let health = {};
@@ -49,6 +49,7 @@ export async function renderSetup(container) {
     p(t("Done — you are signed in.")),
   ] : [
     p(t("On the Account page, under \"New driver\": choose a driver name, enter your email and a password, confirm your age and the terms.")),
+    p(t("Then open the confirmation link in the email we send you — the desktop client connects only with a confirmed email.")),
     el("a", { class: "btn", href: "#/account" }, t("Create account")),
   ], { done: signedIn }));
 
@@ -89,7 +90,7 @@ export async function renderSetup(container) {
       t("Enter the email and password of your Garage16 account and click \"Connect\"."),
     ]),
     el("div", { class: "notice" },
-      t("One PC at a time: connecting Garage16 on a second PC disconnects the first one. It then shows \"Reconnect account…\" — just sign in there again when you switch back.")),
+      t("Several PCs (for example the sim rig and a laptop) can be connected at the same time. You see them under Account → Desktop client & sign-ins → Connected PCs, where you can also disconnect one.")),
   ]));
 
   container.appendChild(step(5, t("Start Le Mans Ultimate and drive"), [
@@ -112,6 +113,7 @@ export async function renderSetup(container) {
 
   container.appendChild(el("h2", {}, t("If something does not work")));
   const problems = [
+    [t("The client says the email is not confirmed yet"), t("Open the link in the confirmation email (check the spam folder). On the Account page you can send a new one.")],
     [t("\"Invalid email or password\" in the client"), t("Use exactly the email and password you signed up with on the website. Forgot the password? Account → Sign in → \"Forgot password?\".")],
     [t("\"Couldn't reach that server\""), t("Check your internet connection and that the server address is {0}.", [serverAddress()])],
     [t("The window stays at \"Waiting for LMU to start...\""), t("Le Mans Ultimate is not running yet, or its shared memory is switched off in the game settings.")],

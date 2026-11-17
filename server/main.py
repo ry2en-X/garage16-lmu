@@ -34,7 +34,7 @@ from .routers.legal import registration_mode
 from .routers.teams import invitations_router
 from .versioning import is_client_outdated
 
-VERSION = "1.0.0"
+VERSION = "1.0.1"
 
 
 def _configure_logging() -> None:
@@ -91,6 +91,20 @@ def _docs_urls(cfg) -> dict:
     }
 
 
+def _prune_unverified_signups() -> None:
+    """V1.0.1: sign-ups whose email was never confirmed (server/driver_lifecycle.py)."""
+    from .driver_lifecycle import prune_unverified_signups
+
+    db = SessionLocal()
+    try:
+        prune_unverified_signups(db, settings.unverified_account_days)
+    except Exception:  # noqa: BLE001 — housekeeping must never stop the server from starting
+        db.rollback()
+        logger.exception("Could not remove unconfirmed sign-ups")
+    finally:
+        db.close()
+
+
 @contextlib.asynccontextmanager
 async def _lifespan(_app):
     """V0.9.8: maintenance at start — the upload log's 30 days, whatever the upload frequency
@@ -98,6 +112,7 @@ async def _lifespan(_app):
     from .upload_log import maybe_prune
 
     await run_in_threadpool(maybe_prune, True)
+    await run_in_threadpool(_prune_unverified_signups)
     workers = int(os.environ.get("LMU_GARAGE_WORKERS", "1") or 1)
     if workers > 1:
         logger.warning("LMU_GARAGE_WORKERS=%d: rate limits and the analysis cache are per worker process "
@@ -257,6 +272,10 @@ def health(client_version: Optional[str] = Query(default=None, max_length=32)) -
         # directly, so the "am I too old" rule lives in exactly one place
         # (server/versioning.py) instead of being re-implemented per client.
         **({"update_required": is_client_outdated(client_version, settings.min_client_version)} if client_version else {}),
+        # V1.0.1: the newest desktop client — a client that is older shows "a new version is
+        # available" (optional, unlike update_required)
+        "latest_client_version": settings.latest_client_version,
+        **({"update_available": is_client_outdated(client_version, settings.latest_client_version)} if client_version else {}),
         **({"client_download_url": settings.client_download_url} if settings.client_download_url else {}),
         # V0.9.2: the "Client + analysis app" edition (see config.py) — the website's download
         # page offers both, and an outdated app-edition client points its user here.

@@ -1,107 +1,67 @@
-# LMU Garage — Web
+# Garage16 — web app
 
-A static, no-build-step web frontend for the LMU Garage backend
-(`server/`): leaderboards, your own lap history, teams, and Discord
-account linking.
+The static web app of Garage16: leaderboards, dashboard, teams, LapTime Analyzer, Stint Analyzer,
+circuit library, account, setup guide, legal pages and the admin area. Plain HTML/CSS and native ES
+modules — no build step, no npm at runtime. In production Caddy serves this folder and the API on
+the same address (`docker/Caddyfile`), so `config.js` keeps `window.LMU_GARAGE_API_BASE_URL = ""`.
 
-No React/Vite/npm needed — it's plain HTML/CSS/JS using native ES
-modules, so any static file server works.
-
-## Running it locally (development)
+## Running it locally
 
 ```
-cd web
-python3 -m http.server 5173
+uvicorn server.main:app --reload          # API on :8000 (from the project root)
+cd web && python3 -m http.server 5173     # the pages on :5173
 ```
 
-Then open `http://localhost:5173`.
+With `python3 -m http.server` the API is on another port: change the one line in `config.js` to
+`window.LMU_GARAGE_API_BASE_URL = "http://localhost:8000";` (the API's development CORS default
+allows `http://localhost:5173`). Do not commit that change — production must keep `""`.
 
-**Important:** `config.js` ships with `window.LMU_GARAGE_API_BASE_URL = ""`,
-which means "the API lives on the same domain as this page" — correct for
-the production setup (Caddy serves both, see `docker/Caddyfile`), but with
-`python3 -m http.server` there is no API on port 5173, so every request
-would fail. For local development, start the API on port 8000 and change
-that one line in `web/config.js` to
+## How it is built
 
-```js
-window.LMU_GARAGE_API_BASE_URL = "http://localhost:8000";
-```
+- `js/router.js` — hash router; every page module is loaded when first opened (dynamic import),
+  sets the page title, and opens the terms dialog (`js/terms_gate.js`) when the signed-in driver has
+  not accepted the current terms.
+- `js/api.js` — the API client (cookie session or, for old token-only accounts, a bearer token);
+  error answers (`detail` as text, list or `{code, message}`) become readable messages.
+- `js/state.js` — the signed-in driver's name/id in `localStorage` (never a password; the web session
+  itself is an HttpOnly cookie).
+- `js/format.js` — `el()`, the only way pages build DOM: text always goes in as text nodes, never as
+  HTML, so names and other user input cannot inject markup.
+- `js/i18n.js` + `js/i18n/de.js` — every visible text is `t("English")`; the German texts live in
+  `de.js` (checked by `scripts/i18n_check.py` and `tests/test_i18n.py`).
+- `js/pages/*` — one module per page; `js/analysis/*` and `js/stints/*` — the two analyzers;
+  `js/legal/*` — the legal texts (German binding, English translation).
+- `fonts/` — self-hosted fonts (SIL Open Font License) — nothing is loaded from other hosts, which is
+  what lets Caddy send a strict Content-Security-Policy (`script-src 'self'`, no inline scripts).
 
-(the API's default CORS setting already allows `http://localhost:5173`).
-Don't commit that change — production must keep `""`.
+## Sign-in (V1.0.1)
 
-## Pointing it at a different backend
-
-Set the same variable in `config.js` (it is loaded before the router
-script, see `index.html`):
-
-```js
-window.LMU_GARAGE_API_BASE_URL = "https://your-backend-host";
-```
-
-## Backend CORS
-
-The FastAPI backend already allows the development frontend origin
-`http://localhost:5173`. If you deploy the frontend elsewhere, add that
-origin to `allow_origins` in `server/main.py`.
-
-## How sign-in works
-
-There's no username/password login on the backend — `POST
-/accounts/register` (see `accounts.py`) is a dev-only endpoint that mints
-a fresh `auth_token` + `client_secret` for a new driver, shown once. This
-app's **Account** page:
-
-- **New driver**: registers and stores the `auth_token` in
-  `localStorage` to authenticate future requests. The `client_secret` is
-  shown once — that one's for configuring the desktop recorder client
-  (`client/uploader.py`), not needed by this web app.
-- **Already have a token**: paste back a previously-saved `auth_token`
-  to restore a session on another device/browser.
-
-Per the backend's own `DriverRegisterResponse.warning`, treat this as a
-placeholder auth scheme — fine for internal testing, not for real users.
-
-If the backend has `LMU_GARAGE_REGISTRATION_SECRET` set (see
-`server/config.py`), the registration form's "Registration secret" field
-must match it, or `/accounts/register` returns 403.
-
-## Managing credentials (Account page → Security)
-
-- **Rotate auth token / Rotate client secret** — issues a new credential
-  and immediately invalidates the old one, without losing the driver
-  identity. Use this routinely, or the moment you suspect a credential
-  leaked but still have access. After rotating the client secret, run
-  `python -m client.main --reconfigure` to save it to the desktop client.
-- **Revoke token** — kills the current token outright, signing out every
-  device using it (this browser, the desktop client, any Discord link).
-  There's no recovery path afterwards (no password to prove ownership) —
-  only use this for "this token is definitely compromised."
+- **New driver:** name, email, password, minimum age, terms → `POST /accounts/signup` answers
+  "check your email" (the same for every address). After confirming the email the driver signs in
+  (`POST /accounts/login`, HttpOnly cookie) and connects the desktop client with the same email and
+  password.
+- **Account page:** driver name (unique), email & password, Discord link, connected PCs (each PC has
+  its own token and can be disconnected), web sessions, token/secret rotation for old token-only
+  setups, data export and account deletion.
+- **Advanced:** pasting an old desktop-client token still restores a session (accounts from before
+  V1.0 without a password).
 
 ## Pages
 
-| Route | Auth | Backed by |
+| Route | Auth | Main API calls |
 |---|---|---|
-| `#/leaderboard` | public | `GET /leaderboard/{track}/{car}` |
-| `#/dashboard` | required | `GET /telemetry/laps` |
-| `#/teams` | required | `POST /teams`, `POST /teams/join`, `GET /teams/mine` |
-| `#/account` | — | `POST /accounts/register`, `POST /teams/discord-link-code` |
+| `#/` | public | `/leaderboard/recent` |
+| `#/leaderboard` | public | `/leaderboard/class/…`, `/leaderboard/car/…`, catalog |
+| `#/circuits` | public | `/telemetry/analysis/circuits` |
+| `#/dashboard` | required | `/accounts/me`, `/telemetry/laps`, `/teams/mine` |
+| `#/analysis` | required | `/telemetry/analysis/compare`, `/line`, `/track-surface`, … |
+| `#/stints` | required | `/telemetry/analysis/stints/…` |
+| `#/teams`, `#/team/<id>` | required | `/teams/…`, `/invitations/…` |
+| `#/driver/<id>` | public | `/drivers/<id>/public` |
+| `#/account` | — | `/accounts/…` |
+| `#/download`, `#/setup`, `#/legal` | public | `/health`, `/legal` |
+| `#/verify-email`, `#/reset-password` | link from the email | `/accounts/verify-email/confirm`, `/accounts/password-reset/confirm` |
+| `#/admin` | admin token | `/admin/…` |
 
-## File layout
-
-```
-web/
-  index.html
-  css/styles.css
-  js/
-    api.js        API client
-    state.js      session (auth token) store, persisted to localStorage
-    format.js     lap-time/date formatting + a tiny DOM helper
-    router.js     hash-based router, nav + status bar
-    pages/
-      auth.js         registration / restore-session form
-      account.js       account page (wraps auth.js when signed out)
-      leaderboard.js
-      dashboard.js
-      teams.js
-```
+Tests: `tests/js/*.test.mjs` render the real pages in jsdom against mocked API answers
+(`tests/test_web_analysis.py` runs them).

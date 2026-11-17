@@ -17,6 +17,7 @@ import { store } from "../state.js";
 import { el, formatDate, formatLapTime } from "../format.js";
 import { renderSignInPrompt } from "./auth.js";
 import { t, tp } from "../i18n.js";
+import { loadTrackNames, trackLabel } from "../tracks.js";
 
 const fmtSigned = (v, digits = 3) => (v === null || v === undefined ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : "±"}${Math.abs(v).toFixed(digits)}`);
 const dateOf = (unix) => (unix ? formatDate(new Date(unix * 1000).toISOString()) : "—");
@@ -154,7 +155,7 @@ export function sessionCard(session) {
   ];
   return el("div", { class: "card sess" }, [
     el("div", { class: "sess__head" }, [
-      el("h2", {}, `${session.track_name} · ${session.car_model || "—"}`),
+      el("h2", {}, `${trackLabel(session.track_name)} · ${session.car_model || "—"}`),
       el("span", { class: "subtitle" }, `${dateOf(session.started)} – ${dateOf(session.ended)}`),
     ]),
     el("div", { class: "sess__stats" }, stats),
@@ -165,6 +166,7 @@ export function sessionCard(session) {
 }
 
 export async function renderSessions(container) {
+  loadTrackNames(); // V1.0.1: readable track names (tracks.js) — not awaited, never blocks the page
   container.appendChild(el("h1", {}, t("My sessions")));
   container.appendChild(el("p", { class: "subtitle" }, t("Your stints with consistency, lap-time trend, fuel and tyre use — and your theoretical best lap.")));
   if (!store.isSignedIn()) {

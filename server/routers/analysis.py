@@ -161,7 +161,7 @@ def _telemetry_file(lap: Lap) -> Path:
     if result.status in (integrity.MISSING, integrity.OUTSIDE):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "The telemetry of this lap is no longer stored."
                             if result.status == integrity.MISSING else "Telemetry file is not available.")
-    raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, INTEGRITY_MESSAGE)
+    raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, INTEGRITY_MESSAGE)
 
 
 def _parse_channels(channels: Optional[str]) -> List[str]:
@@ -306,7 +306,7 @@ def lap_info(
     try:
         available = _available_keys(path)
     except AnalysisError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
     return {
         "lap": _lap_header(lap, owner.display_name if owner else "?"),
         "available_channels": available,
@@ -468,7 +468,7 @@ def _load(lap_id: int, path: Path, channels: List[str]) -> LapSeries:
     try:
         return load_lap(path, channels)
     except AnalysisError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Lap {lap_id}: {exc}")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Lap {lap_id}: {exc}")
 
 
 def _compact_json(value) -> bytes:
@@ -542,7 +542,7 @@ def _compute_comparison(
     try:
         grid, used_step = make_grid(lo, hi, step, max_points)
     except AnalysisError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
 
     laps: Dict[str, Optional[LapSeries]] = {"a": series_a, "b": series_b}
     rows: Dict[str, Optional[Lap]] = {"a": lap_a_row, "b": lap_b_row}
@@ -769,7 +769,7 @@ def compare_laps(
         if end is not None:
             hi = min(hi, float(end))
         if (start is not None or end is not None) and hi - lo < 10.0:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "The requested section does not overlap the lap.")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "The requested section does not overlap the lap.")
         result = _compute_comparison(
             series_a, series_b, lap_a_row, lap_b_row, keys, lo, hi, step, max_points or MAX_POINTS_DEFAULT,
             whole_lap=whole_lap, extras=extras,
@@ -839,7 +839,7 @@ def racing_line(
         try:
             grid, used_step = make_grid(lo, hi, step, LINE_MAX_POINTS)
         except AnalysisError as exc:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc))
         mirror, _info = resolve_mirror(series_a, series_b)
         out: dict = {"grid": {"start": round(float(grid[0]), 3), "step": round(float(used_step), 4), "count": int(len(grid))},
                      "mirrored": mirror}
@@ -847,7 +847,7 @@ def racing_line(
         for side, series in extras:
             xy[side] = track_xy(series, grid, mirror)
         if xy["a"] is None:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Lap 1 has no position data.")
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Lap 1 has no position data.")
         for side, pair in xy.items():
             out[f"x_{side}"] = json_series(pair[0], 2) if pair else None
             out[f"y_{side}"] = json_series(pair[1], 2) if pair else None
@@ -921,7 +921,7 @@ def track_surface(
                 loaded[lap_id] = load_lap(path, list(SURFACE_COLUMNS_KEYS))
             except AnalysisError:
                 if lap_id == lap_a:
-                    raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Lap {lap_id} cannot be analysed.")
+                    raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Lap {lap_id} cannot be analysed.")
         # the same mirror decision as /compare and /line, so the surface lies under the lines
         mirror, _info = resolve_mirror(loaded[lap_a], loaded.get(lap_b) if lap_b is not None else None)
         surface, reason = build_surface_why(list(loaded.values()), mirror)

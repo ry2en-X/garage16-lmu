@@ -8,6 +8,7 @@
 
 import { el, formatDate, formatLapTime, recordTypeLabel } from "./format.js";
 import { t } from "./i18n.js";
+import { trackLabel } from "./tracks.js";
 
 const RANK = { WR: 0, TEAM_BEST: 1, PR: 2 };
 
@@ -44,7 +45,7 @@ export function renderActivityList(items, { showDriver = false, limit = 10, empt
     const car = a.car_model || a.car_name;
     const what = [
       showDriver && a.driver_name ? el("strong", { class: "activity__who" }, a.driver_name) : null,
-      el("span", { class: "activity__where" }, `${a.track_name} · ${car}`),
+      el("span", { class: "activity__where" }, `${trackLabel(a.track_name)} · ${car}`),
     ];
     const time = el("span", { class: "lap-time" }, formatLapTime(a.lap_time));
     card.appendChild(el("div", { class: "card-row activity__row", "data-lap": a.lap_id != null ? String(a.lap_id) : null }, [

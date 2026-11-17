@@ -90,7 +90,7 @@ The WebView2 **runtime** is not bundled: it is part of Windows 11 and updated Wi
 
 Again **no third-party source code, assets or data were copied into Garage16**. What V0.9.3
 took from other projects are facts about LMU's interface; the full review (what was examined,
-what was rejected and why) is in `docs/OPEN_SOURCE_REVIEW_V0_9_3.md`.
+what was rejected and why) is in `docs/archive/OPEN_SOURCE_REVIEW_V0_9_3.md`.
 
 Facts, all from pyLMUSharedMemory (MIT, see above; the project states they come from LMU's own
 `SharedMemoryInterface.hpp`), each checked against a second source where one existed:

@@ -1,4 +1,4 @@
-# Garage16 — Leitfaden für Fahrer (V1.0)
+# Garage16 — Leitfaden für Fahrer (V1.0.1)
 
 Kein Python, kein Terminal, keine Konfigurationsdateien, nichts zu kopieren. Der Ablauf:
 
@@ -10,14 +10,19 @@ du sehen kannst, und was du dann tust.
 
 ## 1. Konto anlegen (ab V1.0 ohne Kennwort vom Admin)
 
-1. Die Garage16-Website öffnen (**`https://garage16.de`**, bzw. die Adresse, die dir der Betreiber
-   nennt) → **Konto** (oder auf der Startseite **Get Garage16**).
-2. Im Kasten **„Neuer Fahrer“**: Fahrernamen (steht so in den Bestenlisten), E-Mail und ein
-   Passwort (mindestens 10 Zeichen, zweimal) eingeben.
+1. Die Garage16-Website öffnen — die Adresse nennt dir der Betreiber (zurzeit eine
+   `….trycloudflare.com`-Adresse, später **`https://garage16.de`**) → **Konto** (oder auf der
+   Startseite **Get Garage16**).
+2. Im Kasten **„Neuer Fahrer“**: Fahrernamen (steht so in den Bestenlisten; jeder Name gibt es nur
+   einmal — „Max“ und „MAX“ gelten als gleich), E-Mail und ein Passwort (mindestens 10 Zeichen,
+   zweimal) eingeben.
 3. Haken bei **„Ich bin mindestens 16 Jahre alt“** und **„Ich akzeptiere die Nutzungsbedingungen
    und habe die Datenschutzerklärung gelesen“** (beide Texte sind verlinkt) → **Konto erstellen**.
-4. Du bist sofort angemeldet und landest auf der Einrichtungsseite. In deinem Postfach liegt eine
-   Bestätigungs-E-Mail — den Link innerhalb von 48 Stunden anklicken (Spam-Ordner prüfen).
+4. Es erscheint **„Fast geschafft — schau in dein Postfach“**: In deinem Postfach liegt eine
+   Bestätigungs-E-Mail — den Link innerhalb von 48 Stunden anklicken (Spam-Ordner prüfen). Danach
+   oben unter **Anmelden** mit E-Mail und Passwort einloggen. **Erst mit bestätigter E-Mail
+   verbindet sich der Desktop-Client** (Schritt 3). Nie bestätigte Anmeldungen werden nach einer
+   Woche gelöscht — dann einfach neu registrieren.
 
 Betreibt jemand einen geschlossenen Garage16-Server, fragt das Formular zusätzlich nach einem
 **Registrierungs-Kennwort** — das bekommst du dann von ihm.
@@ -58,16 +63,26 @@ Fenster **"Connect Garage16 to your account"**:
 - **Email** und **Password:** die deines Garage16-Kontos aus Schritt 1.
 - **Connect** klicken.
 
-Unten im Fenster führen Links zur Registrierung, zur Einrichtungsanleitung und zur
-Datenschutzerklärung.
+Unten im Fenster führen Links zur Registrierung, zur Einrichtungsanleitung, zu den
+Nutzungsbedingungen und zur Datenschutzerklärung.
 
-**Ein PC zur selben Zeit:** Verbindest du Garage16 auf einem zweiten PC, wird der erste getrennt
-und zeigt **„Reconnect account…“** — dort einfach wieder mit E-Mail und Passwort anmelden.
+**Mehrere PCs:** Sim-Rig und Laptop können gleichzeitig verbunden sein (ab 1.0.1). Auf der Website
+unter **Konto → Desktop-Client & Anmeldungen → Verbundene PCs** siehst du jeden PC mit Namen und
+kannst einen trennen, den du nicht mehr nutzt — er zeigt dann **„Reconnect account…“**.
+
+Deine Anmeldung speichert Garage16 auf dem PC verschlüsselt (Windows-Datenschutz-API); nur dein
+Windows-Benutzer auf diesem PC kann sie lesen.
 
 Meldungen im Fenster:
 - *"Email or password is wrong…"* — genau die Daten von der Website verwenden; Passwort vergessen →
   Website → Konto → „Passwort vergessen?“.
 - *"Couldn't reach that server…"* — Adresse und Internetverbindung prüfen.
+- *"Please confirm your email address first…"* — den Link aus der Bestätigungs-E-Mail öffnen
+  (Spam-Ordner); auf der Website unter **Konto** kannst du ihn neu senden. Dann erneut **Connect**.
+- *"The terms of use and the privacy policy have changed…"* — Bedingungen lesen (Link unten im
+  Fenster), den Haken **„I accept the terms of use…“** setzen und erneut **Connect**.
+- *"This address starts with http://…"* — dein Passwort ginge unverschlüsselt übers Netz. Nur
+  weitermachen (zweites Mal **Connect**), wenn dir der Betreiber genau diese Adresse genannt hat.
 - *"…older than Garage16 1.0…"* — der Server ist noch nicht auf 1.0; dann den Haken **„Use an auth
   token instead (advanced)“** setzen und Auth token + Client secret einfügen (Website → Konto →
   „Zugangsdaten des Desktop-Clients“ → neu erzeugen).
@@ -131,8 +146,9 @@ warten und einen neuen Code erzeugen).
 
 ## Updates und Serverumzug — was du davon merkst
 
-- **Neue Garage16-Version:** Website → **Download** → die Setup-Datei laden und einfach
-  **erneut ausführen**.
+- **Neue Garage16-Version:** Ab 1.0.1 sagt dir das Fenster selbst Bescheid (*"Garage16 v… is
+  available"*, mit Knopf **Open download page**). Website → **Download** → die Setup-Datei laden
+  und einfach **erneut ausführen**.
   Sie aktualisiert an Ort und Stelle; Anmeldung und aufgezeichnete Runden
   bleiben erhalten.
 - **Der Admin zieht auf einen neuen Server um:** Du musst nichts tun.
@@ -147,10 +163,12 @@ warten und einen neuen Code erzeugen).
 |---|---|---|
 | **Gelbes Banner:** "Can't reach the Garage16 server right now — your laps are saved and will upload automatically once it's back." | Server offline oder deine Verbindung hakt | Nichts. Deine Runden sind sicher gespeichert und werden automatisch nachgeladen. Hält es lange an: Admin fragen |
 | **Gelbes Banner:** "A new version of Garage16 … is required. … Your recorded laps are kept and will upload after you update." (evtl. mit Knopf **Open download page**) | Dein Garage16 ist zu alt für den Server | Knopf klicken bzw. neue Setup-Datei vom Admin holen und ausführen. Gefahrene Runden gehen nicht verloren |
-| **Gelbes Banner:** "Garage16 rejected your login (it may have been reset or revoked). Click "Reconnect account…" …" | Die Anmeldung des Clients gilt nicht mehr (z. B. auf einem anderen PC verbunden oder auf der Website erneuert) | **Reconnect account…** klicken und mit E-Mail und Passwort anmelden |
+| **Gelbes Banner:** "Garage16 v… is available. This version keeps working — updating is recommended." | Es gibt eine neuere Version (freiwillig) | Wenn du Zeit hast: **Open download page**, Setup ausführen |
+| **Gelbes Banner:** "Garage16 rejected your login (it may have been reset or revoked). Click "Reconnect account…" …" | Die Anmeldung dieses PCs gilt nicht mehr (auf der Website unter „Verbundene PCs“ getrennt, mehr als fünf PCs verbunden, oder Zugangsdaten erneuert) | **Reconnect account…** klicken und mit E-Mail und Passwort anmelden |
 | **Gelbes Banner:** "This server may have moved to …, but the connection isn't secure enough to switch automatically. Please ask whoever runs your Garage16 server for updated connection details." | Der Server zieht um, aber die alte Verbindung ist nicht per HTTPS gesichert — deshalb wechselt Garage16 aus Sicherheitsgründen nicht selbst | Admin nach der neuen Adresse fragen, dann **Reconnect account…** und die neue Server-Adresse eintragen |
 | "Waiting for LMU to start..." (bleibt) | LMU läuft nicht, oder Shared Memory ist aus | LMU starten; Einstellung prüfen |
 | Runde ist rot / "invalid" | Die Plausibilitätsprüfung hat die Runde beanstandet (z. B. Abkürzung) | Normal — nur gültige Runden zählen fürs Leaderboard |
+| Runde zählt noch nicht („wartet auf Prüfung“) | Die automatische Prüfung war unsicher, oder du bist neu und warst schneller als das bisherige Garage16 Best — dann schaut der Admin kurz drauf | Nichts tun; nach der Freigabe zählt die Runde mit allen Bestzeiten |
 | Keine Bestätigungs- oder Reset-E-Mail | Spam-Ordner, oder der Admin hat E-Mail noch nicht eingerichtet | Spam prüfen; "Resend verification email" auf der Account-Seite; sonst Admin fragen |
 | Bot: "That code is invalid or expired…" | Code schon benutzt, abgelaufen (10 Minuten) oder ein neuerer Code hat ihn ersetzt | Auf der Website einen neuen Code erzeugen und den **neuesten** verwenden |
 | Bot: "…is already linked to … Run `/unlink` first…" | Dieses Discord-Konto hängt schon an einem Fahrer | In Discord `/unlink`, dann mit einem neuen Code erneut `/link` |

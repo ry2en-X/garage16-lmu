@@ -16,7 +16,7 @@ for (const w of [400, 500, 600]) assert.ok(css.includes(`ibm-plex-mono-latin-${w
 for (const f of ["oswald-latin-wght.woff2", "ibm-plex-mono-latin-400.woff2", "OFL-Oswald.txt", "OFL-IBM-Plex-Mono.txt"]) {
   assert.ok(readFileSync(new URL(`../../web/fonts/${f}`, import.meta.url)).length > 1000, f);
 }
-assert.ok(html.includes("<title>Garage16</title>"));
+assert.ok(html.includes("<title>Garage16 — Le Mans Ultimate telemetry &amp; leaderboards</title>"));   // V1.0.1: a descriptive title
 const shell = new JSDOM(html);
 const groups = [...shell.window.document.querySelectorAll("#navLinks .nav-group")].map((g) => [...g.querySelectorAll("a")].map((a) => a.dataset.route));
 assert.deepEqual(groups, [["dashboard", "teams"], ["analysis", "stints"], ["leaderboard", "circuits"], ["account", "download", "setup", "legal"]], "the menu in groups (V1.0: + setup guide, legal)");
@@ -68,6 +68,7 @@ globalThis.fetch = async (url) => {
   if (p === "/leaderboard/catalog/venues") return json([]);
   if (p === "/accounts/discord") return json({ linked: false });
   if (p === "/accounts/sessions") return json([]);
+  if (p === "/accounts/devices") return json([]);
   if (p === "/accounts/me") return json({ driver_id: 1, display_name: "Me", email: null });
   return json({ detail: `unexpected ${p}` }, 404);
 };
@@ -102,15 +103,15 @@ assert.ok(text(app.querySelector(".activity")).includes("499P (2025)") && !text(
 assert.equal(app.querySelector(".activity__row a").getAttribute("href"), "#/analysis?a=6", "the time opens the lap");
 // lap filter: in the browser, no request
 const before = calls.length;
-assert.equal(app.querySelectorAll(".timing-table tbody tr").length, 4);
+assert.equal(app.querySelectorAll(".timing-table:not(.best-table) tbody tr").length, 4);
 const track = app.querySelector("#fTrack");
 track.value = "Le Mans";
 track.dispatchEvent(new dom.window.Event("change"));
-assert.equal(app.querySelectorAll(".timing-table tbody tr").length, 3);
+assert.equal(app.querySelectorAll(".timing-table:not(.best-table) tbody tr").length, 3);
 const valid = app.querySelector("#fValid");
 valid.checked = true;
 valid.dispatchEvent(new dom.window.Event("change"));
-assert.equal(app.querySelectorAll(".timing-table tbody tr").length, 2);
+assert.equal(app.querySelectorAll(".timing-table:not(.best-table) tbody tr").length, 2);
 assert.equal(calls.length, before, "filtering makes no request");
 assert.ok(text(app).includes("2 laps"));
 

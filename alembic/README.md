@@ -40,6 +40,14 @@ pip install -r server/requirements.txt   # now includes alembic
   incremental migration on top of it (adds `drivers.token_revoked_at` for
   token revocation) — a template for how future model changes get their
   own migration.
+- In Docker the entrypoint runs `alembic upgrade head` before the server starts — an update needs no
+  manual step. A downgrade inside the container needs the database URL passed explicitly
+  (`docker compose exec` does not inherit it); the exact commands are in `docs/ADMIN_GUIDE.md`
+  (chapter 8) and `docs/ROLLBACK.md`.
+- Revisions: `0001` baseline … `0015` stint analyzer (V0.9.4), `0016` upload log (V0.9.7), `0017`
+  integrity + audit log (V0.9.9), `0018` terms acceptance (V1.0), `0019` unique driver names + one
+  token per PC (V1.0.1). Every migration since 0013 is additive and has a tested downgrade
+  (`tests/test_migrations.py`, `tests/test_v097_migrate_filled_db.py`).
 - Back up before running anything against real data:
   ```
   Copy-Item lmu_garage_server.db lmu_garage_server.backup.db

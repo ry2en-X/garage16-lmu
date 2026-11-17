@@ -112,6 +112,14 @@
   "server/request_context.py": {
    "lines": 100,
    "branches": 100
+  },
+  "server/fair_play.py": {
+   "lines": 100,
+   "branches": 100
+  },
+  "server/names.py": {
+   "lines": 100,
+   "branches": 100
   }
  }
 }

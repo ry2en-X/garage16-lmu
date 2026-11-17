@@ -1,4 +1,4 @@
-# Quality — what is checked, how, and what is not yet proven (V0.9.9)
+# Quality — what is checked, how, and what is not yet proven (V1.0.1)
 
 ## The release gate
 
@@ -94,7 +94,7 @@ here is calibrated.
 
 **None of these limits has been checked against labelled REAL laps yet** — the empirical basis is
 the synthetic set below plus the V0.9.7 reference laps. `scripts/trackcheck_eval.py --labels` runs
-the same measurement on real laps (docs/V0_9_9_NAS_ANLEITUNG.md).
+the same measurement on real laps (docs/NAS_MESSUNGEN.md).
 
 ### Reference set and measured error rates
 
@@ -175,7 +175,7 @@ speed vs distance, acceleration, frozen frames, the decision record), `decision_
 INVALID / REVIEW → API fields, late findings), `integrity` (MAC, verify, path checks, quarantine,
 release), `official` (which laps count), `upload_limits` (decoding limits) and `audit_chain`.
 Full run over every target on the final code (V0.9.9.1, 2026-10-21, log in
-`docs/mutation_v0991/`): **371 mutants generated, 28 listed as equivalent (one key each, each with
+`docs/archive/mutation_v0991/`): **371 mutants generated, 28 listed as equivalent (one key each, each with
 its reason), 343 run — all 343 killed.** The same run on the code of the first V0.9.9 archive: 340
 of 340 killed — but there 27 keys skipped 31 mutants, because two identical changes on one line had
 the same description (e.g. both `- 1` in `clip(x - 1, 0, n - 1)`); three of those skipped mutants
@@ -186,13 +186,29 @@ The first V0.9.9 run had 39 survivors in `lap_decision` — the tests checked ou
 values and limits; `tests/test_v099_decision_units.py` pins them with hand-computed numbers.
 Run it after changing one of these functions (~40 minutes on 2 vCPU; not part of the gate).
 
+## V1.0.1 — what the new account rules are tested with
+
+| Rule | Tests |
+|---|---|
+| desktop sign-in only with a confirmed email; switch-off | `tests/test_v101_accounts.py`, `tests/test_v101_client.py` (real server over HTTP) |
+| terms accepted again (website dialog, client checkbox, changed `TERMS_VERSION`) | `tests/test_v101_accounts.py`, `tests/test_v101_client.py` (real Tk window under xvfb), `tests/js/v101.test.mjs` |
+| one token per PC: two PCs, list, disconnect, limit, revoke only that PC, locked account, export, deletion | `tests/test_v101_accounts.py`, `tests/test_driver_deletion.py` (every FK table incl. `device_tokens`) |
+| no enumeration: same sign-up answer, dummy hash for unknown addresses | `tests/test_v101_accounts.py` |
+| failed sign-ins per address (a correct password never counts), emails per address, expired windows dropped | `tests/test_v101_accounts.py` |
+| unique names (NFKC, case, invisible characters, reserved) and legacy duplicates | `tests/test_v101_accounts.py`, `tests/test_team_invitations.py` |
+| unconfirmed sign-ups deleted (and the ones that must stay) | `tests/test_v101_accounts.py` |
+| fair-play hold, admin release with records, off switch, kept by revalidation | `tests/test_v101_fair_play.py` |
+| DPAPI storage (simulated: Linux has no DPAPI), migration of 1.0.0 files, foreign files, failing DPAPI | `tests/test_v101_client.py` |
+| migration 0019 up/down on SQLite and PostgreSQL, on filled databases | `tests/test_migrations.py`, `tests/test_v097_migrate_filled_db.py`, `scripts/test_against_postgres.sh` |
+| security headers, no inline scripts/handlers, docs links, versions | `tests/test_v101_docs.py`, `tests/test_reverse_proxy.py` (real Caddy) |
+
 ## Not yet proven (the 9.9/10 checklist, honestly)
 
 | Item | State |
 |---|---|
 | Clean-room install + full CI run | done locally in a fresh Python 3.12 environment; the GitHub pipeline runs on the next push |
 | Mutation tests for critical calculations | done for the listed targets (`scripts/mutation_check.py`), V0.9.9 including the track-limit decision, integrity, quarantine, upload limits, record release; `server/track_limits.py`'s rule functions and `server/validation.py` are not yet targets |
-| False positives / negatives of the track-limit check on labelled data | done on **synthetic** labelled laps (truth from geometry); **open on real laps** — `docs/V0_9_9_NAS_ANLEITUNG.md` Teil D, `scripts/trackcheck_eval.py --labels` |
+| False positives / negatives of the track-limit check on labelled data | done on **synthetic** labelled laps (truth from geometry); **open on real laps** — `docs/NAS_MESSUNGEN.md` Teil D, `scripts/trackcheck_eval.py --labels` |
 | Real LMU laps as versioned regression corpus | **open** — needs recorded laps from the NAS (reference values must not come from the same algorithm) |
 | Load test with fixed data volume on the target hardware | **open** — `scripts/load_test.py` exists; to be run on the NAS with a defined data set; p95/p99 to be recorded per release |
 | Monitoring with alerting | partial — readiness endpoint, Docker health, operations view; **no alert channel yet** |
@@ -200,3 +216,7 @@ Run it after changing one of these functions (~40 minutes on 2 vCPU; not part of
 | External penetration test | **open** |
 | Shared rate limiter for several workers | not needed with one worker (ADR-1); required before scaling out |
 | Accessibility audit (screen reader, contrast measurement) | partial — keyboard focus styles, labels, tables scroll; no audit |
+| DPAPI on a real Windows PC (V1.0.1) | **open** — the Windows calls are exercised only by the GitHub Windows build and by the first real start; the storage logic around them is tested with a stand-in |
+| Fair-play rule on real data (V1.0.1) | **open** — how often real new drivers are held, and whether 10 laps is the right threshold |
+| CSP in every real browser / the WebView2 analysis window (V1.0.1) | partial — no inline scripts or handlers (tested); check the browser console once after the update |
+| Code-signed installers | **open** — needs a code-signing certificate; releases carry `SHA256SUMS.txt` meanwhile |

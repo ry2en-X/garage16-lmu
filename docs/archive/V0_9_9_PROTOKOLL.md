@@ -3,7 +3,7 @@
 Jeder Schritt mit Befehl und tatsächlichem Ergebnis. Umgebung für alle Läufe (falls nicht anders
 angegeben): Cloud-Container, Linux 6.18 x86_64, 2 vCPU Intel Xeon 2,8 GHz, 7 GiB RAM, Python 3.12.3,
 Node 22.22.0, PostgreSQL 16.15 (lokal, Port 5433), Caddy für die Proxy-Tests. **Nicht** die
-NAS-Hardware — was dort zu messen ist, steht in `docs/V0_9_9_NAS_ANLEITUNG.md`.
+NAS-Hardware — was dort zu messen ist, steht in `docs/NAS_MESSUNGEN.md`.
 
 ## 1. Ausgangsstand V0.9.8 (vor jeder Änderung)
 
@@ -168,7 +168,7 @@ nacheinander, dann 40 mit 4 Threads. Container mit 2 vCPU.
 Jede Kombination wurde **zweimal** gemessen: am 20.10. abends (Maschine spürbar belastet: sha256 nur
 ≈ 380 MB/s) und am 21.10. morgens ohne Last (≈ 1 000–1 500 MB/s). Die Tabelle zeigt den ruhigen
 Lauf; der erste Lauf zeigte dieselben Richtungen bei größerer Streuung (Rohdaten aller acht Läufe:
-`docs/bench_v099/`, Dateiname `<version>_<datenbank>[2].json`).
+`docs/archive/bench_v099/`, Dateiname `<version>_<datenbank>[2].json`).
 
 | Messung (Lauf 2, ruhig) | SQLite 0.9.8 | SQLite 0.9.9 | PostgreSQL 0.9.8 | PostgreSQL 0.9.9 |
 |---|---|---|---|---|
@@ -309,8 +309,8 @@ Mutanten.
 
 Je Ziel in Lauf B (getötet): client_ip 10, records 11, distance_axis 71, crossings 49, write_lock 10,
 rate_limit 10, lap_decision 115, decision_status 17, integrity 30, official 3, upload_limits 4,
-audit_chain 13. Vollständige Logs: `docs/mutation_v0991/v099_zip_code.txt`,
-`docs/mutation_v0991/v0991_final_code.txt`. Zwischen Lauf B und dem Archiv wurden nur Dokumente und
+audit_chain 13. Vollständige Logs: `docs/archive/mutation_v0991/v099_zip_code.txt`,
+`docs/archive/mutation_v0991/v0991_final_code.txt`. Zwischen Lauf B und dem Archiv wurden nur Dokumente und
 `tests/coverage_floors.json` geändert, kein Code (Abschnitt 11.4).
 
 ### 11.4 Gate, Archiv, Verifikation

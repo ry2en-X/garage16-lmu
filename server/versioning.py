@@ -23,6 +23,9 @@ def is_client_outdated(client_version: str, min_client_version: str) -> bool:
 # tyre forces, accelerations, driver aids, ...). Older clients keep working — their
 # laps just carry the basic channels — and the analysis says so.
 FULL_DATA_CLIENT_VERSION = "0.9.0"
+# V1.0.1: the desktop client released together with this server — GET /health reports it so an
+# older client can say "a new version is available" (LMU_GARAGE_LATEST_CLIENT_VERSION overrides).
+LATEST_CLIENT_VERSION = "1.0.1"
 
 
 def data_level_for_client_version(client_version) -> str:

@@ -67,7 +67,8 @@ def test_every_client_message_quoted_in_the_friends_guide_exists_in_the_code():
 
 
 def test_files_the_docs_point_at_exist():
-    for doc in ("README.md", "docs/ADMIN_GUIDE.md", "docs/FRIENDS_GUIDE.md", "docs/CLIENT_BUILD.md", "docs/CLIENT_INSTALL.md"):
+    for doc in ("README.md", "docs/README.md", "docs/ADMIN_GUIDE.md", "docs/DEPLOYMENT.md", "docs/FRIENDS_GUIDE.md",
+                "docs/CLIENT_BUILD.md", "docs/CLIENT_INSTALL.md", "docs/RUNBOOKS.md", "docs/ROLLBACK.md"):
         text = (ROOT / doc).read_text(encoding="utf-8")
         for ref in set(re.findall(r"`((?:docs|packaging|scripts|discord_bot)/[A-Za-z0-9_./-]+\.[a-z0-9]+)`", text)):
             assert (ROOT / ref).exists(), f"{doc} references missing file {ref}"
@@ -79,8 +80,11 @@ def test_server_settings_named_in_the_docs_exist():
     config = "\n".join(
         [p.read_text(encoding="utf-8") for p in (ROOT / "server").rglob("*.py")]
         + [(ROOT / "docker" / "entrypoint.sh").read_text(encoding="utf-8"), (ROOT / "docker-compose.yml").read_text(encoding="utf-8")]
+        # V1.0.1: docs/DEPLOYMENT.md also names the client's own settings (LMU_GARAGE_DEBUG, …)
+        + [p.read_text(encoding="utf-8") for p in (ROOT / "client").rglob("*.py")]
+        + [(ROOT / "web" / "config.js").read_text(encoding="utf-8")]   # LMU_GARAGE_API_BASE_URL
     )
-    for doc in ("docs/ADMIN_GUIDE.md", "docs/CLIENT_BUILD.md", ".env.example"):
+    for doc in ("docs/ADMIN_GUIDE.md", "docs/DEPLOYMENT.md", "docs/CLIENT_BUILD.md", ".env.example"):
         for var in set(re.findall(r"LMU_GARAGE_[A-Z_]+", (ROOT / doc).read_text(encoding="utf-8"))):
             assert var in config or var in ("LMU_GARAGE_TEST_PG_URL",), f"{doc} mentions {var}, unknown to the server code / docker files"
 

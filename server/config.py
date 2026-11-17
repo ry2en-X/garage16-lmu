@@ -35,6 +35,12 @@ def _github_release_page() -> Optional[str]:
     return f"https://github.com/{repo}/releases/latest" if repo else None
 
 
+def _latest_client() -> str:
+    from .versioning import LATEST_CLIENT_VERSION
+
+    return LATEST_CLIENT_VERSION
+
+
 @dataclass
 class Settings:
     database_url: str = field(
@@ -144,6 +150,17 @@ class Settings:
                 int(os.environ.get("LMU_GARAGE_RATELIMIT_LOGIN_MAX", 10)),
                 float(os.environ.get("LMU_GARAGE_RATELIMIT_LOGIN_WINDOW", 900)),
             ),
+            # V1.0.1 — per email address (rate_limit.limit_key), on top of the per-IP limits:
+            # failed sign-ins against one account from many addresses, and the emails one address
+            # can be sent (sign-up notices, resets, verification links).
+            "login_account": (
+                int(os.environ.get("LMU_GARAGE_RATELIMIT_LOGINACCOUNT_MAX", 10)),
+                float(os.environ.get("LMU_GARAGE_RATELIMIT_LOGINACCOUNT_WINDOW", 900)),
+            ),
+            "email_to_address": (
+                int(os.environ.get("LMU_GARAGE_RATELIMIT_EMAILADDRESS_MAX", 3)),
+                float(os.environ.get("LMU_GARAGE_RATELIMIT_EMAILADDRESS_WINDOW", 3600)),
+            ),
             "password_reset": (
                 int(os.environ.get("LMU_GARAGE_RATELIMIT_PASSWORDRESET_MAX", 5)),
                 float(os.environ.get("LMU_GARAGE_RATELIMIT_PASSWORDRESET_WINDOW", 3600)),
@@ -226,6 +243,32 @@ class Settings:
     )
     # Minimum age for an account (terms of use, privacy policy; the sign-up form asks for it).
     min_age: int = field(default_factory=lambda: int(os.environ.get("LMU_GARAGE_MIN_AGE", 16)))
+
+    # --- V1.0.1: account rules for an open server ---
+    # The desktop client connects (POST /accounts/desktop-login) only after the account's email was
+    # confirmed. "0" turns it off (a closed circle that does not need it).
+    require_email_verification: bool = field(
+        default_factory=lambda: os.environ.get("LMU_GARAGE_REQUIRE_EMAIL_VERIFICATION", "1").strip().lower()
+        not in ("0", "false", "no")
+    )
+    # Accounts made on the sign-up form whose email was never confirmed, without laps or teams, are
+    # deleted after this many days (0 = never).
+    unverified_account_days: int = field(
+        default_factory=lambda: int(os.environ.get("LMU_GARAGE_UNVERIFIED_ACCOUNT_DAYS", 7))
+    )
+    # Fair play (server/fair_play.py): a driver with fewer official laps than this whose lap would
+    # beat the current Garage16 Best of that track and car is held for an admin (0 = off).
+    new_driver_review_laps: int = field(
+        default_factory=lambda: int(os.environ.get("LMU_GARAGE_NEW_DRIVER_REVIEW_LAPS", 10))
+    )
+    # How many PCs one account may have connected at the same time (desktop-login); the one used
+    # longest ago is disconnected when another one connects.
+    # The newest desktop client (GET /health latest_client_version / update_available). Defaults to
+    # the client version this server was released with (server/versioning.py).
+    latest_client_version: str = field(
+        default_factory=lambda: (os.environ.get("LMU_GARAGE_LATEST_CLIENT_VERSION") or "").strip() or _latest_client()
+    )
+    max_devices: int = field(default_factory=lambda: max(1, int(os.environ.get("LMU_GARAGE_MAX_DEVICES", 5))))
     # The operator shown in the legal notice (Impressum) and the privacy policy. Kept in .env, not in
     # the code: the repository is public and other instances have other operators. Address lines
     # are separated by "|", e.g. "Musterstraße 1|12345 Musterstadt".

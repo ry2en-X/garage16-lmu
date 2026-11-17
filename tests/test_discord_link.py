@@ -365,6 +365,7 @@ class _FakeInteraction:
 
 
 def test_the_bots_link_and_unlink_commands_drive_the_shared_logic(client):
+    pytest.importorskip("discord")  # V1.0.1: skip, not fail, where discord.py is not installed
     import discord_bot.bot as bot
 
     account = _register(client, "Racer")
@@ -391,6 +392,7 @@ def test_the_bots_link_and_unlink_commands_drive_the_shared_logic(client):
 
 
 def test_the_bot_registers_link_and_unlink_as_slash_commands():
+    pytest.importorskip("discord")  # V1.0.1: skip, not fail, where discord.py is not installed
     import discord_bot.bot as bot
 
     names = {c.name for c in bot.tree.get_commands()}

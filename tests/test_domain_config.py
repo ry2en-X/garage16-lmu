@@ -33,7 +33,8 @@ def _active_env(name: str) -> str:
 
 def _chapter_10() -> str:
     start = ADMIN_GUIDE.index("## 10. ")
-    return ADMIN_GUIDE[start:]
+    end = ADMIN_GUIDE.find("\n## 11. ", start)   # V1.0.1: chapters 11 and 12 follow
+    return ADMIN_GUIDE[start:end if end != -1 else None]
 
 
 # ---------------------------------------------------------------------------

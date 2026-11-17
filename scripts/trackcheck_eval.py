@@ -11,7 +11,7 @@ Precision, recall, false-positive and false-negative rate of the lap decision
         --json FILE / --markdown FILE write the results; --quick runs the curated cases only.
 
     python -m scripts.trackcheck_eval --labels labels.csv
-        REAL laps from the database, labelled by a person (docs/V0_9_9_NAS_ANLEITUNG.md):
+        REAL laps from the database, labelled by a person (docs/NAS_MESSUNGEN.md):
         CSV with the columns lap_id,label[,note] — label "clean" or "violation" (anything else is
         skipped and listed). Every lap is judged again with the current rules from its stored file
         and check inputs (nothing is changed), and its stored verdict is reported next to it.

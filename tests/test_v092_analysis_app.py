@@ -25,7 +25,9 @@ from client.analysis_window import AppBridge
 from client.config import ClientConfig
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-needs_xvfb = pytest.mark.skipif(shutil.which("xvfb-run") is None, reason="xvfb-run not available — GUI tests skipped, not faked")
+# V1.0.1: also skipped (not failed) where Python has no tkinter (e.g. a server-only Python)
+needs_xvfb = pytest.mark.skipif(shutil.which("xvfb-run") is None or __import__("importlib.util").util.find_spec("tkinter") is None,
+                                reason="xvfb-run or tkinter not available — GUI tests skipped, not faked")
 
 CONFIG = ClientConfig(api_url="https://garage16.example", auth_token="desk-token", client_secret="s3cret")
 

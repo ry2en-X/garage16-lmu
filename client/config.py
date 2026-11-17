@@ -16,13 +16,15 @@ Resolution order (highest priority first):
   3. If neither is present, run the wizard: prompt for the three values,
      save them, and continue.
 
-Threat model note: the client_secret has always had to live in plaintext
-somewhere reachable by the client process (it's used to HMAC-sign every
-upload) — an env var isn't meaningfully safer than a file, and is easier
-to accidentally leak (shell history, process listing, CI logs). This file
-is written with owner-only permissions where the OS supports it (POSIX
-chmod 600; Windows ACLs are not restricted here — this is still a
-dev/beta-scale tool, not something protecting secrets on a shared machine).
+Threat model note: the client_secret has to be readable by the client
+process (it's used to HMAC-sign every upload) — an env var isn't
+meaningfully safer than a file, and is easier to accidentally leak (shell
+history, process listing, CI logs). The file is written with owner-only
+permissions where the OS supports it (POSIX chmod 600). V1.0.1: on Windows,
+where chmod does nothing, the auth token and the client secret are stored
+encrypted with the Windows Data Protection API (client/secret_store.py) —
+only the same Windows user on the same PC can read them; a plain-text file
+from 1.0.0 is rewritten encrypted the first time it is read.
 Run with --reconfigure or --rotate-secret (server/routers/accounts.py) if
 a secret needs to change.
 """
@@ -36,6 +38,8 @@ import stat
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, Optional
+
+from client import secret_store
 
 logger = logging.getLogger("lmu_garage.client_config")
 
@@ -133,7 +137,9 @@ def _from_env() -> Optional[ClientConfig]:
     if not auth_token or not client_secret:
         return None
     return ClientConfig(
-        api_url=os.environ.get("LMU_GARAGE_API_URL", DEFAULT_API_URL),
+        # V1.0.1: without LMU_GARAGE_API_URL the server baked into the package (garage16_server.txt),
+        # like the setup window — before, it fell back to http://localhost:8000
+        api_url=default_api_url(),
         auth_token=auth_token,
         client_secret=client_secret,
     )
@@ -144,14 +150,26 @@ def _from_file() -> Optional[ClientConfig]:
         return None
     try:
         data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        return ClientConfig(
+        stored_token, stored_secret = data["auth_token"], data["client_secret"]
+        config = ClientConfig(
             api_url=data.get("api_url", DEFAULT_API_URL),
-            auth_token=data["auth_token"],
-            client_secret=data["client_secret"],
+            auth_token=secret_store.unprotect(stored_token),
+            client_secret=secret_store.unprotect(stored_secret),
         )
-    except (json.JSONDecodeError, KeyError, OSError):
+    except (json.JSONDecodeError, KeyError, OSError, TypeError, AttributeError):
         logger.warning("Could not read %s — re-running setup.", CONFIG_PATH)
         return None
+    except secret_store.SecretUnavailable:
+        # copied from another PC or Windows user: the credentials cannot be decrypted here
+        logger.warning("The saved Garage16 credentials belong to another PC or user — connect again.")
+        return None
+    # V1.0.1: a plain-text file from 1.0.0 is rewritten encrypted (Windows)
+    if secret_store.available() and not (secret_store.is_protected(stored_token) and secret_store.is_protected(stored_secret)):
+        try:
+            save_config(config)
+        except OSError:
+            logger.warning("Could not re-save %s encrypted — kept as it is.", CONFIG_PATH)
+    return config
 
 
 def save_config(config: ClientConfig) -> None:
@@ -174,7 +192,11 @@ def save_config(config: ClientConfig) -> None:
             merged.update(existing)
     except (OSError, ValueError):
         pass
-    merged.update(asdict(config))
+    stored = asdict(config)
+    # V1.0.1: encrypted on Windows (client/secret_store.py), unchanged elsewhere
+    stored["auth_token"] = secret_store.protect(config.auth_token)
+    stored["client_secret"] = secret_store.protect(config.client_secret)
+    merged.update(stored)
     tmp_path = CONFIG_PATH.with_name(CONFIG_PATH.name + ".tmp")
     tmp_path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
     try:

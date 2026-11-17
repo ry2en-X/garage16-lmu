@@ -279,7 +279,7 @@ def stored_validation(verdict: track_limits.Verdict, previous: Optional[dict] = 
     own check: findings linked from a neighbour and an admin's review decision."""
     out = verdict.as_dict()
     previous = previous if isinstance(previous, dict) else {}
-    for key in ("linked", "review", "restored"):
+    for key in ("linked", "review", "restored", "fair_play"):   # V1.0.1: fair_play (server/fair_play.py)
         if previous.get(key):
             out[key] = previous[key]
     if out.get("linked"):

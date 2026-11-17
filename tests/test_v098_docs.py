@@ -8,7 +8,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _section():
-    guide = (ROOT / "docs/ADMIN_GUIDE.md").read_text(encoding="utf-8")
+    # V1.0.1: the version-by-version update sections moved unchanged to the archive
+    guide = (ROOT / "docs/archive/UPDATES_V0_9_BIS_V1_0.md").read_text(encoding="utf-8")
     return guide.split("**Neu in V0.9.8", 1)[1].split("**Neu in V0.9.7", 1)[0]
 
 
@@ -17,8 +18,8 @@ def test_versions_and_changelog():
     from server.main import VERSION
 
     # V0.9.9 is the current server (tests/test_v099_docs.py); the V0.9.8 entry stays
-    assert VERSION == "1.0.0"  # V1.0 moved both on
-    assert CLIENT_VERSION == "1.0.0", "V0.9.8 changes the server only (client 1.0.0 since V1.0)"
+    assert tuple(map(int, VERSION.split("."))) >= (1, 0, 0)  # V1.0 moved both on; later versions too
+    assert tuple(map(int, CLIENT_VERSION.split("."))) >= (1, 0, 0), "V0.9.8 changes the server only (client 1.0.0 since V1.0)"
     assert "\n## V0.9.8 — " in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 
 

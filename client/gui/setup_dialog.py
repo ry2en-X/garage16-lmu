@@ -18,11 +18,17 @@ nothing to copy from the website any more. Pasting an auth token and client
 secret is still there, folded away as "advanced" (accounts without a
 password, servers older than 1.0). Links to the website's sign-up, setup
 guide and privacy policy sit right in the window.
+
+V1.0.1: the client sends this PC's name (each PC gets its own token, so the rig and a laptop can
+both stay connected), understands the server's two new answers — "confirm your email first" and
+"accept the changed terms" (a checkbox appears) — and warns before a password would travel over
+plain http:// to anything but this computer.
 """
 
 from __future__ import annotations
 
 import re
+import socket
 from typing import Optional, Tuple
 from urllib.parse import urlparse
 
@@ -49,13 +55,48 @@ def validate_login_input(api_url: str, email: str, password: str) -> Tuple[Optio
     return url, None
 
 
-def desktop_login(api_url: str, email: str, password: str, timeout: float = LOGIN_TIMEOUT_S) -> Tuple[Optional[ClientConfig], Optional[str]]:
+class LoginError(str):
+    """The message for the driver (a str, as before) plus the server's code when it sent one
+    ("email_not_verified", "terms_required") — the dialog reacts to the code."""
+
+    code: Optional[str] = None
+
+    def __new__(cls, message: str, code: Optional[str] = None):
+        obj = super().__new__(cls, message)
+        obj.code = code
+        return obj
+
+
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
+
+
+def insecure_http(api_url: str) -> bool:
+    """V1.0.1: True if the password would go unencrypted to another computer (http://, not this PC)."""
+    parsed = urlparse(normalize_server_url(api_url))
+    return parsed.scheme == "http" and (parsed.hostname or "") not in _LOCAL_HOSTS
+
+
+def this_pc_name() -> str:
+    """How this PC appears in Account → Connected PCs (the computer name; "PC" if unknown)."""
+    try:
+        name = socket.gethostname().strip()
+    except OSError:
+        name = ""
+    return name[:80] or "PC"
+
+
+def desktop_login(api_url: str, email: str, password: str, timeout: float = LOGIN_TIMEOUT_S,
+                  accept_terms: bool = False, device_name: Optional[str] = None) -> Tuple[Optional[ClientConfig], Optional[str]]:
     """Signs in with email + password (POST /accounts/desktop-login, V1.0) and returns the client's
-    configuration, or (None, what to tell the driver). Never raises for network or server errors."""
+    configuration, or (None, what to tell the driver — a LoginError). Never raises for network or
+    server errors."""
+    from client.uploader.uploader import CLIENT_VERSION
+
     try:
         resp = requests.post(
             f"{api_url.rstrip('/')}/accounts/desktop-login",
-            json={"email": email.strip(), "password": password},
+            json={"email": email.strip(), "password": password, "accept_terms": bool(accept_terms),
+                  "device_name": (device_name or this_pc_name())[:80], "client_version": CLIENT_VERSION},
             timeout=timeout,
         )
     except requests.RequestException:
@@ -70,15 +111,34 @@ def desktop_login(api_url: str, email: str, password: str, timeout: float = LOGI
             return None, "The server sent an unexpected answer. Please try again later."
         return ClientConfig(api_url=api_url.rstrip("/"), auth_token=token, client_secret=secret), None
     if resp.status_code == 401:
-        return None, "Email or password is wrong. Use the ones you signed up with on the Garage16 website."
+        return None, LoginError("Email or password is wrong. Use the ones you signed up with on the Garage16 website.")
     if resp.status_code == 403:
-        return None, "This account has been locked. Please contact whoever runs the Garage16 server."
+        return None, LoginError("This account has been locked. Please contact whoever runs the Garage16 server.")
+    if resp.status_code == 409:
+        # V1.0.1: {"detail": {"code": ..., "message": ...}}
+        try:
+            detail = resp.json().get("detail")
+        except (ValueError, AttributeError):
+            detail = None
+        if isinstance(detail, dict):
+            code = detail.get("code")
+            if code == "email_not_verified":
+                return None, LoginError(
+                    "Please confirm your email address first: open the link in the email we sent you (check the "
+                    "spam folder). On the website under Account you can send a new link. Then click Connect again.",
+                    code)
+            if code == "terms_required":
+                return None, LoginError(
+                    "The terms of use and the privacy policy have changed. Read them (link below), tick "
+                    "\"I accept…\" and click Connect again.", code)
+            if isinstance(detail.get("message"), str):
+                return None, LoginError(detail["message"][:300], code)
     if resp.status_code == 429:
-        return None, "Too many attempts. Please wait a few minutes and try again."
+        return None, LoginError("Too many attempts. Please wait a few minutes and try again.")
     if resp.status_code in (404, 405):
-        return None, ("This server does not support signing in with email (it is older than Garage16 1.0). "
-                      "Tick \"Use an auth token instead\" and paste your token and secret.")
-    return None, f"The server answered with an error ({resp.status_code}). Please try again later."
+        return None, LoginError("This server does not support signing in with email (it is older than Garage16 1.0). "
+                                "Tick \"Use an auth token instead\" and paste your token and secret.")
+    return None, LoginError(f"The server answered with an error ({resp.status_code}). Please try again later.")
 
 
 def website_link(api_url: str, page: str) -> Optional[str]:
@@ -182,6 +242,9 @@ def run_setup_dialog(default_api_url: str, parent=None) -> Optional[ClientConfig
     secret_var = add_field(token_frame, "Client secret", secret=True)
     use_token = tk.BooleanVar(value=False)
 
+    terms_var = tk.BooleanVar(value=False)
+    insecure_warned = {"value": False}
+
     error_var = tk.StringVar(value="")
     button_var = tk.StringVar(value="Connect")
 
@@ -198,6 +261,10 @@ def run_setup_dialog(default_api_url: str, parent=None) -> Optional[ClientConfig
 
     advanced = ttk.Checkbutton(frame, text="Use an auth token instead (advanced)", variable=use_token, command=toggle_token)
     advanced.pack(anchor="w", pady=(0, 6))
+    # V1.0.1: shown (below the password) only when the server says the terms changed
+    # (LoginError code "terms_required")
+    terms_box = ttk.Checkbutton(frame, text="I accept the terms of use and have read the privacy policy",
+                                variable=terms_var)
 
     tk.Label(frame, textvariable=error_var, fg="#c0392b", wraplength=400, justify="left").pack(anchor="w", pady=(0, 6))
 
@@ -217,7 +284,8 @@ def run_setup_dialog(default_api_url: str, parent=None) -> Optional[ClientConfig
 
     add_link("Create an account", "account")
     add_link("Setup guide", "setup")
-    add_link("Privacy & legal", "legal?tab=privacy")
+    add_link("Terms of use", "legal?tab=terms")
+    add_link("Privacy", "legal?tab=privacy")
 
     def on_connect() -> None:
         if use_token.get():
@@ -242,11 +310,18 @@ def run_setup_dialog(default_api_url: str, parent=None) -> Optional[ClientConfig
         if error:
             error_var.set(error)
             return
+        if insecure_http(url) and not insecure_warned["value"]:
+            error_var.set("This address starts with http:// — your password would be sent unencrypted. "
+                          "Use https:// if you can, or click Connect again to continue anyway.")
+            insecure_warned["value"] = True
+            return
         error_var.set("Connecting…")
         root.update_idletasks()
-        config, error = desktop_login(url, email_var.get(), password_var.get())
+        config, error = desktop_login(url, email_var.get(), password_var.get(), accept_terms=terms_var.get())
         if error:
             error_var.set(error)
+            if getattr(error, "code", None) == "terms_required" and not terms_box.winfo_ismapped():
+                terms_box.pack(anchor="w", pady=(0, 8), after=login_frame)
             return
         result["config"] = config
         root.destroy()

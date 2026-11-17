@@ -35,7 +35,7 @@ COPY scripts/consistency_check.py ./scripts/consistency_check.py
 # V0.9.8: re-encrypt the client secrets after a key change (docs/RUNBOOKS.md)
 COPY scripts/rotate_secret_key.py ./scripts/rotate_secret_key.py
 # V0.9.9: integrity sweep / backfill / re-signing, the measurement on labelled real laps, and the
-# server-side timing of the lap check (docs/V0_9_9_NAS_ANLEITUNG.md)
+# server-side timing of the lap check (docs/NAS_MESSUNGEN.md)
 COPY scripts/integrity_check.py ./scripts/integrity_check.py
 COPY scripts/trackcheck_eval.py ./scripts/trackcheck_eval.py
 COPY scripts/bench_server.py ./scripts/bench_server.py

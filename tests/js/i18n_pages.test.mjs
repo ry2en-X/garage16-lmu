@@ -35,6 +35,7 @@ globalThis.fetch = async (url) => {
   if (p === "/invitations/mine") return json([]);
   if (p === "/accounts/me") return json({ driver_id: 1, display_name: "Mika", email: "m@x.de", email_verified: false, discord_linked: false, has_password: true });
   if (p === "/accounts/sessions") return json([]);
+  if (p === "/accounts/devices") return json([]);
   if (p === "/accounts/discord") return json({ linked: false });
   if (p === "/drivers/1/public") return json({ driver_id: 1, display_name: "Mika", total_laps: 4, tracks_driven: 2, cars_driven: 1, personal_records: [], teams: [{ team_id: 5, team_name: "Red", role: "owner" }], recent_activity: [
     { record_type: "WR", track_name: "Spa", car_name: "#7", lap_time: 139.0, created_at: "2026-10-01T10:00:00" },

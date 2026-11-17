@@ -55,6 +55,7 @@ from ..database import acquire_record_lock, get_db
 from ..models import Driver, Lap, LapReport
 from ..rate_limit import rate_limit
 from ..records import evaluate_and_record
+from .. import fair_play
 from ..catalog import canonical_class, track_matches_query
 from ..versioning import data_level_for_client_version, is_client_outdated
 from ..schemas import LapMetadata, LapReportOut, LapReportRequest, LapSummary, UploadResponse
@@ -103,7 +104,7 @@ def _stream_to_temp_file(upload: UploadFile, dest_dir: Path) -> tuple[Path, str,
                 total += len(chunk)
                 if total > settings.max_upload_bytes:
                     raise HTTPException(
-                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Telemetry file too large."
+                        status.HTTP_413_CONTENT_TOO_LARGE, "Telemetry file too large."
                     )
                 sha256.update(chunk)
                 out.write(chunk)
@@ -390,6 +391,9 @@ def _upload_lap(telemetry: UploadFile, envelope: str, signature: str, driver: Dr
         # V0.9.3: keyed by the car MODEL — records compare models (records.py), so two
         # liveries of one model racing for the same record must take the same lock.
         acquire_record_lock(db, metadata.track_name, lap.car_model or metadata.car_name)
+        # V1.0.1: a new driver beating the Garage16 Best of others waits for an admin (fair_play.py)
+        if fair_play.apply(db, lap, settings.new_driver_review_laps):
+            db.flush()
         records = evaluate_and_record(db, lap)
         # V0.9.9: the audit log (last before the commit — it holds the chain lock)
         decision = (lap.validation or {}).get("decision") or {}

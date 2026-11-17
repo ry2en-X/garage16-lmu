@@ -7,7 +7,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _section():
-    guide = (ROOT / "docs/ADMIN_GUIDE.md").read_text(encoding="utf-8")
+    # V1.0.1: the version-by-version update sections moved unchanged to the archive
+    guide = (ROOT / "docs/archive/UPDATES_V0_9_BIS_V1_0.md").read_text(encoding="utf-8")
     return guide.split("**Neu in V0.9.4", 1)[1].split("**Neu in V0.9.3.1", 1)[0]
 
 
@@ -26,9 +27,9 @@ def test_versions_and_changelog():
     from server.main import VERSION
 
     # V0.9.5 is the current server (tests/test_v095_docs.py); the desktop client stays 0.9.4
-    assert CLIENT_VERSION == "1.0.0" and VERSION == "1.0.0"  # V1.0 moved both on
+    assert min(tuple(map(int, v.split("."))) for v in (CLIENT_VERSION, VERSION)) >= (1, 0, 0)  # V1.0 moved both on
     assert "\n## V0.9.4 — " in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert '#define AppVersion "1.0.0"' in (ROOT / "packaging/version.iss").read_text(encoding="utf-8")
+    assert f'#define AppVersion "{CLIENT_VERSION}"' in (ROOT / "packaging/version.iss").read_text(encoding="utf-8")
 
 
 def test_the_protocol_has_the_stint_point_and_the_probe_records_it():

@@ -1,6 +1,23 @@
 {
  "components": {
   "schemas": {
+   "AcceptTermsRequest": {
+    "description": "POST /accounts/accept-terms (V1.0.1) \u2014 accounts from before V1.0, or after the terms changed.",
+    "properties": {
+     "accept_terms": {
+      "default": false,
+      "title": "Accept Terms",
+      "type": "boolean"
+     },
+     "confirm_min_age": {
+      "default": false,
+      "title": "Confirm Min Age",
+      "type": "boolean"
+     }
+    },
+    "title": "AcceptTermsRequest",
+    "type": "object"
+   },
    "AccountExport": {
     "description": "Self-service data export \u2014 GDPR/DSGVO Art. 15/20 style 'what do you\nhave about me' response. Deliberately does not include raw telemetry\nfile contents (those are downloadable separately if needed) \u2014 this is\nthe structured data the DB actually holds about the driver.",
     "properties": {
@@ -16,6 +33,15 @@
      "created_at": {
       "title": "Created At",
       "type": "string"
+     },
+     "devices": {
+      "default": [],
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "title": "Devices",
+      "type": "array"
      },
      "discord_linked": {
       "title": "Discord Linked",
@@ -592,8 +618,37 @@
     "type": "object"
    },
    "DesktopLoginRequest": {
-    "description": "POST /accounts/desktop-login (V1.0) \u2014 the desktop client's \"Connect\" with email + password.",
+    "description": "POST /accounts/desktop-login (V1.0) \u2014 the desktop client's \"Connect\" with email + password.\n\nV1.0.1: `device_name` (the computer's name, shown in Account \u2192 Connected PCs), `accept_terms`\n(the client's checkbox when the terms changed since the driver last accepted them) and the\nclient's version. Clients 1.0.0 send none of them.",
     "properties": {
+     "accept_terms": {
+      "default": false,
+      "title": "Accept Terms",
+      "type": "boolean"
+     },
+     "client_version": {
+      "anyOf": [
+       {
+        "maxLength": 32,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Client Version"
+     },
+     "device_name": {
+      "anyOf": [
+       {
+        "maxLength": 80,
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Device Name"
+     },
      "email": {
       "maxLength": 254,
       "minLength": 3,
@@ -615,7 +670,7 @@
     "type": "object"
    },
    "DesktopLoginResponse": {
-    "description": "The desktop client's credentials. The auth token is NEW (the previous one stops working \u2014\nonly one PC is connected at a time); the client secret is the account's existing one.",
+    "description": "The desktop client's credentials. V1.0.1: the auth token belongs to THIS PC (other connected\nPCs keep theirs, up to LMU_GARAGE_MAX_DEVICES); the client secret is the account's existing one.",
     "properties": {
      "auth_token": {
       "title": "Auth Token",
@@ -641,6 +696,52 @@
      "client_secret"
     ],
     "title": "DesktopLoginResponse",
+    "type": "object"
+   },
+   "DeviceOut": {
+    "description": "One connected PC (Account \u2192 Connected PCs, V1.0.1). Never the token itself.",
+    "properties": {
+     "created_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Created At"
+     },
+     "id": {
+      "title": "Id",
+      "type": "integer"
+     },
+     "is_current": {
+      "default": false,
+      "title": "Is Current",
+      "type": "boolean"
+     },
+     "last_used_at": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Used At"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "name"
+    ],
+    "title": "DeviceOut",
     "type": "object"
    },
    "DiscordLinkStatusOut": {
@@ -787,6 +888,39 @@
      "car_name": {
       "title": "Car Name",
       "type": "string"
+     },
+     "class_best_driver_id": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Class Best Driver Id"
+     },
+     "class_best_driver_name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Class Best Driver Name"
+     },
+     "class_best_time": {
+      "anyOf": [
+       {
+        "type": "number"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Class Best Time"
      },
      "lap_time": {
       "title": "Lap Time",
@@ -1318,6 +1452,28 @@
      "driver_id": {
       "title": "Driver Id",
       "type": "integer"
+     },
+     "email_verified": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Email Verified"
+     },
+     "terms_required": {
+      "anyOf": [
+       {
+        "type": "boolean"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Terms Required"
      }
     },
     "required": [
@@ -1711,6 +1867,14 @@
       "title": "Lap Time",
       "type": "number"
      },
+     "records": {
+      "default": [],
+      "items": {
+       "type": "string"
+      },
+      "title": "Records",
+      "type": "array"
+     },
      "track_name": {
       "title": "Track Name",
       "type": "string"
@@ -1897,6 +2061,18 @@
      "password"
     ],
     "title": "SignupRequest",
+    "type": "object"
+   },
+   "SignupResponse": {
+    "description": "POST /accounts/signup (V1.0.1). The same answer whether the address is new or already has an\naccount \u2014 the difference only goes to that mailbox (a confirmation link, or \"you already have an\naccount\"), so the form cannot be used to find out who is registered. The browser is not signed in:\nthe driver confirms the email first and then signs in.",
+    "properties": {
+     "status": {
+      "default": "check_email",
+      "title": "Status",
+      "type": "string"
+     }
+    },
+    "title": "SignupResponse",
     "type": "object"
    },
    "StatusResponse": {
@@ -2568,6 +2744,17 @@
    "WhoAmIOut": {
     "description": "GET /accounts/me \u2014 the only thing missing before V0.7.2's dashboard\nrework: a way to resolve \"my own driver_id\" from just a valid\ncredential (bearer token OR session cookie), for the one case that\ndidn't already have it \u2014 a session restored from a pasted-in\nauth_token (see web/js/pages/auth.js), which never learns driver_id\nany other way. Deliberately minimal \u2014 this is identity resolution,\nnot a profile; DriverProfileOut (the public one) already covers\n\"everything about a driver\" for driver_id once known.\n\nemail/email_verified (V0.8-NAS \u00a72) stay within that same \"who am I\"\nspirit rather than becoming a second endpoint \u2014 Account Settings\nneeds exactly this to show a verify-email prompt.",
     "properties": {
+     "current_terms_version": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Current Terms Version"
+     },
      "display_name": {
       "title": "Display Name",
       "type": "string"
@@ -2591,6 +2778,22 @@
       "default": false,
       "title": "Email Verified",
       "type": "boolean"
+     },
+     "terms_required": {
+      "default": false,
+      "title": "Terms Required",
+      "type": "boolean"
+     },
+     "terms_version": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Terms Version"
      }
     },
     "required": [
@@ -2603,6 +2806,82 @@
   }
  },
  "paths": {
+  "/accounts/accept-terms": {
+   "post": {
+    "description": "V1.0.1: accept the current terms of use and privacy policy \u2014 accounts from before V1.0, and\neverybody after the texts changed (legal.py TERMS_VERSION). The website asks right after\nsigning in.",
+    "operationId": "accept_terms_accounts_accept_terms_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "authorization",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "garage16_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Garage16 Session"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/AcceptTermsRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/WhoAmIOut"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Accept Terms",
+    "tags": [
+     "accounts"
+    ]
+   }
+  },
   "/accounts/app-session": {
    "post": {
     "operationId": "create_app_session_accounts_app_session_post",
@@ -2786,7 +3065,7 @@
   },
   "/accounts/desktop-login": {
    "post": {
-    "description": "The desktop client's \"Connect\" with email + password (V1.0). Issues a NEW auth token \u2014\nthe previous one stops working, so one PC is connected at a time (connecting a second PC\ndisconnects the first; it says so and offers \"Reconnect account\u2026\") \u2014 and returns the\naccount's existing client secret, so laps already waiting on this PC still upload. Same\ngeneric failure as /login (no hint which emails have accounts).",
+    "description": "The desktop client's \"Connect\" with email + password (V1.0). Returns a token for THIS PC and\nthe account's client secret, so laps already waiting on this PC still upload. Same generic\nfailure as /login (no hint which emails have accounts).\n\nV1.0.1:\n  * one token per PC (models.DeviceToken) \u2014 connecting the laptop no longer disconnects the rig;\n  * only after the email was confirmed (LMU_GARAGE_REQUIRE_EMAIL_VERIFICATION) \u2192 409\n    email_not_verified;\n  * the current terms must be accepted \u2014 the client's checkbox sends accept_terms \u2192 otherwise\n    409 terms_required;\n  * failed attempts are also counted per address, not only per IP (`_sign_in_checked`).",
     "operationId": "desktop_login_accounts_desktop_login_post",
     "requestBody": {
      "content": {
@@ -2821,6 +3100,151 @@
      }
     },
     "summary": "Desktop Login",
+    "tags": [
+     "accounts"
+    ]
+   }
+  },
+  "/accounts/devices": {
+   "get": {
+    "description": "V1.0.1: the PCs connected with this account (desktop-login), newest use first.",
+    "operationId": "list_devices_accounts_devices_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "authorization",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "garage16_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Garage16 Session"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "items": {
+          "$ref": "#/components/schemas/DeviceOut"
+         },
+         "title": "Response List Devices Accounts Devices Get",
+         "type": "array"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "List Devices",
+    "tags": [
+     "accounts"
+    ]
+   }
+  },
+  "/accounts/devices/{device_id}": {
+   "delete": {
+    "description": "V1.0.1: disconnect one PC \u2014 its client says \"Reconnect account\u2026\" at its next upload.",
+    "operationId": "revoke_device_accounts_devices__device_id__delete",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "device_id",
+      "required": true,
+      "schema": {
+       "title": "Device Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "authorization",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Authorization"
+      }
+     },
+     {
+      "in": "cookie",
+      "name": "garage16_session",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Garage16 Session"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/StatusResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Revoke Device",
     "tags": [
      "accounts"
     ]
@@ -3302,7 +3726,7 @@
     ]
    },
    "patch": {
-    "description": "Rename yourself. Everything that shows a driver's name reads it from the\ndriver row at display time (leaderboards, profiles, teams, invitations,\nDiscord announcements), so the new name appears everywhere at once \u2014 old\nlaps and records are not rewritten because they never stored the name.\nNames are not unique (as at registration); blank or whitespace-only names\nare rejected.",
+    "description": "Rename yourself. Everything that shows a driver's name reads it from the\ndriver row at display time (leaderboards, profiles, teams, invitations,\nDiscord announcements), so the new name appears everywhere at once \u2014 old\nlaps and records are not rewritten because they never stored the name.\nV1.0.1: names are unique in their compared form (server/names.py) \u2014 409 if another driver\nalready uses it; changing only the capitalisation of your own name is allowed.",
     "operationId": "update_my_display_name_accounts_me_patch",
     "parameters": [
      {
@@ -3999,7 +4423,7 @@
   },
   "/accounts/signup": {
    "post": {
-    "description": "The website's sign-up form (V1.0): one step instead of register \u2192 copy token and secret \u2192\nset email and password. Creates the account with email and password, records the accepted\nterms (server/routers/legal.py TERMS_VERSION), sends the verification email and signs the\nbrowser in (session cookie, like /login). The desktop client connects with the same email\nand password (POST /accounts/desktop-login) \u2014 no token to copy.",
+    "description": "The website's sign-up form (V1.0): one step instead of register \u2192 copy token and secret \u2192\nset email and password. Creates the account with email and password, records the accepted\nterms (server/routers/legal.py TERMS_VERSION) and sends the verification email. The desktop\nclient connects with the same email and password (POST /accounts/desktop-login) once the email\nis confirmed.\n\nV1.0.1: the answer is the same for a new address and for one that already has an account (that\nmailbox gets \"you already have an account\" instead) \u2014 before, a 409 told anybody which addresses\nare registered. The browser is no longer signed in here: confirm the email, then sign in.\nA driver name that is taken (in its compared form, server/names.py) is still a 409 \u2014 names are\npublic anyway.",
     "operationId": "signup_accounts_signup_post",
     "parameters": [
      {
@@ -4030,11 +4454,11 @@
      "required": true
     },
     "responses": {
-     "200": {
+     "202": {
       "content": {
        "application/json": {
         "schema": {
-         "$ref": "#/components/schemas/LoginResponse"
+         "$ref": "#/components/schemas/SignupResponse"
         }
        }
       },

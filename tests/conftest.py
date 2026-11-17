@@ -33,6 +33,9 @@ os.environ.setdefault("LMU_GARAGE_ENV", "development")
 os.environ.setdefault("LMU_GARAGE_DB_URL", f"sqlite:///{_tmp_db_dir}/test.db")
 os.environ.setdefault("LMU_GARAGE_STORAGE_DIR", _tmp_storage_dir)
 os.environ.setdefault("LMU_GARAGE_ADMIN_TOKEN", "test-admin-token")
+# V1.0.1: the fair-play hold for new drivers (server/fair_play.py) is off for the suite — most tests
+# build a leaderboard from brand-new drivers; tests/test_v101_fair_play.py switches it on itself.
+os.environ.setdefault("LMU_GARAGE_NEW_DRIVER_REVIEW_LAPS", "0")
 # Registration stays open (no LMU_GARAGE_REGISTRATION_SECRET) so tests can
 # freely register drivers without needing the header.
 

@@ -147,3 +147,11 @@ def test_my_laps_filter_by_track_is_a_case_insensitive_venue_search(client):
     assert tracks("Monza") == ["Monza"]
     assert tracks("nothing-like-this") == []
     assert len(client.get("/telemetry/laps", headers=headers).json()) == 3  # no filter: everything
+
+
+def test_silverstone_layouts_are_one_venue():
+    """V1.0.1: LMU's Silverstone layouts belong to one venue (the leaderboard offers them as layouts)."""
+    from server import catalog
+    assert catalog.venue_for("Silverstone Grand Prix Circuit - ELMS") == "Silverstone"
+    assert catalog.venue_for("Silverstone National Circuit") == "Silverstone"
+    assert catalog.venue_for("Sebring International Raceway") == "Sebring International Raceway"

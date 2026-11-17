@@ -1,4 +1,4 @@
-# Garage16 — architecture (V0.9.9)
+# Garage16 — architecture (V1.0.1)
 
 How the parts fit together, where data lives, and the decisions behind the design. Written so
 that someone who has never seen the project can run, change and repair it.
@@ -36,9 +36,9 @@ that someone who has never seen the project can run, change and repair it.
 
 | Where | What | Kept |
 |---|---|---|
-| PostgreSQL | drivers, laps (metadata, verdict, figures), records, teams, sessions, invitations, upload log | until deleted; upload log 30 days |
+| PostgreSQL | drivers, connected PCs (`device_tokens`, V1.0.1), laps (metadata, verdict, figures), records, teams, sessions, invitations, upload log, audit log | until deleted; upload log 30 days; audit log 365 days; unconfirmed sign-ups 7 days |
 | `telemetry_data` volume | one parquet file per lap, content-addressed (`<sha256>.parquet`) | as long as its lap |
-| Client PC | laps not yet accepted, the client's config and log | until uploaded / by the driver |
+| Client PC | laps not yet accepted, the client's config (token and secret DPAPI-encrypted on Windows, V1.0.1) and log | until uploaded / by the driver |
 | Backups | `garage16_<stamp>/` = dump + archive + manifest | 14 days (configurable) |
 
 Details per field and the deletion rules: `docs/DATA_PROTECTION.md`.
@@ -113,6 +113,8 @@ switch). A failure quarantines the lap.
 | proxy → server | the client address only from configured proxies (ADR-8) | — |
 | database ↔ files | neither alone | sha256 + size + MAC tie a lap row to its file and lap time |
 | backup → restore | nothing | manifest sha256, every file's hash, every lap's MAC, the audit chain |
+| browser → web pages | nothing from other origins | CSP `script-src 'self'`, no framing (`frame-ancestors 'none'`), `nosniff` (Caddy, V1.0.1); the API sets its own headers |
+| new account → leaderboards | nothing until the email is confirmed and the driver has a track record | desktop sign-in only with a confirmed email; a new driver's lap that beats the Garage16 Best of others waits in the review queue (ADR-14) |
 | admin → server | one shared token (no per-person accounts) | every admin decision is an audit event |
 
 Not covered: a client that fabricates a consistent lap (the signature proves the sender, not the
@@ -194,3 +196,23 @@ event; a trigger refuses updates. Whoever holds the key and the database can rew
 the head is therefore copied into every backup manifest (kept off the server). The driver id is not
 part of the chain so a deletion request can be honoured without breaking it.
 
+**ADR-13 One token per PC, one secret per account (V1.0.1).** `POST /accounts/desktop-login` issues a
+token per PC (`device_tokens`, hash only, a name and dates), so connecting a second PC no longer
+disconnects the first; the oldest is dropped above `LMU_GARAGE_MAX_DEVICES`. The per-driver token
+(`drivers.token_hash`) stays valid for clients connected before and for the "advanced" token login —
+`server/auth.py` accepts both. The client secret (HMAC key) stays per account: queued laps of every PC
+keep uploading, and rotating it remains one action. Revoking with a PC's token disconnects only that PC.
+
+**ADR-14 Fair play by review, not by trusting the client (V1.0.1).** The client holds the HMAC key, so
+a signature proves the account, not the lap. Besides the telemetry checks (ADR-4, ADR-10) one cheap
+rule covers the case that matters most on an open server: a driver with fewer than N official laps
+whose lap would beat the Garage16 Best of *others* is held (`server/fair_play.py`) — same mechanism as
+REVIEW, records evaluated when an admin clears it. First laps on a combination and slower laps never
+wait, so normal use does not reach the admin.
+
+**ADR-15 Accounts that do not reveal themselves (V1.0.1).** Sign-up answers the same for a new and a
+registered address (the mailbox learns the difference), unknown addresses cost a password hash on
+sign-in, and failed sign-ins and emails are limited per address (hashed, in memory) as well as per
+IP. Driver names are unique in a normalised form (`server/names.py`: NFKC, case-folded, invisible
+characters removed) so a newcomer cannot appear as an existing driver; names duplicated before
+V1.0.1 keep a NULL key rather than being renamed by a migration.

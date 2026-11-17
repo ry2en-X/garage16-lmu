@@ -183,6 +183,21 @@ def test_real_caddy_serves_the_frontend_and_spa_fallback(proxied):
 
 
 @needs_caddy
+def test_real_caddy_sends_the_security_headers_of_the_pages(proxied):
+    """V1.0.1: the web pages come with a strict CSP, no framing and nosniff; the API keeps its own."""
+    base, _ = proxied
+    for path in ("/", "/js/router.js", "/robots.txt"):
+        page = requests.get(base + path, timeout=5)
+        assert page.status_code == 200, path
+        csp = page.headers.get("content-security-policy", "")
+        assert "script-src 'self'" in csp and "frame-ancestors 'none'" in csp, (path, csp)
+        assert page.headers.get("x-frame-options") == "DENY" and page.headers.get("x-content-type-options") == "nosniff"
+    api = requests.get(base + "/health", timeout=5)
+    assert api.status_code == 200 and "content-security-policy" not in {k.lower() for k in api.headers}
+    assert api.headers.get("x-content-type-options") == "nosniff"     # set by the app itself
+
+
+@needs_caddy
 def test_real_caddy_forwards_https_so_the_app_accepts_the_request(proxied, client):
     """The V0.6.5 bug: without `header_up X-Forwarded-Proto https` the app
     (LMU_GARAGE_REQUIRE_HTTPS) rejected every request behind the proxy."""

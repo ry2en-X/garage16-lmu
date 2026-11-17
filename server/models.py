@@ -34,6 +34,12 @@ class Driver(Base):
 
     id = Column(Integer, primary_key=True)
     display_name = Column(String, nullable=False)
+    # V1.0.1: the name in the form two names are compared (server/names.py: NFKC, case folded,
+    # whitespace collapsed, invisible characters removed) — unique, so "Max Mustermann" and
+    # "max  mustermann" cannot both exist. NULL only for names that were already taken twice
+    # before V1.0.1 (migration 0019 keeps the oldest; the others keep their name, get no key,
+    # and must pick a free one at their next rename).
+    display_name_key = Column(String(120), nullable=True, unique=True, index=True)
     # Optional (V0.6.9): a driver can exist token-only forever (the
     # desktop client never needs a password — see routers/accounts.py's
     # login()) or add email+password for web login and self-service
@@ -276,6 +282,27 @@ class Session(Base):
     # Best-effort, display-only (account "Sessions" list) — never used for
     # any security decision (trivially spoofable by the client).
     user_agent = Column(String, nullable=True)
+
+    driver = relationship("Driver")
+
+
+class DeviceToken(Base):
+    """One connected PC of a driver (V1.0.1). POST /accounts/desktop-login issues one per PC, so a
+    driver can have the rig and a laptop connected at the same time (before, every sign-in replaced
+    THE token and disconnected the other PC). The old per-driver token (Driver.token_hash) keeps
+    working for clients connected before V1.0.1 and for the "advanced" token login.
+
+    Only the hash is stored. `name` is what the client reports (the computer name) — display only."""
+
+    __tablename__ = "device_tokens"
+
+    id = Column(Integer, primary_key=True)
+    driver_id = Column(Integer, ForeignKey("drivers.id"), nullable=False, index=True)
+    token_hash = Column(String, unique=True, nullable=False, index=True)
+    name = Column(String(80), nullable=False, default="PC")
+    created_at = Column(DateTime, default=_utcnow)
+    last_used_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
 
     driver = relationship("Driver")
 

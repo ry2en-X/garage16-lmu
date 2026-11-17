@@ -12,7 +12,7 @@
 // läuft nicht durch t() — die Sprache wird als Ganzes gewählt (pages/legal.js).
 // Bei inhaltlichen Änderungen: TERMS_VERSION in server/routers/legal.py und {date} anpassen.
 
-export const DATE = "24. Oktober 2026";
+export const DATE = "26. Oktober 2026";
 
 export const LABELS = {
   title: "Rechtliches",
@@ -100,11 +100,11 @@ export const PRIVACY = [
             ["Konto: Anzeigename, E-Mail-Adresse, Passwort (nur als Argon2-Hash, nie im Klartext), Bestätigungsstatus der E-Mail, Anlagedatum, Zustimmung zu diesen Bedingungen (Zeitpunkt, Fassung)",
               "Konto anlegen und anmelden, Passwort zurücksetzen, Bestenlisten, Nachweis der Zustimmung",
               "Art. 6 Abs. 1 lit. b DSGVO (Nutzungsvertrag); Zustimmungsnachweis: lit. c und f",
-              "bis du dein Konto löschst"],
-            ["Zugangsdaten des Desktop-Clients (Token nur als Hash, Client-Geheimnis verschlüsselt)",
-              "Runden sicher hochladen und signieren",
+              "bis du dein Konto löschst; eine Anmeldung, deren E-Mail nie bestätigt wird (ohne Runden und Team), nach 7 Tagen"],
+            ["Zugangsdaten des Desktop-Clients je verbundenem PC: Token (nur als Hash), Name des PCs (Computername), Zeitpunkt der Verbindung und der letzten Nutzung; Client-Geheimnis verschlüsselt",
+              "Runden sicher hochladen und signieren; du siehst und trennst deine PCs unter Konto → Verbundene PCs",
               "Art. 6 Abs. 1 lit. b DSGVO",
-              "bis zur Löschung oder Erneuerung"],
+              "bis du den PC trennst, die Zugangsdaten erneuerst oder dein Konto löschst"],
             ["Web-Sitzungen: Sitzungskennung (als Hash), Ablaufzeit, Browser-Kennung (User-Agent)",
               "angemeldet bleiben; du siehst und beendest deine Sitzungen unter Konto → Sitzungen",
               "Art. 6 Abs. 1 lit. b DSGVO",
@@ -133,8 +133,8 @@ export const PRIVACY = [
               "Nachvollziehbarkeit von Prüf- und Moderationsentscheidungen, Erkennen von Manipulation",
               "Art. 6 Abs. 1 lit. f DSGVO (faire, überprüfbare Bestenlisten)",
               "365 Tage"],
-            ["IP-Adresse",
-              "Schutz vor Missbrauch (Begrenzung der Anfragen pro Zeitraum); Zugriffsprotokoll des Webservers (IP-Adresse, Zeit, aufgerufene Adresse, Statuscode, Browser-Kennung)",
+            ["IP-Adresse; bei Anmeldeversuchen und E-Mails zusätzlich ein Prüfwert (Hash) der E-Mail-Adresse",
+              "Schutz vor Missbrauch (Begrenzung der Anfragen und Anmeldeversuche pro Zeitraum); Zugriffsprotokoll des Webservers (IP-Adresse, Zeit, aufgerufene Adresse, Statuscode, Browser-Kennung)",
               "Art. 6 Abs. 1 lit. f DSGVO (Sicherheit, Abwehr von Angriffen)",
               "Anfragebegrenzung: nur im Arbeitsspeicher für die Dauer des Zeitfensters (höchstens 1 Stunde); Zugriffsprotokoll: 7 Tage"],
             ["Sicherungskopien (alle Daten oben außer Protokollen)",
@@ -165,13 +165,13 @@ export const PRIVACY = [
   {
     h: "6. Automatische Prüfung der Runden",
     blocks: [
-      "Jede hochgeladene Runde wird automatisch auf Plausibilität geprüft (u. a. Streckenbegrenzungen, Datenqualität, Urteil des Spiels). Das Ergebnis — gültig, ungültig oder zur Prüfung zurückgestellt — steht mit Begründung bei der Runde. Es entscheidet nur darüber, ob eine Runde in den Bestenlisten zählt, und hat keine rechtliche oder ähnlich erhebliche Wirkung im Sinne von Art. 22 DSGVO. Zurückgestellte Runden sieht sich ein Administrator an; du kannst eine Entscheidung jederzeit per E-Mail beanstanden.",
+      "Jede hochgeladene Runde wird automatisch auf Plausibilität geprüft (u. a. Streckenbegrenzungen, Datenqualität, Urteil des Spiels). Das Ergebnis — gültig, ungültig oder zur Prüfung zurückgestellt — steht mit Begründung bei der Runde. Es entscheidet nur darüber, ob eine Runde in den Bestenlisten zählt, und hat keine rechtliche oder ähnlich erhebliche Wirkung im Sinne von Art. 22 DSGVO. Zurückgestellte Runden sieht sich ein Administrator an — ebenso die Runde eines neuen Fahrers (mit noch wenigen gewerteten Runden), die die bisherige Bestzeit anderer schlägt, bevor sie zählt. Du kannst eine Entscheidung jederzeit per E-Mail beanstanden.",
     ],
   },
   {
     h: "7. Der Desktop-Client",
     blocks: [
-      "Der Windows-Client liest während des Fahrens die Telemetrie aus dem gemeinsamen Speicher (Shared Memory) von Le Mans Ultimate — sonst nichts von deinem PC. Fertige Runden speichert er in deinem Benutzerordner (%LOCALAPPDATA%\\Garage16), bis sie hochgeladen sind, und schreibt dort ein Protokoll zur Fehlersuche. Diese Dateien verlassen deinen PC nur als Runden-Upload; das Protokoll nur, wenn du es selbst jemandem schickst. Beim Start fragt der Client den Server nach der aktuellen Version.",
+      "Der Windows-Client liest während des Fahrens die Telemetrie aus dem gemeinsamen Speicher (Shared Memory) von Le Mans Ultimate — sonst nichts von deinem PC. Fertige Runden speichert er in deinem Benutzerordner (%LOCALAPPDATA%\\Garage16), bis sie hochgeladen sind, und schreibt dort ein Protokoll zur Fehlersuche. Diese Dateien verlassen deinen PC nur als Runden-Upload; das Protokoll nur, wenn du es selbst jemandem schickst. Beim Start fragt der Client den Server nach der aktuellen Version. Deine Zugangsdaten speichert er unter Windows verschlüsselt (Windows-Datenschutz-API, nur für deinen Windows-Benutzer lesbar). Beim Verbinden mit deinem Konto übermittelt er den Namen deines PCs, damit du deine PCs auf der Website unterscheiden kannst.",
     ],
   },
   {

@@ -87,11 +87,19 @@ export async function renderLeaderboard(container) {
     values.forEach((v) => select.appendChild(el("option", { value: v }, v)));
   }
 
+  // the options of `items` that pass `driven` as they are, the rest in an <optgroup> "no laps yet"
+  function appendGrouped(select, items, driven, option) {
+    const rest = items.filter((i) => !driven(i));
+    items.filter(driven).forEach((i) => select.appendChild(option(i)));
+    if (rest.length) select.appendChild(el("optgroup", { label: t("No laps yet") }, rest.map(option)));
+  }
+
   function fillClassOptions(options) {
     classSelect.innerHTML = "";
     classSelect.disabled = false;
     classSelect.appendChild(el("option", { value: "" }, t("Choose…")));
-    options.forEach((o) => classSelect.appendChild(el("option", { value: o.name }, `${o.name} · ${lapsLabel(o.lap_count)}`)));
+    // V1.0.1: classes with laps first; the ones nobody has driven yet in their own group at the end
+    appendGrouped(classSelect, options, (o) => o.lap_count > 0, (o) => el("option", { value: o.name }, `${o.name} · ${lapsLabel(o.lap_count)}`));
     // V0.9.6: the class asked for in the address, else the one with the most laps
     const busiest = [...options].filter((o) => o.lap_count > 0).sort((a, b) => b.lap_count - a.lap_count)[0];
     const fromUrl = firstLoad && wanted.cls && options.some((o) => o.name === wanted.cls) ? wanted.cls : null;
@@ -106,6 +114,8 @@ export async function renderLeaderboard(container) {
       venues = [];
       venueSelect.innerHTML = "";
       venueSelect.appendChild(el("option", { value: "" }, t("Couldn't load tracks")));
+      resultsBox.innerHTML = "";
+      resultsBox.appendChild(el("div", { class: "notice notice--error" }, err.message));
       return;
     }
     venueSelect.innerHTML = "";
@@ -117,7 +127,8 @@ export async function renderLeaderboard(container) {
     }
     venueSelect.disabled = false;
     venueSelect.appendChild(el("option", { value: "" }, t("Choose a track…")));
-    venues.forEach((v) => venueSelect.appendChild(el("option", { value: v.venue }, `${v.venue} · ${lapsLabel(v.lap_count)}`)));
+    // V1.0.1: tracks with laps first; the ones nobody has driven yet in their own group at the end
+    appendGrouped(venueSelect, venues, (v) => v.lap_count > 0, (v) => el("option", { value: v.venue }, `${v.venue} · ${lapsLabel(v.lap_count)}`));
     const urlVenue = firstLoad && wanted.track ? venues.find((v) => v.layouts.some((l) => l.track_name === wanted.track)) : null;
     if (previous && venues.some((v) => v.venue === previous)) {
       venueSelect.value = previous;
@@ -141,6 +152,8 @@ export async function renderLeaderboard(container) {
     if (!venue) {
       fillSelect(classSelect, [], t("Pick a track first"));
       fillSelect(carSelect, [], t("Pick a track first"));
+      firstLoad = false;
+      await runSearch();   // shows "pick a track" instead of the loading notice
       return;
     }
     if (venue.layouts.length === 0) {
@@ -152,6 +165,8 @@ export async function renderLeaderboard(container) {
         fillSelect(classSelect, [], t("Couldn't load classes"));
       }
       fillSelect(carSelect, [], t("No cars yet"));
+      firstLoad = false;
+      await runSearch();
       return;
     }
     if (venue.layouts.length > 1) {
@@ -220,13 +235,16 @@ export async function renderLeaderboard(container) {
     }
     const seq = ++searchSeq;
     resultsBox.setAttribute("aria-busy", "true");
+    // V1.0.1: say that the table is loading (before, the "pick a track" text stayed until it came,
+    // which looked as if the choice had not worked); a table already shown stays until the new one
+    if (!resultsBox.querySelector("table")) showLoading();
     try {
       const entries = mode === "class"
         ? await api.classLeaderboard(track, key, 20)
         : await api.carLeaderboard(track, key, 20);
       if (seq !== searchSeq) return;   // a newer choice is already loading
       resultsBox.innerHTML = "";
-      resultsBox.appendChild(el("h2", { class: "board-title" }, `${track} · ${key}`));
+      resultsBox.appendChild(el("h2", { class: "board-title" }, `${boardTrackLabel()} · ${key}`));
       resultsBox.appendChild(renderTable(entries));
       // V0.9.6: keep the choice in the address (a link opens this table); no re-render
       const params = new URLSearchParams({ track, [mode === "class" ? "class" : "car"]: key });
@@ -241,9 +259,19 @@ export async function renderLeaderboard(container) {
   }
   let searchSeq = 0;
 
-  resultsBox.appendChild(
-    el("div", { class: "empty-state" }, t("Pick a track and class (or an exact car) to see the standings."))
-  );
+  // the venue's readable name; the LMU name of the layout where a venue has several
+  function boardTrackLabel() {
+    const venue = venues.find((v) => v.venue === venueSelect.value);
+    return venue && venue.layouts.length === 1 ? venue.venue : currentTrack;
+  }
+
+  function showLoading() {
+    resultsBox.innerHTML = "";
+    resultsBox.appendChild(el("div", { class: "empty-state empty-state--loading" }, t("Loading standings…")));
+  }
+
+  // V1.0.1: a loading notice from the start (the busiest track is chosen by itself, see loadVenues)
+  showLoading();
 
   await loadVenues("");
 }
@@ -261,7 +289,7 @@ function renderTable(entries) {
       el("td", {}, el("a", { href: `#/driver/${entry.driver_id}` }, entry.driver_name)),
       el("td", {}, el("span", { class: "lap-time" }, formatLapTime(entry.lap_time))),
       // V0.9.6: the gap to P1, and the sectors in seconds (not "0:29.425")
-      el("td", { class: "lap-gap" }, pos === 1 ? "" : `+${(entry.lap_time - leader).toFixed(3)}`),
+      el("td", { class: "lap-gap" }, pos === 1 ? "—" : `+${(entry.lap_time - leader).toFixed(3)}`),
       el(
         "td",
         { class: "sector-cells" },
@@ -279,7 +307,7 @@ function renderTable(entries) {
   });
 
   const table = el("table", { class: "timing-table" }, [
-    el("thead", {}, el("tr", {}, ["#", t("Driver"), t("Lap"), t("Gap"), t("Sectors"), "", t("Set"), ""].map((h) => el("th", {}, h)))),
+    el("thead", {}, el("tr", {}, ["#", t("Driver"), t("Lap"), t("Gap"), t("Sectors"), t("Status"), t("Set"), t("Analysis")].map((h) => el("th", {}, h)))),
     el("tbody", {}, rows),
   ]);
 

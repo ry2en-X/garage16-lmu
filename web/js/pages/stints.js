@@ -17,6 +17,7 @@ import { el, formatDate, formatLapTime } from "../format.js";
 import { renderSignInPrompt } from "./auth.js";
 import { sessionCard } from "./sessions.js";
 import { t, tp } from "../i18n.js";
+import { loadTrackNames, trackLabel } from "../tracks.js";
 import * as S from "../stints/stats.js";
 import { chart as svgChart, legend } from "../stints/chart.js";
 
@@ -89,6 +90,7 @@ export function parseStintQuery(hash = window.location.hash) {
 // ------------------------------------------------------------------ page
 
 export async function renderStints(container) {
+  loadTrackNames(); // V1.0.1: readable track names (tracks.js) — not awaited, never blocks the page
   container.classList.add("panel--wide");
   container.appendChild(el("h1", {}, t("Stint Analyzer")));
   container.appendChild(el("p", { class: "subtitle" }, t("Whole sessions: pace over the stint, tyres, fuel and energy, pit stops, traffic, forecasts and strategy. For a single lap use the LapTime Analyzer.")));
@@ -156,7 +158,7 @@ async function renderSession(container, lapId, compareLap) {
   container.appendChild(el("div", { class: "stint-head" }, [
     back,
     el("div", {}, [
-      el("h2", { class: "stint-head__title" }, `${data.track_name} · ${data.car_model || dash}`),
+      el("h2", { class: "stint-head__title" }, `${trackLabel(data.track_name)} · ${data.car_model || dash}`),
       el("div", { class: "subtitle" }, `${data.driver.name || ""} · ${dateOf(data.started)} – ${dateOf(data.ended)} · ${tp("{0} lap", "{0} laps", data.laps.length)}`),
     ]),
   ]));

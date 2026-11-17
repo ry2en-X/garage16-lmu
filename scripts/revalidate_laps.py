@@ -234,7 +234,9 @@ def main(argv=None) -> int:
                 lap.invalid_reason = None
                 lap.review_status = "pending"
             elif kind == T_REVIEW:
-                lap.review_status = HELD if args.hold else "pending"
+                # V1.0.1: a lap held for a new driver's record (server/fair_play.py) stays held
+                fair_play_hold = lap.review_status == HELD and bool((lap.validation or {}).get("fair_play"))
+                lap.review_status = HELD if (args.hold or fair_play_hold) else "pending"
             elif not lap.is_valid and not check.is_valid and lap.review_status not in ("cleared", "invalidated"):
                 old = lap.invalid_reason if isinstance(lap.invalid_reason, list) else [lap.invalid_reason]
                 if old and all(is_automatic_reason(r) for r in old):

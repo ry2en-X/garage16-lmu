@@ -17,7 +17,7 @@ def _register(client, name="Driver"):
     return resp.json()
 
 
-def _upload_lap(client, account, lap_time=90.0):
+def _upload_lap(client, account, lap_time=90.0, sector_times=None, speed=50.0):
     from client.telemetry.recorder import LapRecorder
     from client.uploader.uploader import Uploader
 
@@ -26,7 +26,7 @@ def _upload_lap(client, account, lap_time=90.0):
         n = int(lap_time * 20) + 1  # V0.9.9: a checkable frame rate (server/lap_decision.py)
         df = pd.DataFrame({
             "t": np.linspace(0, lap_time, n), "lap_dist": np.linspace(0, 4500, n),
-            "speed": np.full(n, 50.0), "throttle": np.full(n, 0.8), "brake": np.zeros(n),
+            "speed": np.full(n, speed), "throttle": np.full(n, 0.8), "brake": np.zeros(n),
             "clutch": np.zeros(n), "steering": np.zeros(n), "gear": np.full(n, 4),
             "rpm": np.full(n, 6000.0), "fuel": np.linspace(50, 48, n),
         })
@@ -37,7 +37,7 @@ def _upload_lap(client, account, lap_time=90.0):
         meta_path.write_text(json.dumps({
             "track_name": "Monza", "car_name": "GT3 Custom #12", "car_class": "GT3",
             "car_model": "Porsche 911 GT3 R", "session_type": 10,
-            "lap_number": 1, "lap_time": lap_time, "sector_times": [30.0, 30.0, 30.0],
+            "lap_number": 1, "lap_time": lap_time, "sector_times": sector_times or [30.0, 30.0, 30.0],
             "is_valid": True, "started_at": 0.0, "recorded_at": 1700000000,
             "sample_count": n, "telemetry_file": "lap.parquet", "uploaded": False,
         }), encoding="utf-8")

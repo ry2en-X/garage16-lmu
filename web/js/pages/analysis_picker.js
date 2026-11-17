@@ -15,6 +15,7 @@ import { el, formatDate, formatLapTime } from "../format.js";
 import { isBasicLap } from "../analysis/model.js";
 
 import { t, tp } from "../i18n.js";
+import { trackLabel } from "../tracks.js";
 // Marks laps from clients older than 0.9.0 (fewer channels) next to the lap time.
 function basicTag(item) {
   return isBasicLap(item)
@@ -71,7 +72,7 @@ function lapTable(laps, options) {
     const best = list.filter((l) => l.is_valid && l.lap_time > 0).reduce((a, b) => (!a || b.lap_time < a.lap_time ? b : a), null);
     const group = el("details", { class: "picker__group", "data-track": track }, [
       el("summary", {}, [
-        el("strong", {}, track),
+        el("strong", {}, trackLabel(track)),
         el("span", { class: "subtitle picker__group-meta" }, `${tp("{0} lap", "{0} laps", list.length, [list.length])}${best ? ` · ${t("best")} ${formatLapTime(best.lap_time)}` : ""}`),
       ]),
       oneTable(list, options),

@@ -72,16 +72,49 @@ class SignupRequest(BaseModel):
     confirm_min_age: bool = False   # at least LMU_GARAGE_MIN_AGE years old
 
 
+class SignupResponse(BaseModel):
+    """POST /accounts/signup (V1.0.1). The same answer whether the address is new or already has an
+    account — the difference only goes to that mailbox (a confirmation link, or "you already have an
+    account"), so the form cannot be used to find out who is registered. The browser is not signed in:
+    the driver confirms the email first and then signs in."""
+
+    status: str = "check_email"
+
+
 class DesktopLoginRequest(BaseModel):
-    """POST /accounts/desktop-login (V1.0) — the desktop client's "Connect" with email + password."""
+    """POST /accounts/desktop-login (V1.0) — the desktop client's "Connect" with email + password.
+
+    V1.0.1: `device_name` (the computer's name, shown in Account → Connected PCs), `accept_terms`
+    (the client's checkbox when the terms changed since the driver last accepted them) and the
+    client's version. Clients 1.0.0 send none of them."""
 
     email: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=1, max_length=200)
+    device_name: Optional[str] = Field(default=None, max_length=80)
+    accept_terms: bool = False
+    client_version: Optional[str] = Field(default=None, max_length=32)
+
+
+class AcceptTermsRequest(BaseModel):
+    """POST /accounts/accept-terms (V1.0.1) — accounts from before V1.0, or after the terms changed."""
+
+    accept_terms: bool = False
+    confirm_min_age: bool = False
+
+
+class DeviceOut(BaseModel):
+    """One connected PC (Account → Connected PCs, V1.0.1). Never the token itself."""
+
+    id: int
+    name: str
+    created_at: Optional[str] = None
+    last_used_at: Optional[str] = None
+    is_current: bool = False
 
 
 class DesktopLoginResponse(BaseModel):
-    """The desktop client's credentials. The auth token is NEW (the previous one stops working —
-    only one PC is connected at a time); the client secret is the account's existing one."""
+    """The desktop client's credentials. V1.0.1: the auth token belongs to THIS PC (other connected
+    PCs keep theirs, up to LMU_GARAGE_MAX_DEVICES); the client secret is the account's existing one."""
 
     driver_id: int
     display_name: str
@@ -123,6 +156,10 @@ class WhoAmIOut(BaseModel):
     display_name: str
     email: Optional[str] = None
     email_verified: bool = False
+    # V1.0.1: the terms this driver accepted, the current ones, and whether they must accept (again)
+    terms_version: Optional[str] = None
+    current_terms_version: Optional[str] = None
+    terms_required: bool = False
 
 
 class AppSessionResponse(BaseModel):
@@ -149,6 +186,9 @@ class LoginResponse(BaseModel):
 
     driver_id: int
     display_name: str
+    # V1.0.1: what the website has to ask right after signing in
+    email_verified: Optional[bool] = None
+    terms_required: Optional[bool] = None
 
 
 class ChangePasswordRequest(BaseModel):
@@ -565,6 +605,10 @@ class DriverPersonalRecordOut(BaseModel):
     car_model: Optional[str] = None
     lap_time: float
     set_at: str
+    # V1.0.1: the Garage16 Best of this track and class (anybody's), for "Your Best" per class
+    class_best_time: Optional[float] = None
+    class_best_driver_id: Optional[int] = None
+    class_best_driver_name: Optional[str] = None
 
 
 class DriverActivityItem(BaseModel):
@@ -757,6 +801,8 @@ class RecentActivityEntry(BaseModel):
     # V0.9.6: the lap behind the entry (link to the analysis, one row per lap) and the car model
     lap_id: Optional[int] = None
     car_model: Optional[str] = None
+    # V1.0.1: the records this lap set ("WR" = Garage16 Best, "TEAM_BEST", "PR"), most important first
+    records: List[str] = []
 
 
 
@@ -879,6 +925,8 @@ class AccountExport(BaseModel):
     # V1.0: when and which version of the terms the driver accepted (null: account from before V1.0)
     terms_accepted_at: Optional[str] = None
     terms_version: Optional[str] = None
+    # V1.0.1: the connected PCs (name and dates — never a token)
+    devices: List[dict] = []
 
 
 class AdminReviewDecision(BaseModel):

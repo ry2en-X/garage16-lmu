@@ -17,7 +17,9 @@ from tests.local_servers import FakeGarageServer, RealAppServer
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 PASSWORD = "Correct-Horse-42-battery"
-needs_xvfb = pytest.mark.skipif(shutil.which("xvfb-run") is None, reason="xvfb-run not available — GUI tests skipped, not faked")
+# V1.0.1: also skipped (not failed) where Python has no tkinter (e.g. a server-only Python)
+needs_xvfb = pytest.mark.skipif(shutil.which("xvfb-run") is None or __import__("importlib.util").util.find_spec("tkinter") is None,
+                                reason="xvfb-run or tkinter not available — GUI tests skipped, not faked")
 
 
 @pytest.fixture()
@@ -29,10 +31,14 @@ def real_server(client):   # `client` gives a fresh database and drops it afterw
         server.stop()
 
 
-def _signup(server, email="rita@example.com"):
+def _signup(server, email="rita@example.com", name="Rita", verify=True):
     resp = requests.post(f"{server.url}/accounts/signup", timeout=10, json={
-        "display_name": "Rita", "email": email, "password": PASSWORD, "accept_terms": True, "confirm_min_age": True})
-    assert resp.status_code == 200, resp.text
+        "display_name": name, "email": email, "password": PASSWORD, "accept_terms": True, "confirm_min_age": True})
+    assert resp.status_code == 202, resp.text
+    if verify:   # V1.0.1: the desktop client connects only with a confirmed email
+        from tests.test_v100_signup import _verify
+
+        _verify(email)
 
 
 @pytest.mark.parametrize("url,email,password,ok", [
@@ -78,7 +84,7 @@ def test_desktop_login_explains_unreachable_and_old_servers():
 
 @needs_xvfb
 def test_real_setup_dialog_signs_in_with_email_and_password(real_server):
-    _signup(real_server, "gui@example.com")
+    _signup(real_server, "gui@example.com", name="Gui")
     script = textwrap.dedent(
         f"""
         import tkinter as tk
@@ -105,4 +111,4 @@ def test_real_setup_dialog_signs_in_with_email_and_password(real_server):
     )
     result = subprocess.run(["xvfb-run", "-a", sys.executable, "-c", script], cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=60)
     assert f"RESULT {real_server.url} True True" in result.stdout, result.stdout + result.stderr
-    assert "LINKS Create an account|Setup guide|Privacy & legal" in result.stdout
+    assert "LINKS Create an account|Setup guide|Terms of use|Privacy" in result.stdout

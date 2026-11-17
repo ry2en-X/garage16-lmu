@@ -8,8 +8,12 @@
 # build-client.yml calls this workflow first: no client is built from code that did not pass.
 name: ci
 
+# V1.0.1: pushes to main (and pull requests) only. Before, "push" without a filter ran the whole gate
+# twice for one release: once for the branch and once for the tag — the tag's build-client.yml
+# calls this workflow itself (workflow_call).
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
   workflow_call:

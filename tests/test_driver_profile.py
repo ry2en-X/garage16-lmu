@@ -98,6 +98,26 @@ def test_profile_personal_records_grouped_by_track_and_car_model(client):
     assert len(profile["personal_records"]) == 2
 
 
+def test_profile_personal_records_carry_the_garage16_best_of_their_class(client):
+    """V1.0.1: "Your Best" per track and class — each record knows its class's Garage16 Best,
+    so a GT3 lap is compared with the GT3 record and never with a Hypercar."""
+    me = _register(client, "ClassMe")
+    rival = _register(client, "ClassRival")
+    _upload(client, me, track="Spa", car_class="GT3", car_model="911 GT3 R", lap_time=140.0)
+    _upload(client, me, track="Spa", car_class="Hypercar", car_model="499P", lap_time=125.0)
+    _upload(client, rival, track="Spa", car_class="GT3", car_model="Ferrari 296 GT3", lap_time=138.5)
+    _upload(client, rival, track="Monza", car_class="GT3", car_model="Ferrari 296 GT3", lap_time=100.0)
+
+    records = {r["car_class"]: r for r in client.get(f"/drivers/{me['driver_id']}/public").json()["personal_records"]}
+    gt3, hyper = records["GT3"], records["Hypercar"]
+    assert gt3["lap_time"] == 140.0
+    assert gt3["class_best_time"] == 138.5  # the GT3 record at Spa, the rival's
+    assert gt3["class_best_driver_id"] == rival["driver_id"]
+    assert gt3["class_best_driver_name"] == "ClassRival"
+    assert hyper["class_best_time"] == 125.0  # my own lap is the Hypercar record
+    assert hyper["class_best_driver_id"] == me["driver_id"]
+
+
 def test_profile_recent_activity_reflects_record_events(client):
     account = _register(client, "ActivityDriver")
     _upload(client, account, lap_time=90.0)

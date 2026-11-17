@@ -2,7 +2,7 @@
 // Same structure and content as legal/de.js (see there). The German version is the binding one;
 // this is a translation for convenience (said on the page).
 
-export const DATE = "24 October 2026";
+export const DATE = "26 October 2026";
 
 export const LABELS = {
   title: "Legal",
@@ -75,8 +75,8 @@ export const PRIVACY = [
           rows: [
             ["Account: driver name, email address, password (only as an Argon2 hash, never in plain text), email confirmation status, creation date, acceptance of these terms (time, version)",
               "create the account and sign in, reset the password, leaderboards, proof of acceptance",
-              "Art. 6(1)(b) GDPR (contract of use); proof of acceptance: (c) and (f)", "until you delete your account"],
-            ["Desktop client credentials (token only as a hash, client secret encrypted)", "upload and sign laps securely", "Art. 6(1)(b) GDPR", "until deleted or renewed"],
+              "Art. 6(1)(b) GDPR (contract of use); proof of acceptance: (c) and (f)", "until you delete your account; a sign-up whose email is never confirmed (no laps, no team): 7 days"],
+            ["Desktop client credentials per connected PC: token (only as a hash), the PC's name (computer name), time of connecting and of last use; client secret encrypted", "upload and sign laps securely; you see and disconnect your PCs under Account → Connected PCs", "Art. 6(1)(b) GDPR", "until you disconnect the PC, renew the credentials or delete your account"],
             ["Web sessions: session id (as a hash), expiry, browser identifier (user agent)", "stay signed in; you see and end your sessions under Account → Sessions", "Art. 6(1)(b) GDPR", "until expiry (30 days), sign-out or deletion"],
             ["Laps: track, car, class, lap and sector times, validity with reason, temperatures, statistics, client version", "leaderboards, records, analysis, validity check", "Art. 6(1)(b) GDPR", "until you delete your account"],
             ["Telemetry of every lap (inputs such as throttle, brake, steering; speed; position on track; car data such as tyres, suspension, temperatures) as the unchanged original file with checksum and server signature",
@@ -85,7 +85,7 @@ export const PRIVACY = [
             ["Discord user id (only if you link Discord yourself)", "mention you in record announcements, bot commands like /pb", "Art. 6(1)(b) GDPR", "until you unlink or delete your account"],
             ["Upload log: time, outcome, reason, client version, file size, duration (no IP address, no content)", "troubleshooting, stable operation", "Art. 6(1)(f) GDPR (legitimate interest in secure operation)", "30 days, then deleted automatically"],
             ["Audit log: time, event, lap id, checksum and check result — no names, emails or IP addresses", "traceable check and moderation decisions, detecting tampering", "Art. 6(1)(f) GDPR (fair, verifiable leaderboards)", "365 days"],
-            ["IP address", "abuse protection (limiting requests per time window); access log of the web server (IP address, time, requested address, status code, browser identifier)",
+            ["IP address; for sign-in attempts and emails also a check value (hash) of the email address", "abuse protection (limiting requests and sign-in attempts per time window); access log of the web server (IP address, time, requested address, status code, browser identifier)",
               "Art. 6(1)(f) GDPR (security, defence against attacks)", "rate limiting: only in memory for the length of the window (at most 1 hour); access log: 7 days"],
             ["Backups (all data above except logs)", "recovery after a defect or error", "Art. 6(1)(f) GDPR", "14 days"],
           ],
@@ -111,11 +111,11 @@ export const PRIVACY = [
   },
   {
     h: "6. Automatic lap check",
-    blocks: ["Every uploaded lap is checked automatically for plausibility (track limits, data quality, the game's own verdict, among others). The result — valid, invalid or held for review — is shown with its reason next to the lap. It only decides whether a lap counts in the leaderboards and has no legal or similarly significant effect within the meaning of Art. 22 GDPR. An administrator looks at held laps; you can contest a decision by email at any time."],
+    blocks: ["Every uploaded lap is checked automatically for plausibility (track limits, data quality, the game's own verdict, among others). The result — valid, invalid or held for review — is shown with its reason next to the lap. It only decides whether a lap counts in the leaderboards and has no legal or similarly significant effect within the meaning of Art. 22 GDPR. An administrator looks at held laps — and, before it counts, at the lap of a new driver (with only a few counted laps) that beats the previous best of others. You can contest a decision by email at any time."],
   },
   {
     h: "7. The desktop client",
-    blocks: ["While you drive, the Windows client reads the telemetry from Le Mans Ultimate's shared memory — nothing else on your PC. It keeps finished laps in your user folder (%LOCALAPPDATA%\\Garage16) until they are uploaded and writes a log for troubleshooting there. These files only leave your PC as a lap upload; the log only if you send it to somebody yourself. On start the client asks the server for the current version."],
+    blocks: ["While you drive, the Windows client reads the telemetry from Le Mans Ultimate's shared memory — nothing else on your PC. It keeps finished laps in your user folder (%LOCALAPPDATA%\\Garage16) until they are uploaded and writes a log for troubleshooting there. These files only leave your PC as a lap upload; the log only if you send it to somebody yourself. On start the client asks the server for the current version. It stores your credentials encrypted on Windows (Windows Data Protection API, readable only by your Windows user). When connecting to your account it sends your PC's name, so you can tell your PCs apart on the website."],
   },
   {
     h: "8. Cookies and browser storage",

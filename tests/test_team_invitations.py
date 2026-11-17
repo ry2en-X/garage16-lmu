@@ -55,9 +55,23 @@ def test_lookup_returns_empty_list_for_no_match(client):
 
 
 def test_lookup_returns_all_matches_when_names_collide(client):
+    """V1.0.1: a second "Duplicate" can no longer be registered — but two drivers who shared a name
+    BEFORE V1.0.1 still both exist (migration 0019 leaves the younger one without a name key), and
+    the lookup must return both."""
+    from server.database import SessionLocal
+    from server.models import Driver
+
     owner = _register(client, "Owner")
     _register(client, "Duplicate")
-    _register(client, "Duplicate")
+    assert client.post("/accounts/register", params={"display_name": "duplicate"}).status_code == 409
+    legacy = _register(client, "Placeholder")
+    db = SessionLocal()
+    try:
+        db.query(Driver).filter(Driver.id == legacy["driver_id"]).update(
+            {"display_name": "Duplicate", "display_name_key": None})
+        db.commit()
+    finally:
+        db.close()
 
     resp = client.get("/drivers/lookup", params={"display_name": "Duplicate"}, headers=_auth(owner))
     assert resp.status_code == 200

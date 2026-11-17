@@ -95,3 +95,17 @@ def test_recent_activity_respects_limit(client):
         _upload(client, account, track=f"Track{i}", lap_time=80.0 + i)
     entries = client.get("/leaderboard/recent", params={"limit": 3}).json()
     assert len(entries) <= 3
+
+
+def test_recent_activity_lists_the_records_a_lap_set(client):
+    """V1.0.1: every entry says which records its lap set (Garage16 Best first) — the landing page
+    marks sessions that brought a record. A slower lap afterwards sets none."""
+    account = _register(client, "RecordDriver")
+    assert _upload(client, account, track="Imola", lap_time=91.0).status_code == 200
+    assert _upload(client, account, track="Imola", lap_time=93.0).status_code == 200
+    entries = [e for e in client.get("/leaderboard/recent").json() if e["driver_name"] == "RecordDriver"]
+    by_time = {round(e["lap_time"], 1): e for e in entries}
+    first, slower = by_time[91.0], by_time[93.0]
+    assert "PR" in first["records"] and "WR" in first["records"]
+    assert first["records"].index("WR") < first["records"].index("PR")
+    assert slower["records"] == []

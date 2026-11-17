@@ -1,4 +1,4 @@
-"""V1.0 — open sign-up with terms and minimum age, the desktop client's email login, the legal
+"""V1.0 (V1.0.1: sign-up answers "check your email", see test_v101_accounts.py) — open sign-up with terms and minimum age, the desktop client's email login, the legal
 endpoint, and the default download links."""
 
 from __future__ import annotations
@@ -16,14 +16,42 @@ def _signup(client, **overrides):
     return client.post("/accounts/signup", json=body)
 
 
-def test_signup_creates_a_signed_in_account_with_terms_recorded(client):
+def _verify(email):
+    """Marks the email confirmed, as clicking the link would (tests/test_email_verification.py
+    covers the link itself)."""
+    from server.database import SessionLocal
+    from server.models import Driver
+
+    db = SessionLocal()
+    try:
+        db.query(Driver).filter(Driver.email == email).update({"email_verified": True})
+        db.commit()
+    finally:
+        db.close()
+
+
+def _drivers_with(email):
+    from server.database import SessionLocal
+    from server.models import Driver
+
+    db = SessionLocal()
+    try:
+        return db.query(Driver).filter(Driver.email == email).all()
+    finally:
+        db.close()
+
+
+def test_signup_creates_the_account_with_terms_recorded_and_asks_to_confirm(client):
     resp = _signup(client)
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["display_name"] == "Mika"
-    # signed in by cookie: /accounts/me answers without any token
-    me = client.get("/accounts/me")
-    assert me.status_code == 200 and me.json()["email"] == "mika@example.com"
-    assert me.json()["email_verified"] is False
+    # V1.0.1: 202 "check_email", the browser is NOT signed in (confirm first, then sign in)
+    assert resp.status_code == 202, resp.text
+    assert resp.json() == {"status": "check_email"}
+    assert "garage16_session" not in resp.cookies
+    assert client.get("/accounts/me").status_code == 401
+    login = client.post("/accounts/login", json={"email": "mika@example.com", "password": STRONG})
+    assert login.status_code == 200 and login.json()["email_verified"] is False and login.json()["terms_required"] is False
+    me = client.get("/accounts/me").json()
+    assert me["email"] == "mika@example.com" and me["email_verified"] is False
     export = client.get("/accounts/me/export").json()
     from server.routers.legal import TERMS_VERSION
 
@@ -36,13 +64,16 @@ def test_signup_requires_both_confirmations(client, field, message):
     assert resp.status_code == 400 and message in resp.json()["detail"]
 
 
-def test_signup_rejects_weak_password_bad_email_duplicate(client):
+def test_signup_rejects_weak_password_bad_email_and_a_taken_name(client):
     assert _signup(client, password="short").status_code == 400
     assert _signup(client, email="not-an-email").status_code == 400
-    assert _signup(client).status_code == 200
-    client.cookies.clear()
+    assert _signup(client).status_code == 202
+    # V1.0.1: an address that already has an account gets the SAME answer (no enumeration) …
     dup = _signup(client, email="MIKA@example.com", display_name="Other")
-    assert dup.status_code == 409
+    assert dup.status_code == 202 and dup.json() == {"status": "check_email"}
+    assert len(_drivers_with("mika@example.com")) == 1
+    # … while a taken driver name is still refused (names are public anyway)
+    assert _signup(client, email="someone@example.com", display_name="mika").status_code == 409
 
 
 def test_signup_needs_the_secret_when_registration_is_not_open(client, monkeypatch):
@@ -52,7 +83,7 @@ def test_signup_needs_the_secret_when_registration_is_not_open(client, monkeypat
     ok = client.post("/accounts/signup", headers={"X-Registration-Secret": "s3cret"},
                      json={"display_name": "Mika", "email": "mika@example.com", "password": STRONG,
                            "accept_terms": True, "confirm_min_age": True})
-    assert ok.status_code == 200
+    assert ok.status_code == 202
 
 
 def test_open_production_server_refuses_the_token_only_register(client, monkeypatch):
@@ -60,12 +91,12 @@ def test_open_production_server_refuses_the_token_only_register(client, monkeypa
     monkeypatch.setattr(settings, "open_registration", True)
     monkeypatch.setattr(settings, "registration_secret", None)
     assert client.post("/accounts/register", params={"display_name": "X"}).status_code == 403
-    assert _signup(client).status_code == 200
+    assert _signup(client).status_code == 202
 
 
-def test_desktop_login_issues_working_credentials_and_replaces_the_old_token(client):
-    assert _signup(client).status_code == 200
-    client.cookies.clear()
+def test_desktop_login_issues_working_credentials(client):
+    assert _signup(client).status_code == 202
+    _verify("mika@example.com")
     bad = client.post("/accounts/desktop-login", json={"email": "mika@example.com", "password": "wrong-password-1"})
     assert bad.status_code == 401
     first = client.post("/accounts/desktop-login", json={"email": "Mika@Example.com", "password": STRONG})
@@ -74,17 +105,18 @@ def test_desktop_login_issues_working_credentials_and_replaces_the_old_token(cli
     creds = first.json()
     who = client.get("/accounts/me", headers={"Authorization": f"Bearer {creds['auth_token']}"})
     assert who.status_code == 200 and who.json()["display_name"] == "Mika"
+    # V1.0.1: a second PC gets its own token; the first one keeps working (tests/test_v101_accounts.py)
     second = client.post("/accounts/desktop-login", json={"email": "mika@example.com", "password": STRONG}).json()
-    # one PC at a time: the first token no longer works, the client secret stays the same
-    assert client.get("/accounts/me", headers={"Authorization": f"Bearer {creds['auth_token']}"}).status_code == 401
-    assert second["client_secret"] == creds["client_secret"]
+    assert client.get("/accounts/me", headers={"Authorization": f"Bearer {creds['auth_token']}"}).status_code == 200
+    assert second["auth_token"] != creds["auth_token"] and second["client_secret"] == creds["client_secret"]
 
 
 def test_desktop_login_refuses_locked_accounts(client):
     from server.database import SessionLocal
     from server.models import Driver
 
-    assert _signup(client).status_code == 200
+    assert _signup(client).status_code == 202
+    _verify("mika@example.com")
     db = SessionLocal()
     driver = db.query(Driver).filter(Driver.email == "mika@example.com").one()
     driver.is_locked = True

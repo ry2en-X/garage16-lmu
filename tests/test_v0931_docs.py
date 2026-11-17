@@ -8,7 +8,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _section():
-    guide = (ROOT / "docs/ADMIN_GUIDE.md").read_text(encoding="utf-8")
+    # V1.0.1: the version-by-version update sections moved unchanged to the archive
+    guide = (ROOT / "docs/archive/UPDATES_V0_9_BIS_V1_0.md").read_text(encoding="utf-8")
     return guide.split("**Neu in V0.9.3.1", 1)[1].split("**Neu in V0.9.3 —", 1)[0]
 
 

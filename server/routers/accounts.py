@@ -37,9 +37,10 @@ from ..database import get_db
 from ..email_provider import get_email_provider
 from .. import discord_link
 from ..driver_lifecycle import delete_driver_rows
-from ..models import Driver, EmailVerificationToken, Lap, PasswordResetToken, RecordEvent, Team, TeamMembership, UploadEvent
+from ..models import DeviceToken, Driver, EmailVerificationToken, Lap, PasswordResetToken, RecordEvent, Team, TeamMembership, UploadEvent
 from ..models import Session as SessionModel
-from ..rate_limit import rate_limit
+from ..rate_limit import count_key, key_blocked, limit_key, rate_limit
+from ..names import NAME_TAKEN_MESSAGE, InvalidName, clean_display_name, name_key, name_taken
 from ..sessions import (
     SESSION_COOKIE_NAME,
     SESSION_LIFETIME,
@@ -50,6 +51,7 @@ from ..sessions import (
 )
 from ..team_lifecycle import TeamOwnershipConflict, resolve_owned_teams_before_driver_deletion
 from ..schemas import (
+    AcceptTermsRequest,
     AppSessionActivateRequest,
     AppSessionResponse,
     AccountExport,
@@ -57,6 +59,7 @@ from ..schemas import (
     DiscordLinkStatusOut,
     DesktopLoginRequest,
     DesktopLoginResponse,
+    DeviceOut,
     DisplayNameUpdateRequest,
     DriverRegisterResponse,
     EmailVerificationConfirmRequest,
@@ -71,6 +74,7 @@ from ..schemas import (
     SessionOut,
     SetPasswordRequest,
     SignupRequest,
+    SignupResponse,
     StatusResponse,
     WhoAmIOut,
 )
@@ -124,6 +128,94 @@ def _send_verification_email(db: Session, driver: Driver, email: str) -> None:
     )
 
 
+_DUMMY_PASSWORD_HASH: Optional[str] = None
+_TOO_MANY_SIGN_INS = "Too many failed sign-ins for this account. Try again later."
+
+
+def _sign_in_checked(db: Session, email: str, password: str) -> Driver:
+    """V1.0.1: the account behind email + password, or 401. Failed attempts are counted per address
+    (`login_account`) on top of the per-IP limit; once the address used them up, even the right
+    password waits (429) — so guessing from many IPs is capped too. A correct password never counts."""
+    if key_blocked("login_account", email):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, _TOO_MANY_SIGN_INS)
+    driver = db.query(Driver).filter(Driver.email == email).one_or_none()
+    if not _password_ok(driver, password):
+        count_key("login_account", email)
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
+    return driver
+
+
+def _password_ok(driver: Optional[Driver], password: str) -> bool:
+    """V1.0.1: True if `driver` exists, has a password and it matches. For an unknown address a
+    password is still hashed (against a fixed dummy), so the answer takes the same time and does
+    not tell which addresses have accounts."""
+    global _DUMMY_PASSWORD_HASH
+    if driver is None or driver.password_hash is None:
+        if _DUMMY_PASSWORD_HASH is None:
+            _DUMMY_PASSWORD_HASH = hash_password("garage16-timing-equaliser-not-a-password")
+        verify_password(password, _DUMMY_PASSWORD_HASH)
+        return False
+    return verify_password(password, driver.password_hash)
+
+
+def terms_required(driver: Driver) -> bool:
+    """V1.0.1: the driver has not accepted the CURRENT terms (accounts from before V1.0 never did)."""
+    from .legal import TERMS_VERSION
+
+    return driver.terms_version != TERMS_VERSION
+
+
+def _record_terms(driver: Driver) -> None:
+    from .legal import TERMS_VERSION
+
+    driver.terms_accepted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    driver.terms_version = TERMS_VERSION
+
+
+def _whoami(driver: Driver) -> WhoAmIOut:
+    from .legal import TERMS_VERSION
+
+    return WhoAmIOut(
+        driver_id=driver.id, display_name=driver.display_name,
+        email=driver.email, email_verified=bool(driver.email_verified),
+        terms_version=driver.terms_version, current_terms_version=TERMS_VERSION,
+        terms_required=terms_required(driver),
+    )
+
+
+def _login_response(driver: Driver) -> LoginResponse:
+    return LoginResponse(driver_id=driver.id, display_name=driver.display_name,
+                         email_verified=bool(driver.email_verified), terms_required=terms_required(driver))
+
+
+def _clean_name(raw: str, db: Session, except_driver_id: Optional[int] = None) -> str:
+    """The display name to store (server/names.py), or 400 / 409 with a message for the user."""
+    try:
+        name = clean_display_name(raw)
+    except InvalidName as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    if name_taken(db, name, except_driver_id=except_driver_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, NAME_TAKEN_MESSAGE)
+    return name
+
+
+def _send_already_registered_email(email: str) -> None:
+    """V1.0.1: somebody signed up with an address that already has an account. The form answered
+    as for a new address; the owner learns about it here, with the way back in."""
+    get_email_provider().send(
+        to=email,
+        subject="Garage16 — you already have an account",
+        body=(
+            "Somebody (hopefully you) tried to create a Garage16 account with this email address.\n\n"
+            "You already have one. Sign in here: "
+            f"{settings.frontend_url}/#/account\n"
+            "Forgot your password? Reset it here: "
+            f"{settings.frontend_url}/#/account (\"Forgot password?\")\n\n"
+            "If it wasn't you, you can ignore this email — nothing was changed."
+        ),
+    )
+
+
 def _secret_matches(x_registration_secret: Optional[str]) -> bool:
     return bool(x_registration_secret) and hmac.compare_digest(
         x_registration_secret.encode(), settings.registration_secret.encode()
@@ -165,19 +257,22 @@ def register_driver(
 ) -> DriverRegisterResponse:
     _check_registration_secret(x_registration_secret)
 
-    display_name = display_name.strip()
-    if not display_name:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "display_name must not be blank.")
+    display_name = _clean_name(display_name, db)
 
     token = generate_token()
     secret = generate_secret()
     driver = Driver(
         display_name=display_name,
+        display_name_key=name_key(display_name),
         token_hash=hash_token(token),
         client_secret=encrypt_secret(secret),
     )
     db.add(driver)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:   # the same name registered twice at the same moment
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, NAME_TAKEN_MESSAGE)
     db.refresh(driver)
     return DriverRegisterResponse(
         driver_id=driver.id,
@@ -187,21 +282,26 @@ def register_driver(
     )
 
 
-@router.post("/signup", response_model=LoginResponse)
+@router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_202_ACCEPTED)
 def signup(
     body: SignupRequest,
-    request: Request,
-    response: Response,
     x_registration_secret: Optional[str] = Header(None),
     db: Session = Depends(get_db),
     _rl: None = Depends(rate_limit("register")),
-) -> LoginResponse:
+) -> SignupResponse:
     """The website's sign-up form (V1.0): one step instead of register → copy token and secret →
     set email and password. Creates the account with email and password, records the accepted
-    terms (server/routers/legal.py TERMS_VERSION), sends the verification email and signs the
-    browser in (session cookie, like /login). The desktop client connects with the same email
-    and password (POST /accounts/desktop-login) — no token to copy."""
+    terms (server/routers/legal.py TERMS_VERSION) and sends the verification email. The desktop
+    client connects with the same email and password (POST /accounts/desktop-login) once the email
+    is confirmed.
+
+    V1.0.1: the answer is the same for a new address and for one that already has an account (that
+    mailbox gets "you already have an account" instead) — before, a 409 told anybody which addresses
+    are registered. The browser is no longer signed in here: confirm the email, then sign in.
+    A driver name that is taken (in its compared form, server/names.py) is still a 409 — names are
+    public anyway."""
     from .legal import TERMS_VERSION
+    from ..driver_lifecycle import prune_unverified_signups
 
     _check_signup_allowed(x_registration_secret)
     if not body.accept_terms:
@@ -211,9 +311,6 @@ def signup(
             status.HTTP_400_BAD_REQUEST,
             f"Garage16 accounts are only for people aged {settings.min_age} or older.",
         )
-    display_name = body.display_name.strip()
-    if not display_name:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "display_name must not be blank.")
     email = normalize_email(body.email)
     if not is_valid_email(email):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "That doesn't look like a valid email address.")
@@ -221,19 +318,25 @@ def signup(
         validate_password_strength(body.password)
     except ValueError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    # housekeeping first: an address whose earlier sign-up was never confirmed is free again
+    prune_unverified_signups(db, settings.unverified_account_days)
+    display_name = _clean_name(body.display_name, db)
+    # how many emails one address may be sent — before the account check, so it says nothing either
+    limit_key("email_to_address", email)
+
     if db.query(Driver).filter(Driver.email == email).one_or_none() is not None:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "That email address already has an account — sign in, or use \"Forgot password?\".",
-        )
+        _password_ok(None, body.password)          # the same work as hashing a new password
+        _send_already_registered_email(email)
+        return SignupResponse()
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     driver = Driver(
         display_name=display_name,
+        display_name_key=name_key(display_name),
         email=email,
         email_verified=False,
         password_hash=hash_password(body.password),
-        token_hash=hash_token(generate_token()),   # nobody sees it; the client gets its own at desktop-login
+        token_hash=hash_token(generate_token()),   # nobody sees it; each PC gets its own at desktop-login
         client_secret=encrypt_secret(generate_secret()),
         terms_accepted_at=now,
         terms_version=TERMS_VERSION,
@@ -241,15 +344,40 @@ def signup(
     db.add(driver)
     try:
         db.commit()
-    except IntegrityError:   # the same email signed up twice at the same moment
+    except IntegrityError:   # the same email or name signed up twice at the same moment
         db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "That email address already has an account.")
+        if db.query(Driver).filter(Driver.email == email).one_or_none() is not None:
+            return SignupResponse()
+        raise HTTPException(status.HTTP_409_CONFLICT, NAME_TAKEN_MESSAGE)
     db.refresh(driver)
     _send_verification_email(db, driver, email)
-    raw_session_token = create_session(db, driver, user_agent=request.headers.get("user-agent"))
     db.commit()
-    _set_session_cookie(response, raw_session_token)
-    return LoginResponse(driver_id=driver.id, display_name=driver.display_name)
+    return SignupResponse()
+
+
+def _desktop_refusal(code: str, message: str) -> HTTPException:
+    """409 with a code the 1.0.1 client understands; clients 1.0.0 show the status as a general
+    error (403 would make them say "account locked")."""
+    return HTTPException(status.HTTP_409_CONFLICT, {"code": code, "message": message})
+
+
+def _issue_device_token(db: Session, driver: Driver, name: Optional[str]) -> str:
+    """A new token for this PC (models.DeviceToken). More than LMU_GARAGE_MAX_DEVICES connected:
+    the PC used longest ago is disconnected."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    active = (db.query(DeviceToken)
+              .filter(DeviceToken.driver_id == driver.id, DeviceToken.revoked_at.is_(None))
+              .all())
+    active.sort(key=lambda d: (d.last_used_at or d.created_at or now))
+    while len(active) >= settings.max_devices:
+        oldest = active.pop(0)
+        oldest.revoked_at = now
+    cleaned = " ".join("".join(ch for ch in (name or "") if ch.isprintable()).split())[:80] or "PC"
+    token = generate_token()
+    db.add(DeviceToken(driver_id=driver.id, token_hash=hash_token(token), name=cleaned,
+                       created_at=now, last_used_at=now))
+    db.commit()
+    return token
 
 
 @router.post("/desktop-login", response_model=DesktopLoginResponse)
@@ -259,18 +387,38 @@ def desktop_login(
     db: Session = Depends(get_db),
     _rl: None = Depends(rate_limit("login")),
 ) -> DesktopLoginResponse:
-    """The desktop client's "Connect" with email + password (V1.0). Issues a NEW auth token —
-    the previous one stops working, so one PC is connected at a time (connecting a second PC
-    disconnects the first; it says so and offers "Reconnect account…") — and returns the
-    account's existing client secret, so laps already waiting on this PC still upload. Same
-    generic failure as /login (no hint which emails have accounts)."""
+    """The desktop client's "Connect" with email + password (V1.0). Returns a token for THIS PC and
+    the account's client secret, so laps already waiting on this PC still upload. Same generic
+    failure as /login (no hint which emails have accounts).
+
+    V1.0.1:
+      * one token per PC (models.DeviceToken) — connecting the laptop no longer disconnects the rig;
+      * only after the email was confirmed (LMU_GARAGE_REQUIRE_EMAIL_VERIFICATION) → 409
+        email_not_verified;
+      * the current terms must be accepted — the client's checkbox sends accept_terms → otherwise
+        409 terms_required;
+      * failed attempts are also counted per address, not only per IP (`_sign_in_checked`)."""
     email = normalize_email(body.email)
-    driver = db.query(Driver).filter(Driver.email == email).one_or_none()
-    if driver is None or driver.password_hash is None or not verify_password(body.password, driver.password_hash):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
+    driver = _sign_in_checked(db, email, body.password)
     if driver.is_locked:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This account has been locked.")
-    token = _issue_fresh_token(driver, db)
+    if settings.require_email_verification and not driver.email_verified:
+        raise _desktop_refusal(
+            "email_not_verified",
+            "Please confirm your email address first — open the link we emailed you (check the spam "
+            "folder). You can send a new link on the website under Account.",
+        )
+    if terms_required(driver):
+        if not body.accept_terms:
+            raise _desktop_refusal(
+                "terms_required",
+                "The terms of use and the privacy policy have changed. Please accept them (tick the box "
+                "in this window, or sign in on the website), then connect again.",
+            )
+        _record_terms(driver)
+        db.add(driver)
+        db.commit()
+    token = _issue_device_token(db, driver, body.device_name)
     response.headers["Cache-Control"] = "no-store"
     return DesktopLoginResponse(
         driver_id=driver.id,
@@ -278,6 +426,61 @@ def desktop_login(
         auth_token=token,
         client_secret=decrypt_secret(driver.client_secret),
     )
+
+
+@router.post("/accept-terms", response_model=WhoAmIOut)
+def accept_terms(
+    body: AcceptTermsRequest,
+    driver: Driver = Depends(get_current_driver),
+    db: Session = Depends(get_db),
+) -> WhoAmIOut:
+    """V1.0.1: accept the current terms of use and privacy policy — accounts from before V1.0, and
+    everybody after the texts changed (legal.py TERMS_VERSION). The website asks right after
+    signing in."""
+    if not body.accept_terms:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Please accept the terms of use and the privacy policy.")
+    if not body.confirm_min_age:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Garage16 accounts are only for people aged {settings.min_age} or older.")
+    _record_terms(driver)
+    db.add(driver)
+    db.commit()
+    return _whoami(driver)
+
+
+@router.get("/devices", response_model=List[DeviceOut])
+def list_devices(
+    request: Request,
+    driver: Driver = Depends(get_current_driver),
+    db: Session = Depends(get_db),
+) -> List[DeviceOut]:
+    """V1.0.1: the PCs connected with this account (desktop-login), newest use first."""
+    current = getattr(request.state, "device_token_id", None)
+    rows = (db.query(DeviceToken)
+            .filter(DeviceToken.driver_id == driver.id, DeviceToken.revoked_at.is_(None))
+            .all())
+    rows.sort(key=lambda d: (d.last_used_at or d.created_at or datetime.min), reverse=True)
+    return [DeviceOut(id=d.id, name=d.name, created_at=_iso(d.created_at), last_used_at=_iso(d.last_used_at),
+                      is_current=(d.id == current)) for d in rows]
+
+
+@router.delete("/devices/{device_id}", response_model=StatusResponse)
+def revoke_device(
+    device_id: int,
+    driver: Driver = Depends(get_current_driver),
+    db: Session = Depends(get_db),
+) -> StatusResponse:
+    """V1.0.1: disconnect one PC — its client says "Reconnect account…" at its next upload."""
+    device = (db.query(DeviceToken)
+              .filter(DeviceToken.id == device_id, DeviceToken.driver_id == driver.id)
+              .one_or_none())
+    if device is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found.")
+    if device.revoked_at is None:
+        device.revoked_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        db.add(device)
+        db.commit()
+    return StatusResponse(status="revoked")
 
 
 @router.post("/rotate-token", response_model=RotateTokenResponse)
@@ -310,6 +513,7 @@ def rotate_secret(
 
 @router.post("/revoke", status_code=status.HTTP_204_NO_CONTENT)
 def revoke_token(
+    request: Request,
     driver: Driver = Depends(get_current_driver),
     db: Session = Depends(get_db),
 ) -> None:
@@ -325,6 +529,15 @@ def revoke_token(
     WEB app by this, though: POST /accounts/login (V0.7.2) still works —
     it grants access via its own, fully independent session cookie (see
     server/sessions.py), never by reviving this token."""
+    device_id = getattr(request.state, "device_token_id", None)
+    if device_id is not None:
+        # V1.0.1: called with a PC's own token — that PC is disconnected, the others stay
+        device = db.query(DeviceToken).filter(DeviceToken.id == device_id).one_or_none()
+        if device is not None:
+            device.revoked_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            db.add(device)
+            db.commit()
+        return
     driver.token_revoked_at = datetime.now(timezone.utc)
     db.add(driver)
     db.commit()
@@ -416,6 +629,7 @@ def resend_verification_email(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "No email set on this account yet.")
     if driver.email_verified:
         return StatusResponse(status="already_verified")
+    limit_key("email_to_address", driver.email)
     _send_verification_email(db, driver, driver.email)
     db.commit()
     return StatusResponse()
@@ -484,16 +698,14 @@ def login(
     existing convention applied here too.
     """
     email = normalize_email(body.email)
-    driver = db.query(Driver).filter(Driver.email == email).one_or_none()
-    if driver is None or driver.password_hash is None or not verify_password(body.password, driver.password_hash):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
+    driver = _sign_in_checked(db, email, body.password)   # V1.0.1: failures also counted per address
     if driver.is_locked:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This account has been locked.")
 
     raw_session_token = create_session(db, driver, user_agent=request.headers.get("user-agent"))
     db.commit()
     _set_session_cookie(response, raw_session_token)
-    return LoginResponse(driver_id=driver.id, display_name=driver.display_name)
+    return _login_response(driver)
 
 
 def _set_session_cookie(response: Response, raw_session_token: str) -> None:
@@ -589,7 +801,7 @@ def activate_app_session(
     db.commit()  # last_used_at
     _set_session_cookie(response, body.session_token)
     response.headers["Cache-Control"] = "no-store"
-    return LoginResponse(driver_id=driver.id, display_name=driver.display_name)
+    return _login_response(driver)
 
 
 @router.post("/logout", response_model=StatusResponse)
@@ -723,6 +935,8 @@ def request_password_reset(
     let anyone probe which emails are registered. The actual email (if
     any) is sent as a side effect, not reflected in the response."""
     email = normalize_email(body.email)
+    # V1.0.1: per address too — for every address alike, so a 429 says nothing about an account
+    limit_key("email_to_address", email)
     driver = db.query(Driver).filter(Driver.email == email).one_or_none()
 
     if driver is not None and driver.password_hash is not None:
@@ -808,10 +1022,7 @@ def whoami(driver: Driver = Depends(get_current_driver)) -> WhoAmIOut:
     presented (desktop bearer token or web session cookie — see
     server/auth.py). See WhoAmIOut's docstring for why this needed to
     exist."""
-    return WhoAmIOut(
-        driver_id=driver.id, display_name=driver.display_name,
-        email=driver.email, email_verified=driver.email_verified,
-    )
+    return _whoami(driver)
 
 
 # --- Discord account link (V0.8.7) -------------------------------------
@@ -872,15 +1083,18 @@ def update_my_display_name(
     driver row at display time (leaderboards, profiles, teams, invitations,
     Discord announcements), so the new name appears everywhere at once — old
     laps and records are not rewritten because they never stored the name.
-    Names are not unique (as at registration); blank or whitespace-only names
-    are rejected."""
-    name = " ".join(body.display_name.split())  # trims and collapses inner whitespace
-    if not name:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "The name must not be blank.")
+    V1.0.1: names are unique in their compared form (server/names.py) — 409 if another driver
+    already uses it; changing only the capitalisation of your own name is allowed."""
+    name = _clean_name(body.display_name, db, except_driver_id=driver.id)
     driver.display_name = name
+    driver.display_name_key = name_key(name)
     db.add(driver)
-    db.commit()
-    return WhoAmIOut(driver_id=driver.id, display_name=driver.display_name, email=driver.email, email_verified=driver.email_verified)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, NAME_TAKEN_MESSAGE)
+    return _whoami(driver)
 
 
 @router.get("/me/export", response_model=AccountExport)
@@ -935,6 +1149,9 @@ def export_my_data(
         audit_events=audit_for_driver(db, driver.id),
         terms_accepted_at=_iso(driver.terms_accepted_at),
         terms_version=driver.terms_version,
+        devices=[{"name": d.name, "created_at": _iso(d.created_at), "last_used_at": _iso(d.last_used_at),
+                  "revoked_at": _iso(d.revoked_at)}
+                 for d in db.query(DeviceToken).filter(DeviceToken.driver_id == driver.id).order_by(DeviceToken.id)],
     )
 
 

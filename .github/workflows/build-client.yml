@@ -83,6 +83,12 @@ jobs:
           The `*-Portable.zip` files are the same apps without an installer (unzip, run Garage16.exe).
 
           From 1.0 on you connect the client with the **email and password of your Garage16 account** — no token to copy.
+          From 1.0.1 on several PCs (sim rig and laptop) stay connected at the same time, and the login is stored encrypted.
           Step-by-step guide: the "Setup guide" page of your Garage16 website (`#/setup`).
+
+          Windows may say "Windows protected your PC" — the installers are not code-signed yet: "More info" → "Run anyway".
+          Check a download: `SHA256SUMS.txt` lists the SHA-256 of every file (PowerShell: `Get-FileHash .\Garage16-Client-Setup.exe`).
           NOTES
-          gh release create "$TAG" files/*.exe files/*.zip --repo "$GITHUB_REPOSITORY" --title "Garage16 client ${TAG#client-v}" --notes-file notes.md
+          # V1.0.1: checksums of every file, attached to the release
+          (cd files && sha256sum *.exe *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          gh release create "$TAG" files/*.exe files/*.zip files/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --title "Garage16 client ${TAG#client-v}" --notes-file notes.md

@@ -87,6 +87,8 @@ async function request(path, { method = "GET", params, body, auth = false, admin
       detail = data.detail || detail;
       // FastAPI's validation errors are a list of {msg, ...}
       if (Array.isArray(detail)) detail = detail.map((d) => (d && d.msg) || String(d)).join("; ");
+      // V1.0.1: some answers are {code, message} (maintenance, desktop sign-in rules)
+      else if (detail && typeof detail === "object") detail = detail.message || detail.code || res.statusText;
     } catch {
       /* body wasn't JSON */
     }
@@ -147,8 +149,10 @@ export const api = {
     });
   },
 
-  // V1.0: the one-step sign-up form (name, email, password, terms, minimum age) — signs this
-  // browser in with a session cookie. registrationSecret only if the server is not open.
+  // V1.0: the one-step sign-up form (name, email, password, terms, minimum age).
+  // V1.0.1: answers {status: "check_email"} for every address (no hint whether it already had an
+  // account) and does NOT sign the browser in — confirm the email, then sign in.
+  // registrationSecret only if the server is not open.
   signup({ displayName, email, password, acceptTerms, confirmMinAge, registrationSecret }) {
     const headers = registrationSecret ? { "X-Registration-Secret": registrationSecret } : undefined;
     return request("/accounts/signup", {
@@ -156,6 +160,20 @@ export const api = {
       headers,
       body: { display_name: displayName, email, password, accept_terms: !!acceptTerms, confirm_min_age: !!confirmMinAge },
     });
+  },
+
+  // V1.0.1: accept the current terms (accounts from before V1.0, or after the texts changed)
+  acceptTerms() {
+    return request("/accounts/accept-terms", { method: "POST", auth: true, body: { accept_terms: true, confirm_min_age: true } });
+  },
+
+  // V1.0.1: the PCs connected with this account (desktop client), and disconnecting one
+  myDevices() {
+    return request("/accounts/devices", { auth: true });
+  },
+
+  revokeDevice(deviceId) {
+    return request(`/accounts/devices/${deviceId}`, { method: "DELETE", auth: true });
   },
 
   // V1.0: operator details, minimum age and registration mode for the legal pages

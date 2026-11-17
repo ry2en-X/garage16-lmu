@@ -2,8 +2,8 @@
 
 Auftrag: „Garage16-LMU V0.9.9 – Tracklimit-Validierung, Manipulationsschutz und Release-Qualität“.
 Gliederung nach Abschnitt 10 des Auftrags. Alle Zahlen stammen aus tatsächlich gelaufenen Befehlen;
-Befehle, Rohergebnisse und behobene Fehler stehen in `docs/V0_9_9_PROTOKOLL.md`. Was nur auf dem NAS
-und in LMU geprüft werden kann, steht in `docs/V0_9_9_NAS_ANLEITUNG.md` und ist unten als **offen**
+Befehle, Rohergebnisse und behobene Fehler stehen in `docs/archive/V0_9_9_PROTOKOLL.md`. Was nur auf dem NAS
+und in LMU geprüft werden kann, steht in `docs/NAS_MESSUNGEN.md` und ist unten als **offen**
 markiert — nichts davon ist als bestanden ausgewiesen.
 
 ## 1. Geänderte und neue Dateien (gegenüber dem V0.9.8-Archiv)
@@ -12,13 +12,13 @@ markiert — nichts davon ist als bestanden ausgewiesen.
 `alembic/versions/0017_integrity_audit.py` ·
 `server/lap_decision.py`, `server/integrity.py`, `server/audit.py`, `server/official.py`, `server/request_context.py` ·
 `scripts/integrity_check.py`, `scripts/trackcheck_eval.py`, `scripts/bench_compare.py`, `scripts/bench_server.py` ·
-`docs/V0_9_9_BESTANDSAUFNAHME.md`, `docs/V0_9_9_PROTOKOLL.md`, `docs/V0_9_9_NAS_ANLEITUNG.md`,
-`docs/V0_9_9_ABSCHLUSSBERICHT.md`, `docs/trackcheck_labels_vorlage.csv`, `docs/bench_v099/` (8 Messdateien) ·
+`docs/archive/V0_9_9_BESTANDSAUFNAHME.md`, `docs/archive/V0_9_9_PROTOKOLL.md`, `docs/NAS_MESSUNGEN.md`,
+`docs/archive/V0_9_9_ABSCHLUSSBERICHT.md`, `docs/trackcheck_labels_vorlage.csv`, `docs/archive/bench_v099/` (8 Messdateien) ·
 `tests/helpers/lapfile.py`, `tests/helpers/trackcheck.py`, `tests/helpers/trackcheck_cases.py`,
 `tests/reference/trackcheck_metrics.json`, `tests/js/v099.test.mjs`,
 `tests/test_v099_trackcheck_reference.py`, `tests/test_v099_decision.py`, `tests/test_v099_decision_units.py`,
 `tests/test_v099_integrity.py`, `tests/test_v099_integrity_units.py`, `tests/test_v099_mutation_keys.py`,
-`tests/test_v099_docs.py` · V0.9.9.1: `tests/test_v0991_audit_anchor.py`, `docs/mutation_v0991/` (2 Mutationslogs).
+`tests/test_v099_docs.py` · V0.9.9.1: `tests/test_v0991_audit_anchor.py`, `docs/archive/mutation_v0991/` (2 Mutationslogs).
 
 **Geändert (85, davon `scripts/restore.sh` neu im V0.9.9.1-Audit):**
 - Server: `server/lap_check.py`, `track_limits.py`, `models.py`, `records.py`, `leaderboard_ranking.py`,
@@ -125,7 +125,7 @@ Untergrenze gesenkt. Alle Module des Gates: `release/TEST_REPORT.md` im Archiv.
 
 Endlauf `python -m scripts.mutation_check` (alle 12 Ziele) auf dem Code, der im Archiv liegt:
 **371 Mutanten erzeugt, 28 als gleichwertig übersprungen (je ein Schlüssel mit Begründung in
-`scripts/mutation_check.py`), 343 getestet — 343 getötet, 0 überlebt.** Log: `docs/mutation_v0991/`.
+`scripts/mutation_check.py`), 343 getestet — 343 getötet, 0 überlebt.** Log: `docs/archive/mutation_v0991/`.
 
 Korrektur gegenüber dem ersten V0.9.9-Bericht („342 Mutanten, 340 getötet, 27 gleichwertig“): Diese
 Zahlen stammten aus einem Lauf vor den letzten Testergänzungen; außerdem übersprangen 27 Schlüssel
@@ -151,7 +151,7 @@ mit dokumentierter Erwartung, exakte Grenzwerte, Hypothesis-Eigenschaften.
 ## 9. Performance gegenüber V0.9.8
 
 Gleiche Maschine (2 vCPU), gleiche erzeugte Daten, je zwei Läufe, SQLite und PostgreSQL (Protokoll
-Abschnitt 9, Rohdaten `docs/bench_v099/`): erster Analyse-Zugriff +6–7 ms (sha256-Prüfung,
+Abschnitt 9, Rohdaten `docs/archive/bench_v099/`): erster Analyse-Zugriff +6–7 ms (sha256-Prüfung,
 gewollt), wiederholt gleich; Upload ≈ +5 ms im Median (≈ +10 %, 4–5 zusätzliche SQL-Anweisungen),
 parallel kein Unterschied, Speicher unverändert, DB ≈ +5,5 KB je Runde inkl. Audit.
 **Offen: Messung auf dem NAS** (Teil A vor, Teil E nach dem Update).
@@ -198,7 +198,7 @@ Checkliste aus Abschnitt 9 des Auftrags:
 
 | Punkt | Stand |
 |---|---|
-| Bestandsaufnahme | erfüllt (`docs/V0_9_9_BESTANDSAUFNAHME.md`) |
+| Bestandsaufnahme | erfüllt (`docs/archive/V0_9_9_BESTANDSAUFNAHME.md`) |
 | alle vorhandenen Tests ausgeführt, dokumentiert | erfüllt (Protokoll 1, 10) |
 | keine neu verursachten Testfehler | erfüllt (0 fehlgeschlagen; ein vorbestehender Zufallsfehler gefunden und behoben) |
 | Referenzfälle gültig / ungültig / unklar | erfüllt (52 kuratierte + 480 Raster-Fälle) |

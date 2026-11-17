@@ -14,6 +14,7 @@ import { store } from "../state.js";
 import { renderActivityList } from "../activity.js";
 import { el, formatLapTime, formatDate } from "../format.js";
 import { renderSignInPrompt } from "./auth.js";
+import { loadTrackNames, trackLabel } from "../tracks.js";
 
 import { t, tp } from "../i18n.js";
 
@@ -38,6 +39,7 @@ export async function renderDashboard(container) {
     session.driverId != null ? api.driverProfile(session.driverId).catch((err) => ({ error: err })) : Promise.resolve(null),
     api.myTeams().catch(() => []),
     api.myLaps({ limit: LAPS_LIMIT }).catch((err) => ({ error: err })),
+    loadTrackNames(),   // V1.0.1: the same track names as the leaderboard (tracks.js)
   ]);
 
   renderQuickActions(actions, Array.isArray(laps) ? laps : []);
@@ -57,7 +59,7 @@ function renderQuickActions(host, laps) {
     el("strong", {}, title), el("span", {}, hint),
   ]);
   host.appendChild(last
-    ? action(`#/analysis?a=${last.id}`, t("Analyse last lap"), `${last.track_name} · ${formatLapTime(last.lap_time)}`, true)
+    ? action(`#/analysis?a=${last.id}`, t("Analyse last lap"), `${trackLabel(last.track_name)} · ${formatLapTime(last.lap_time)}`, true)
     : action("#/download", t("Record your first lap"), t("Install the desktop client and drive"), true));
   host.appendChild(action(`#/analysis?quick=wr${last ? `&track=${encodeURIComponent(last.track_name)}` : ""}`, t("You vs. Garage16 Best"), t("Your best lap against the fastest one")));
   host.appendChild(action("#/stints", t("Stint Analyzer"), t("Whole sessions: pace, tyres, fuel")));
@@ -69,34 +71,39 @@ async function renderCockpit(container, profile, teams) {
   const grid = el("div", { class: "dash-grid" });
   container.appendChild(grid);
 
-  // --- Your Best: fastest valid lap per track, across every car
-  const bestCol = el("section", { class: "dash-grid__col" }, [el("h2", {}, t("Your Best"))]);
+  // --- Your Best: your fastest valid lap per track AND class, each against that class's
+  // Garage16 Best (V1.0.1 — before: one row per track across every car, so a GT3 lap was hidden
+  // behind your Hypercar lap and "vs. Garage16 Best" compared with the overall fastest car).
+  // V1.0.1: a table over the full width; the team block follows below it.
+  const bestCol = el("section", { class: "dash-grid__col dash-grid__col--wide" }, [el("h2", {}, t("Your Best"))]);
   grid.appendChild(bestCol);
-  const bestPerTrack = new Map();
-  for (const r of profile.personal_records) {
-    const current = bestPerTrack.get(r.track_name);
-    if (!current || r.lap_time < current.lap_time) bestPerTrack.set(r.track_name, r);
-  }
-  if (bestPerTrack.size === 0) {
+  const rows = bestPerTrackAndClass(profile.personal_records);
+  if (rows.length === 0) {
     bestCol.appendChild(el("div", { class: "empty-state" }, t("No valid laps yet — once your recorder client uploads one, it'll show up here.")));
   } else {
-    const card = el("div", { class: "card" });
-    [...bestPerTrack.values()]
-      .sort((a, b) => a.track_name.localeCompare(b.track_name))
-      .forEach((r) => {
-        card.appendChild(el("div", { class: "card-row" }, [
-          el("div", {}, [el("div", {}, r.track_name), el("div", { class: "subtitle", style: "margin:2px 0 0;" }, r.car_model || r.car_name)]),
-          el("div", { style: "text-align:right;" }, [
-            el("span", { class: "lap-time" }, formatLapTime(r.lap_time)),
-            el("div", {}, el("a", { class: "small-link", href: `#/analysis?quick=wr&track=${encodeURIComponent(r.track_name)}` }, t("vs. Garage16 Best →"))),
-          ]),
-        ]));
-      });
-    bestCol.appendChild(card);
+    bestCol.appendChild(el("p", { class: "subtitle" }, t("One row per track and class — each class has its own Garage16 Best.")));
+    let previousTrack = null;
+    const body = rows.map((r) => {
+      const sameTrack = r.track_name === previousTrack;
+      previousTrack = r.track_name;
+      return el("tr", { class: sameTrack ? "best-table__more" : "" }, [
+        el("td", {}, sameTrack ? "" : trackLabel(r.track_name)),
+        el("td", {}, r.car_class ? el("span", { class: "tag tag--basic" }, r.car_class) : "—"),
+        el("td", { title: r.car_name }, r.car_model || r.car_name),
+        el("td", {}, el("span", { class: "lap-time" }, formatLapTime(r.lap_time))),
+        el("td", {}, classBestCell(r)),
+        el("td", { class: "best-table__when" }, formatDate(r.set_at)),
+        el("td", { class: "best-table__link" }, el("a", { class: "small-link", href: compareHref(r) }, t("vs. Garage16 Best →"))),
+      ]);
+    });
+    bestCol.appendChild(el("div", { class: "table-scroll" }, el("table", { class: "timing-table best-table" }, [
+      el("thead", {}, el("tr", {}, [t("Track"), t("Class"), t("Car"), t("Your time"), t("Garage16 Best"), t("Set"), ""].map((h) => el("th", {}, h)))),
+      el("tbody", {}, body),
+    ])));
   }
 
   // --- Your Team(s): records held + closest gap to one you don't hold (records in parallel)
-  const teamCol = el("section", { class: "dash-grid__col" }, [el("h2", {}, t("Your Team"))]);
+  const teamCol = el("section", { class: "dash-grid__col dash-grid__col--wide" }, [el("h2", {}, t("Your Team"))]);
   grid.appendChild(teamCol);
   if (!teams.length) {
     teamCol.appendChild(el("div", { class: "empty-state" }, [t("You are not in a team yet. "), el("a", { href: "#/teams" }, t("Create or join one →"))]));
@@ -114,7 +121,7 @@ async function renderCockpit(container, profile, teams) {
       ]));
       if (closest) {
         teamsCard.appendChild(el("div", { class: "subtitle", style: "margin:2px 0 12px;" }, [
-          t("Closest to a record: {0} — {1} ", [closest.track_name, closest.car_model]),
+          t("Closest to a record: {0} — {1} ", [trackLabel(closest.track_name), closest.car_model]),
           el("span", { class: "lap-time" }, `+${closest.gap.toFixed(3)}`),
           t(" (held by {0})", [closest.driver_name]),
         ]));
@@ -131,10 +138,10 @@ async function renderCockpit(container, profile, teams) {
 // ---------------------------------------------------------------- 4. all laps
 
 function renderLapsBrowser(container, laps) {
-  const tracks = [...new Set(laps.map((l) => l.track_name))].sort((a, b) => a.localeCompare(b));
+  const tracks = [...new Set(laps.map((l) => l.track_name))].sort((a, b) => trackLabel(a).localeCompare(trackLabel(b)));
   const trackSelect = el("select", { id: "fTrack", "aria-label": t("Track") }, [
     el("option", { value: "" }, t("All tracks")),
-    ...tracks.map((name) => el("option", { value: name }, name)),
+    ...tracks.map((name) => el("option", { value: name }, trackLabel(name))),
   ]);
   const validOnly = el("input", { type: "checkbox", id: "fValid" });
   const count = el("span", { class: "subtitle laps-filter__count" });
@@ -163,7 +170,7 @@ function renderLapsTable(laps) {
 
   const rows = laps.map((lap) =>
     el("tr", {}, [
-      el("td", {}, lap.track_name),
+      el("td", {}, trackLabel(lap.track_name)),
       el("td", { title: lap.car_name }, lap.car_model || lap.car_name),
       el("td", {}, `#${lap.lap_number}`),
       el("td", {}, el("span", { class: "lap-time" }, formatLapTime(lap.lap_time))),
@@ -207,4 +214,46 @@ function renderLapsTable(laps) {
       t("Laps tagged \"basic data\" were recorded with a Garage16 client older than 0.9.0. They still count for the leaderboard and can be analysed, but contain fewer channels (no suspension, tyre forces, G-forces or TC/ABS). Update the client and drive again to get the full data.")),
     table,
   ]);
+}
+
+
+// Order of the classes in the UI — the same as the leaderboard (server/catalog.py CLASSES).
+const CLASS_ORDER = ["Hypercar", "LMP2 WEC", "LMP2 ELMS", "LMP2", "LMP3", "GTE", "GT3"];
+const classRank = (name) => {
+  const i = CLASS_ORDER.indexOf(name);
+  return i === -1 ? CLASS_ORDER.length : i;
+};
+
+// Your personal records are per (track, car model); "Your Best" keeps the fastest per
+// (track, class), sorted by track name, then class (Hypercar first).
+export function bestPerTrackAndClass(records) {
+  const best = new Map();
+  for (const r of records || []) {
+    const key = `${r.track_name}\u0000${r.car_class || ""}`;
+    const current = best.get(key);
+    if (!current || r.lap_time < current.lap_time) best.set(key, r);
+  }
+  return [...best.values()].sort((a, b) =>
+    trackLabel(a.track_name).localeCompare(trackLabel(b.track_name))
+    || classRank(a.car_class) - classRank(b.car_class)
+    || String(a.car_class || "").localeCompare(String(b.car_class || "")));
+}
+
+// The class's Garage16 Best: "Record" when it is yours, otherwise the gap and who holds it.
+function classBestCell(r) {
+  if (r.class_best_time == null) return "—";
+  const gap = r.lap_time - r.class_best_time;
+  if (gap <= 0.0005) return el("span", { class: "tag tag--valid" }, t("Your record"));
+  return el("span", { title: r.class_best_driver_name ? `${formatLapTime(r.class_best_time)} · ${r.class_best_driver_name}` : formatLapTime(r.class_best_time) }, [
+    el("span", { class: "lap-time" }, formatLapTime(r.class_best_time)),
+    el("span", { class: "best-table__gap" }, ` +${gap.toFixed(3)}`),
+  ]);
+}
+
+// "vs. Garage16 Best" for exactly this row: your best lap in this car model, against the fastest
+// lap of the same class on this track (scope=class).
+function compareHref(r) {
+  const params = new URLSearchParams({ quick: "wr", track: r.track_name, scope: "class" });
+  if (r.car_model) params.set("model", r.car_model);
+  return `#/analysis?${params.toString()}`;
 }

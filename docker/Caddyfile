@@ -85,6 +85,17 @@
     handle {
         root * /srv/web
         header Cache-Control "no-cache"
+        # V1.0.1: the security headers of the web pages (the API sets its own, server/main.py).
+        # The pages load nothing from other hosts and have no inline scripts, so the policy can be
+        # strict: no foreign scripts, no embedding in other sites (clickjacking of the sign-in and
+        # password forms), no MIME sniffing. Inline style attributes stay allowed (index.html, charts).
+        header {
+            Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+            X-Content-Type-Options "nosniff"
+            X-Frame-Options "DENY"
+            Referrer-Policy "strict-origin-when-cross-origin"
+            Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+        }
         try_files {path} /index.html
         file_server
     }

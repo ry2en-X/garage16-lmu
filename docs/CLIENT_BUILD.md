@@ -1,11 +1,19 @@
 # Client-Paket bauen und verteilen (für den Admin)
 
-> **Ab V1.0:** Das Repository ist öffentlich, ein Tag `client-vX.Y.Z` baut beide Installer und legt
-> das Release an — die Download-Knöpfe der Website zeigen ohne `.env`-Eintrag automatisch auf das
-> neueste Release (`…/releases/latest/download/Garage16-Client-Setup.exe`). Schritt für Schritt:
-> `docs/ADMIN_GUIDE.md`, „Neu in V1.0“, Teil B. Der Client meldet sich mit E-Mail und Passwort an.
+> **Stand V1.0.1:** Ein Tag `client-vX.Y.Z` baut beide Installer und legt das Release an — mit
+> `SHA256SUMS.txt` (Prüfsummen aller Dateien). Die Download-Knöpfe der Website zeigen ohne
+> `.env`-Eintrag automatisch auf das neueste Release (`…/releases/latest/download/Garage16-Client-Setup.exe`).
+> Schritt für Schritt: `docs/ADMIN_GUIDE.md`, Kapitel 11. Der Client meldet sich mit E-Mail und
+> Passwort an (ab 1.0.1 mit einem eigenen Token je PC, unter Windows verschlüsselt gespeichert).
 > Die Variable `GARAGE16_SERVER_URL` muss auf die Adresse zeigen, unter der der Server wirklich
-> erreichbar ist — solange garage16.de noch auf den Webspace zeigt, die Tunnel-Adresse.
+> erreichbar ist — solange garage16.de noch auf den Webspace zeigt, die Tunnel-Adresse
+> (`https://garage16.de` ist nur der Standard, wenn die Variable fehlt).
+>
+> **Nicht signiert:** Die `.exe`-Dateien tragen keine Code-Signatur — Windows SmartScreen warnt
+> („Weitere Informationen → Trotzdem ausführen“). Eine Signatur bräuchte ein Code-Signing-Zertifikat
+> (kostenpflichtig, oft mit Identitätsprüfung) und wäre ein eigener Schritt im Workflow. Bis dahin
+> kann jeder den Download gegen `SHA256SUMS.txt` prüfen (PowerShell:
+> `Get-FileHash .\Garage16-Client-Setup.exe`).
 
 > **Ab V0.9.2 in zwei Varianten** (gleicher Code, gleiche App):
 >
@@ -27,14 +35,9 @@ So entsteht die App, die deine Freunde ohne Python und ohne Terminal
 installieren: `Garage16-Client-Setup.exe`. Gebaut wird **einmal von dir**,
 danach reicht es, die Datei zu verteilen.
 
-> **Ehrlicher Stand (V0.8.6):** Alles hier ist geschrieben und statisch
-> getestet. Ein **Linux**-Build der gleichen Konfiguration wurde real
-> gebaut und ausgeführt (Version, eingebackene Server-Adresse, HTTPS-
-> Serverumzug). Ein **Windows-.exe** und der **Installer** wurden noch nie
-> gebaut — PyInstaller kann nur für das Betriebssystem bauen, auf dem es
-> läuft. Der erste echte Lauf passiert bei dir. Bau ihn und probiere die
-> Installation an einem Windows-PC aus, bevor du ihn verteilst (Checkliste
-> unten).
+> **Stand:** Die Windows-Pakete werden seit V0.9.2 von GitHub Actions gebaut und laufen bei den
+> Beta-Fahrern. Nach Änderungen an `packaging/` trotzdem einmal auf einem echten Windows-PC
+> installieren (Checkliste unten), bevor du einen Tag setzt.
 
 ## Variante A — GitHub baut es für dich (kein Windows-PC nötig)
 
@@ -100,7 +103,7 @@ Danach den Server neu starten (`docker compose up -d server`).
 ## Serverumzug später
 
 Nichts neu zu bauen: laufende Clients folgen einem angekündigten Umzug
-selbst (README, "Moving the server later"). Nur wenn ein Client zu alt für
+selbst (`docs/DEPLOYMENT.md`, "Moving the server later"). Nur wenn ein Client zu alt für
 den neuen Server ist, braucht er das Update wie oben.
 
 ## Bekannte Eigenheiten — vorher lesen

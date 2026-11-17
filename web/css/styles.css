@@ -1075,3 +1075,50 @@ select, input, textarea { max-width: 100%; }
 .site-footer span { flex: 1 1 100%; }
 /* the hidden attribute wins over component display rules (e.g. the sign-up form's secret field) */
 [hidden] { display: none !important; }
+
+/* V1.0.1 — the terms dialog (terms_gate.js) uses the language popup's frame, left-aligned text */
+.terms-popup { text-align: left; width: min(520px, 100%); }
+.terms-popup .check-row { margin: 10px 0; }
+.terms-popup .lang-popup__buttons { justify-content: flex-start; margin-top: 16px; }
+
+/* ---------- V1.0.1: landing page ---------- */
+.hero__title { font-size: 2.4em; margin-bottom: 4px; }
+.hero__claim { font-size: 1.2em; margin-bottom: 12px; }
+.hero__lead { max-width: 62ch; color: var(--text); margin: 0 0 4px; line-height: 1.6; }
+.hero__actions { margin-top: 16px; }
+.features { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.feature { background: var(--panel); border: 1px solid var(--hairline); padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+.feature__art { width: 100%; height: auto; display: block; background: var(--asphalt); border: 1px solid var(--hairline); }
+.feature__title { font-family: var(--font-display); font-weight: 500; font-size: 16px; letter-spacing: 0.02em; }
+.feature__body { margin: 0; font-size: 13px; line-height: 1.55; }
+.features__more { margin-top: 12px; }
+.empty-state--loading { border-style: solid; }
+
+/* ---------- V1.0.1: the menu on short windows (laptops, browser not full screen) ---------- */
+@media (min-width: 861px) and (max-height: 760px) {
+  .pitwall { padding: 18px 16px; }
+  .pitwall__brand { margin-bottom: 16px; }
+  .pitwall__links { gap: 10px; }
+  .pitwall__links a { padding: 6px 12px; font-size: 14px; }
+  .nav-group__label { padding-bottom: 2px; }
+  .nav-group--foot { padding-top: 8px; }
+  .nav-group--foot a { padding: 4px 12px; font-size: 13px; }
+  .pitwall__lang { padding: 6px 0; }
+  .pitwall__status { padding-top: 10px; }
+}
+/* very short windows: the whole menu scrolls as one, nothing hides behind an inner scroll bar */
+@media (min-width: 861px) and (max-height: 600px) {
+  .pitwall { overflow-y: auto; }
+  .pitwall__links { flex: 1 0 auto; overflow: visible; }
+}
+/* V1.0.1: "Your Best" as a table over both columns */
+.dash-grid__col--wide { grid-column: 1 / -1; }
+.best-table { width: 100%; }
+.best-table__link { text-align: right; white-space: nowrap; }
+.best-table__when { color: var(--text-muted); }
+/* V1.0.1: further classes of the same track — no repeated track name, a lighter divider */
+.best-table__more td { border-top-color: transparent; }
+.best-table__gap { color: var(--text-muted); white-space: nowrap; }
+@media (max-width: 640px) {
+  .feature__art { height: 96px; }
+}

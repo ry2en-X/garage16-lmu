@@ -9,6 +9,7 @@ import { el, formatLapTime, formatDate, inviteStatusLabel, roleLabel } from "../
 import { renderSignInPrompt } from "./auth.js";
 
 import { t, tp } from "../i18n.js";
+import { loadTrackNames, trackLabel } from "../tracks.js";
 export async function renderTeamDetail(container, teamId) {
   if (!store.isSignedIn()) {
     renderSignInPrompt(container, t("Sign in to view this team."));
@@ -18,7 +19,7 @@ export async function renderTeamDetail(container, teamId) {
   const myDriverId = store.getSession()?.driverId;
   let detail, members;
   try {
-    [detail, members] = await Promise.all([api.teamDetail(teamId), api.teamMembers(teamId)]);
+    [detail, members] = await Promise.all([api.teamDetail(teamId), api.teamMembers(teamId), loadTrackNames()]);
   } catch (err) {
     container.appendChild(el("div", { class: "notice notice--error" }, err.message));
     return;
@@ -386,7 +387,7 @@ async function renderTeamRecords(teamId) {
         youCell = el("span", { class: "subtitle" }, t("no lap yet"));
       }
       return el("tr", {}, [
-        el("td", {}, r.track_name),
+        el("td", {}, trackLabel(r.track_name)),
         el("td", {}, r.car_class || "—"),
         el("td", {}, r.car_model),
         el("td", {}, formatLapTime(r.lap_time)),

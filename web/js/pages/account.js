@@ -31,6 +31,9 @@ export async function renderAccount(container) {
     ]),
   ]);
   container.appendChild(profileCard);
+  // V1.0.1: an unconfirmed email blocks connecting the desktop client — say so at the top
+  const verifyBanner = el("div");
+  container.appendChild(verifyBanner);
   const main = el("div");          // name, e-mail & password, Discord
   container.appendChild(main);
   const advanced = el("details", { class: "fold", id: "accountAdvanced" }, [el("summary", {}, t("Desktop client & sign-ins"))]);
@@ -41,6 +44,52 @@ export async function renderAccount(container) {
   // --- discord link (V0.8.7: status, one-time link code, unlink) ---
   const discordCard = el("div", { class: "card" });
   await renderDiscordCard(discordCard);
+
+  // --- connected PCs (V1.0.1): one token per PC, the desktop client signs in with email+password ---
+  const devicesCard = el("div", { class: "card", id: "devicesCard" });
+  devicesCard.appendChild(el("h2", {}, t("Connected PCs")));
+  devicesCard.appendChild(el("p", { class: "subtitle" },
+    t("Every PC on which you connected the Garage16 desktop client with your email and password. Disconnect a PC you no longer use — it then shows \"Reconnect account…\".")));
+  const devicesBox = el("div");
+  devicesCard.appendChild(devicesBox);
+  async function loadDevices() {
+    devicesBox.innerHTML = "";
+    let devices;
+    try {
+      devices = await api.myDevices();
+    } catch (err) {
+      devicesBox.appendChild(el("div", { class: "notice notice--error" }, err.message));
+      return;
+    }
+    if (!devices.length) {
+      devicesBox.appendChild(el("div", { class: "empty-state" }, t("No PC connected with email and password yet.")));
+      return;
+    }
+    const when = (iso) => (iso ? new Date(iso).toLocaleString(locale()) : "—");
+    devices.forEach((d) => {
+      const btn = el("button", { class: "btn btn--ghost", "data-device": String(d.id) }, t("Disconnect"));
+      btn.addEventListener("click", async () => {
+        if (!window.confirm(t("Disconnect \"{0}\"? Its Garage16 client stops uploading until you sign in there again.", [d.name]))) return;
+        btn.disabled = true;
+        try {
+          await api.revokeDevice(d.id);
+          await loadDevices();
+        } catch (err) {
+          devicesBox.appendChild(el("div", { class: "notice notice--error" }, err.message));
+          btn.disabled = false;
+        }
+      });
+      devicesBox.appendChild(el("div", { class: "card-row" }, [
+        el("div", {}, [
+          el("strong", {}, d.name),
+          el("div", { class: "subtitle", style: "margin:2px 0 0;" }, t("Connected {0} · last used {1}", [when(d.created_at), when(d.last_used_at)])),
+        ]),
+        btn,
+      ]));
+    });
+  }
+  advanced.appendChild(devicesCard);
+  await loadDevices();
 
   // --- security: rotate / revoke credentials ---
   const securityCard = el("div", { class: "card" });
@@ -252,6 +301,11 @@ export async function renderAccount(container) {
       return; // not fatal — the form below still works without this
     }
     if (!who.email) return; // nothing to show yet
+    verifyBanner.innerHTML = "";
+    if (!who.email_verified) {
+      verifyBanner.appendChild(el("div", { class: "notice notice--basic", id: "verifyBanner" },
+        t("Please confirm your email address — open the link we sent to {0}. The desktop client connects only after that. You can send the link again below.", [who.email])));
+    }
     const row = el("div", { class: "card-row" }, [
       el("span", {}, who.email),
       el("span", { class: `tag ${who.email_verified ? "tag--valid" : "tag--invalid"}` }, who.email_verified ? t("verified") : t("not verified")),

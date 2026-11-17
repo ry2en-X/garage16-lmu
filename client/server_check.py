@@ -17,7 +17,7 @@ from typing import List, Optional
 from client.config import ClientConfig
 from client.migration import HEALTH_CHECK_TIMEOUT_SECONDS, apply_migration_if_safe, check_for_migration
 from client.edition import download_url_for_this_edition
-from client.update_notice import format_update_required_message, is_safe_download_url
+from client.update_notice import format_update_available_message, format_update_required_message, is_safe_download_url
 
 logger = logging.getLogger("lmu_garage.server_check")
 
@@ -34,6 +34,7 @@ class ServerCheckResult:
     config: ClientConfig
     reachable: bool
     update_required: bool = False
+    update_available: bool = False   # V1.0.1: optional update, the client keeps working
     # Text for the persistent GUI banner: "" = nothing to show (clears
     # any previous banner), otherwise the message.
     notice: str = ""
@@ -85,12 +86,25 @@ def run_server_check(
         log_lines.append(msg)
         notice_parts.insert(0, msg)
 
+    # V1.0.1: an optional update — the server names the newest client (latest_client_version)
+    if "update_available" in body:
+        update_available = bool(body["update_available"])
+    else:
+        latest = body.get("latest_client_version")
+        update_available = bool(latest) and _version_tuple(client_version) < _version_tuple(str(latest))
+    update_available = update_available and not update_required
+    if update_available:
+        msg = format_update_available_message(body.get("latest_client_version"), download_url)
+        log_lines.append(msg)
+        notice_parts.append(msg)
+
     return ServerCheckResult(
         config=migration.config,
         reachable=True,
         update_required=update_required,
+        update_available=update_available,
         notice=" ".join(notice_parts),
-        notice_url=download_url if update_required and is_safe_download_url(download_url) else None,
+        notice_url=download_url if (update_required or update_available) and is_safe_download_url(download_url) else None,
         log_lines=log_lines,
         migrated=migration.migrated,
     )

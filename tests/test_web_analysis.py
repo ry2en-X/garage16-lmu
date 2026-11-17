@@ -13,6 +13,8 @@
                                              English and on a first visit (language popup); jsdom
   * tests/js/desktop_app.test.mjs          — V0.9.2: sign-in inside the desktop app's analysis window
   * tests/js/v100.test.mjs                — V1.0: legal pages, sign-up form, setup guide, downloads
+  * tests/js/v101.test.mjs                — V1.0.1: terms dialog, connected PCs, email banner, page titles
+  * tests/js/v101_web.test.mjs            — V1.0.1: landing page, leaderboard, track names, "Your Best"
   * tests/js/v093_analysis.test.mjs        — V0.9.3: coaching, events, histograms, tyres, track-map
                                              markers, the sessions page and the theoretical best
                                              (app_bridge.js) and the download page; jsdom
@@ -133,4 +135,25 @@ def test_v100_legal_pages_sign_up_setup_guide_and_downloads(lang):
     languages), the one-step sign-up form, the setup guide and the download page's next step."""
     result = _run("v100.test.mjs", lang)
     assert f"V100-{lang.upper()}-OK" in result.stdout, result.stdout + result.stderr
+    assert "Error" not in result.stderr, result.stderr
+
+
+@needs_jsdom
+@pytest.mark.parametrize("lang", ["en", "de"])
+def test_v101_terms_dialog_connected_pcs_and_titles(lang):
+    """V1.0.1: the terms dialog after signing in, the Connected PCs card (disconnect), the
+    confirm-your-email banner, page titles, {code, message} errors shown as text."""
+    result = _run("v101.test.mjs", lang)
+    assert f"V101-{lang.upper()}-OK" in result.stdout, result.stdout + result.stderr
+    assert "Error" not in result.stderr, result.stderr
+
+
+@needs_jsdom
+@pytest.mark.parametrize("lang", ["en", "de"])
+def test_v101_website_pass(lang):
+    """V1.0.1 (website pass): landing page with features and sessions, leaderboard loading notice,
+    tracks/classes without laps grouped at the end, column headings, one track name everywhere,
+    "Your Best" as a table."""
+    result = _run("v101_web.test.mjs", lang)
+    assert f"V101-WEB-{lang.upper()}-OK" in result.stdout, result.stdout + result.stderr
     assert "Error" not in result.stderr, result.stderr

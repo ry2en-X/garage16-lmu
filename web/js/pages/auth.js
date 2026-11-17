@@ -45,7 +45,9 @@ function renderLoginCard() {
       const res = await api.login(email, password);
       store.setSession({ driverId: res.driver_id, displayName: res.display_name, viaCookie: true });
       out.appendChild(el("div", { class: "notice notice--success" }, t("Signed in.")));
-      window.location.hash = "#/dashboard";
+      // V1.0.1: an unconfirmed email goes to the account page (where the link can be sent again);
+      // the terms dialog (terms_gate.js) opens by itself when the terms must be accepted
+      window.location.hash = res.email_verified === false ? "#/account" : "#/dashboard";
     } catch (err) {
       out.appendChild(el("div", { class: "notice notice--error" }, err instanceof ApiError ? err.message : t("Sign-in failed.")));
     } finally {
@@ -208,12 +210,19 @@ function renderSignupCard() {
     if (!termsBox.querySelector("input").checked) return problem(t("Please accept the terms of use and the privacy policy."));
     button.disabled = true;
     try {
-      const res = await api.signup({
+      await api.signup({
         displayName, email, password, acceptTerms: true, confirmMinAge: true,
         registrationSecret: secretField.hidden ? undefined : value(secretField).trim() || undefined,
       });
-      store.setSession({ driverId: res.driver_id, displayName: res.display_name, viaCookie: true });
-      window.location.hash = "#/setup?welcome=1";
+      // V1.0.1: not signed in yet — the email has to be confirmed first (the same answer comes for
+      // an address that already has an account; that mailbox gets a note instead of a link)
+      card.innerHTML = "";
+      card.appendChild(el("h2", {}, t("Almost done — check your email")));
+      card.appendChild(el("div", { class: "notice notice--success" },
+        t("We sent a confirmation link to {0}. Open it (check the spam folder too), then sign in above with your email and password.", [email])));
+      card.appendChild(el("p", { class: "subtitle" },
+        t("The desktop client connects once your email is confirmed. Meanwhile you can already download it:")));
+      card.appendChild(el("a", { class: "btn btn--ghost", href: "#/setup?welcome=1" }, t("Setup guide")));
     } catch (err) {
       problem(err.message);
     } finally {

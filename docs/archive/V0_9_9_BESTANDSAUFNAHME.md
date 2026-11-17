@@ -2,7 +2,7 @@
 
 Grundlage: das ausgelieferte Archiv `Garage16_Lmu_V0_9_8.zip`
 (sha256 `85b58384926b1d0742cf782f4326e28e45d21f6e5b53fa44283e810a4ba02f83`), sauber entpackt und
-unverändert getestet (Ergebnis: `docs/V0_9_9_PROTOKOLL.md`, Abschnitt 1). Gelesen: CHANGELOG,
+unverändert getestet (Ergebnis: `docs/archive/V0_9_9_PROTOKOLL.md`, Abschnitt 1). Gelesen: CHANGELOG,
 `docs/ARCHITECTURE.md`, `docs/QUALITY.md`, `docs/DATA_PROTECTION.md`, `docs/RUNBOOKS.md`,
 `scripts/release_check.py`, `scripts/mutation_check.py`, die unten genannten Module.
 

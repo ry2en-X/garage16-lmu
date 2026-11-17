@@ -36,7 +36,7 @@ from ..catalog import (
     venue_for,
     venue_matches_query,
 )
-from ..models import Driver, Lap
+from ..models import Driver, Lap, RecordEvent
 from ..schemas import CatalogClassOptionOut, CatalogLayoutOut, CatalogVenueOut, LeaderboardEntry, RecentActivityEntry
 from ..official import official_filter
 
@@ -58,13 +58,29 @@ def recent_activity(limit: int = 15, db: Session = Depends(get_db)) -> List[Rece
         .limit(min(limit, 50))
     )
     rows = db.execute(stmt).all()
+    # V1.0.1: which records each lap set (one query for all of them) — the landing page groups the
+    # laps into sessions and marks the ones that brought a personal best or a Garage16 Best.
+    lap_ids = [row[6] for row in rows]
+    records: dict = {}
+    if lap_ids:
+        for rec_lap_id, rec_type in db.execute(
+            select(RecordEvent.lap_id, RecordEvent.record_type).where(RecordEvent.lap_id.in_(lap_ids))
+        ).all():
+            types = records.setdefault(rec_lap_id, [])
+            if rec_type not in types:
+                types.append(rec_type)
     return [
         RecentActivityEntry(
             driver_id=driver_id, driver_name=name, track_name=track, car_name=car,
             lap_time=lap_time, uploaded_at=uploaded_at.isoformat(), lap_id=lap_id, car_model=car_model,
+            records=sorted(records.get(lap_id, []), key=lambda r: _RECORD_RANK.get(r, 9)),
         )
         for driver_id, name, track, car, lap_time, uploaded_at, lap_id, car_model in rows
     ]
+
+
+# most important record first (Garage16 Best, team best, personal best)
+_RECORD_RANK = {"WR": 0, "TEAM_BEST": 1, "PR": 2}
 
 
 @router.get("/class/{track_name}/{car_class}", response_model=List[LeaderboardEntry])

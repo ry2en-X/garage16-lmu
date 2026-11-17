@@ -10,7 +10,7 @@ docker compose -f docker-compose.yml -f docker-compose.vps.yml ...
 ```
 Sonst identisch — beide Varianten teilen sich Images, Volumes und
 Migrationslogik, der Unterschied ist nur die Port-Freigabe auf
-`reverse_proxy` (siehe README.md).
+`reverse_proxy` (siehe `docs/DEPLOYMENT.md`).
 
 ## Wenn ein Deployment schiefgeht
 
@@ -33,7 +33,7 @@ Migrationslogik, der Unterschied ist nur die Port-Freigabe auf
    Produktion: Backup laufen lassen (`./scripts/backup.sh` oder, falls
    der containerisierte Weg genutzt wird, einfach den nächsten
    `--profile backup`-Zyklus abwarten oder manuell antriggern — siehe
-   README.md "Backups").
+   `docs/DEPLOYMENT.md` "Backups").
 
 3. **Falls Daten beschädigt/inkonsistent sind: aus einem Backup wiederherstellen** (V0.9.8).
 
@@ -97,18 +97,19 @@ Migrationslogik, der Unterschied ist nur die Port-Freigabe auf
 
 ## Nach jedem Rollback
 
-- `curl https://garage16.de/health` prüfen (Variante B) bzw. den
-  über den Cloudflare-Tunnel erreichbaren Hostnamen (Variante A) — auf
-  `db_ok: true` und die erwartete `version` achten.
+- `/health/ready` prüfen — auf der NAS
+  `sudo docker compose exec -T server python -c "import urllib.request as u; print(u.urlopen('http://localhost:8000/health/ready').read().decode())"`,
+  von außen `https://<öffentliche Adresse>/health/ready` — auf `"status":"ready"` und die erwartete
+  `version` achten.
 - Discord-Bot-Logs prüfen (`docker compose logs discord_bot`) — ein
   Schema-Mismatch zwischen Bot und DB zeigt sich meist als wiederholte
   Exceptions im Poll-Loop. `docker compose ps` sollte alle vier Dienste
   als `healthy` zeigen, inklusive des Bots (Heartbeat-Datei, siehe
-  README.md "Monitoring") — `unhealthy` dort ist ein zusätzliches, vom
+  `docs/DEPLOYMENT.md` "Monitoring") — `unhealthy` dort ist ein zusätzliches, vom
   reinen Log-Grep unabhängiges Signal.
 - **Nach einem Restore (V0.9.7): Datenbank und Telemetrie-Volume gegeneinander prüfen** —
   `python -m scripts.consistency_check --deep` im Server-Container (genauer Befehl:
-  `docs/ADMIN_GUIDE.md`, „Neu in V0.9.7“). Runden ohne Datei oder Dateien mit anderer Prüfsumme
+  `docs/ADMIN_GUIDE.md`, Kapitel 8.2, Schritt 5). Runden ohne Datei oder Dateien mit anderer Prüfsumme
   heißen: DB- und Telemetrie-Backup stammen nicht vom selben Zeitpunkt.
 - Betroffene Fahrer informieren, falls Uploads in der Zwischenzeit
   verloren gingen (Client-Queue behält lokale Kopien — `--reconfigure`
@@ -135,4 +136,17 @@ scheitert, o.ä.): das alte NAS-Deployment einfach weiterlaufen lassen
 DNS-Umstellung ist der einzige Schritt, der wirklich "scharf" ist, und
 lässt sich durch Zurückändern des DNS-Eintrags rückgängig machen, ohne
 dass am NAS selbst etwas repariert werden müsste.
+
+## Zurück auf eine ältere Version (Migrationen)
+
+Jede Version mit Migration nennt ihren Rückweg in `docs/ADMIN_GUIDE.md` (aktuell Kapitel 8.2) bzw.
+für ältere Versionen in `docs/archive/UPDATES_V0_9_BIS_V1_0.md`. Die Reihenfolge ist immer: **im
+neuen Ordner** die Migration zurücknehmen (`alembic downgrade <Revision der alten Version>`, mit der
+Datenbank-URL, weil `exec` sie nicht erbt), dann den neuen Stack stoppen und den alten Ordner starten.
+
+| Zurück auf | `alembic downgrade` | Was dabei verloren geht |
+|---|---|---|
+| V1.0.0 | `0018` | verbundene PCs (Tabelle `device_tokens`; diese PCs verbinden sich neu) und die Namens-Vergleichsspalte |
+| V0.9.9 | `0017` | Zeitpunkt/Fassung der Zustimmung zu den Bedingungen |
+| V0.9.8 | `0016` | Integritätsangaben der Runden und das Audit-Protokoll |
 

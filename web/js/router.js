@@ -13,6 +13,7 @@ const loadVerifyEmail = page("./pages/verify_email.js", "renderVerifyEmail");
 import { startDesktopAppBridge } from "./app_bridge.js";
 
 import { applyStaticTranslations, createLanguageSwitch, ensureLanguageChosen, t } from "./i18n.js";
+import { checkTerms } from "./terms_gate.js";
 const routes = {
   landing: page("./pages/landing.js", "renderLanding"),
   leaderboard: page("./pages/leaderboard.js", "renderLeaderboard"),
@@ -60,6 +61,20 @@ function matchDriverDetail(path) {
   return m ? m[1] : null;
 }
 
+// V1.0.1: the browser tab says which page is open (and link previews / history are readable)
+const PAGE_TITLES = {
+  dashboard: () => t("Dashboard"), teams: () => t("Teams"), analysis: () => t("LapTime Analyzer"),
+  stints: () => t("Stint Analyzer"), sessions: () => t("Stint Analyzer"), leaderboard: () => t("Leaderboard"),
+  circuits: () => t("Circuits"), account: () => t("Account"), download: () => t("Download"),
+  setup: () => t("Setup guide"), legal: () => t("Legal"), admin: () => t("Admin"),
+  "reset-password": () => t("Reset password"), "verify-email": () => t("Confirm email"),
+};
+
+function updateTitle(path) {
+  const title = matchTeamDetail(path) ? t("Team") : matchDriverDetail(path) ? t("Driver") : PAGE_TITLES[path] && PAGE_TITLES[path]();
+  document.title = title ? `${title} · Garage16` : "Garage16 — Le Mans Ultimate telemetry & leaderboards";
+}
+
 function updateNavActive(path) {
   const effective = matchTeamDetail(path) ? "teams" : path === "sessions" ? "stints" : path;
   navLinks.querySelectorAll("a").forEach((a) => {
@@ -85,6 +100,7 @@ async function render() {
   const driverId = matchDriverDetail(path);
   const seq = ++renderSeq;
   updateNavActive(path);
+  updateTitle(path);
   pitwall.classList.remove("open");
   try {
     // load the page module first (usually instant, cached), THEN clear — no blank flash
@@ -127,6 +143,7 @@ function renderNotFound(container) {
 
 window.addEventListener("hashchange", render);
 store.subscribe(updateStatus);
+store.subscribe(() => { checkTerms(); });
 mobileToggle.addEventListener("click", () => pitwall.classList.toggle("open"));
 
 // Language (V0.9.1): translate the static menu, add the EN | DE switch, and on the very first
@@ -137,6 +154,7 @@ ensureLanguageChosen();
 
 updateStatus();
 render();
+checkTerms();
 
 // V0.9.2: inside the desktop app's analysis window, sign in through the app (does
 // nothing in a normal browser — see app_bridge.js)

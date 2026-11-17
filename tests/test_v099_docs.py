@@ -9,7 +9,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def _section():
-    guide = (ROOT / "docs/ADMIN_GUIDE.md").read_text(encoding="utf-8")
+    # V1.0.1: the version-by-version update sections moved unchanged to the archive
+    guide = (ROOT / "docs/archive/UPDATES_V0_9_BIS_V1_0.md").read_text(encoding="utf-8")
     return guide.split("**Neu in V0.9.9", 1)[1].split("**Neu in V0.9.8", 1)[0]
 
 
@@ -17,14 +18,14 @@ def test_versions_and_changelog():
     from client.uploader.uploader import CLIENT_VERSION
     from server.main import VERSION
 
-    assert VERSION == "1.0.0"  # V1.0 moved both on
-    assert CLIENT_VERSION == "1.0.0", "V0.9.9 changes the server and the web page only (client 1.0.0 since V1.0)"
+    assert tuple(map(int, VERSION.split("."))) >= (1, 0, 0)  # V1.0 moved both on; later versions too
+    assert tuple(map(int, CLIENT_VERSION.split("."))) >= (1, 0, 0), "V0.9.9 changes the server and the web page only (client 1.0.0 since V1.0)"
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     assert "\n## V0.9.9" in changelog and changelog.index("\n## V1.0.0") < changelog.index("\n## V0.9.9")
     entry = changelog.split("\n## V0.9.9", 1)[1].split("\n## V0.9.8", 1)[0]
     for needle in ("0017", "Known limits", "held", "INTEGRITY_FAILED", "downgrade 0016"):
         assert needle in entry, needle
-    assert "server 1.0.0 / desktop client 1.0.0" in (ROOT / "README.md").read_text(encoding="utf-8")
+    assert f"server {VERSION} / desktop client {CLIENT_VERSION}" in (ROOT / "README.md").read_text(encoding="utf-8")
 
 
 def test_the_update_backs_up_first_signs_the_laps_and_has_a_way_back_over_the_migration():
@@ -41,7 +42,7 @@ def test_the_update_backs_up_first_signs_the_laps_and_has_a_way_back_over_the_mi
 def test_the_migration_is_the_head_additive_and_reversible():
     versions = sorted(p.name for p in (ROOT / "alembic/versions").glob("0*.py"))
     [mine] = [v for v in versions if v.startswith("0017_")]
-    assert versions[versions.index(mine) + 1:] in ([], [v for v in versions if v.startswith("0018_")]), "V1.0 added 0018"
+    assert versions[versions.index(mine) + 1].startswith("0018_"), "V1.0 added 0018 (and later versions more)"
     text = (ROOT / "alembic/versions" / mine).read_text(encoding="utf-8")
     upgrade = text.split("def upgrade", 1)[1].split("def downgrade", 1)[0]
     downgrade = text.split("def downgrade", 1)[1]
@@ -51,14 +52,15 @@ def test_the_migration_is_the_head_additive_and_reversible():
 
 
 def test_the_new_documents_exist_and_point_at_real_things():
-    for name in ("V0_9_9_BESTANDSAUFNAHME.md", "V0_9_9_PROTOKOLL.md", "V0_9_9_NAS_ANLEITUNG.md",
+    # V1.0.1: the V0.9.9 reports moved to docs/archive/, the NAS guide is docs/NAS_MESSUNGEN.md
+    for name in ("archive/V0_9_9_BESTANDSAUFNAHME.md", "archive/V0_9_9_PROTOKOLL.md", "NAS_MESSUNGEN.md",
                  "ARCHITECTURE.md", "RUNBOOKS.md", "DATA_PROTECTION.md", "QUALITY.md"):
         text = (ROOT / "docs" / name).read_text(encoding="utf-8")
         for ref in [w.strip("`,.:;()") for w in text.split() if w.startswith(("`scripts/", "`server/", "`tests/"))]:
             ref = ref.split("`")[0]
             if ref.endswith((".py", ".md", ".sh", ".json", ".mjs")):
                 assert (ROOT / ref).exists(), f"{name} points at {ref}"
-    guide = (ROOT / "docs/V0_9_9_NAS_ANLEITUNG.md").read_text(encoding="utf-8")
+    guide = (ROOT / "docs/NAS_MESSUNGEN.md").read_text(encoding="utf-8")
     for part in ("Teil A", "Teil B", "Teil C", "Teil D", "Teil E", "Teil F", "Wenn es nicht klappt", "Zurückschicken"):
         assert part in guide, part
     assert (ROOT / "docs/trackcheck_labels_vorlage.csv").read_text(encoding="utf-8").startswith("lap_id,label,note")

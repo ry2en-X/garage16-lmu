@@ -93,6 +93,9 @@ VENUES: List[Tuple[str, Tuple[str, ...]]] = [
     ("Monza", ("monza",)),
     ("Portimão (Algarve)", ("portimao", "algarve")),
     ("Sebring International Raceway", ("sebring",)),
+    # V1.0.1: LMU reports each Silverstone layout as its own track ("Silverstone Grand Prix Circuit -
+    # ELMS", "Silverstone National Circuit") — one venue with its layouts in the leaderboard
+    ("Silverstone", ("silverstone",)),
     ("Spa-Francorchamps", ("spa", "francorchamps")),
 ]
 

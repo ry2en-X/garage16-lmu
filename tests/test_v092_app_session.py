@@ -54,7 +54,9 @@ def test_activation_sets_the_cookie_and_the_window_is_signed_in(client):
     token = _app_session(client, account).json()["session_token"]
     resp = client.post("/accounts/app-session/activate", json={"session_token": token}, headers=SAME_ORIGIN)
     assert resp.status_code == 200, resp.text
-    assert resp.json() == {"driver_id": account["driver_id"], "display_name": "Driver"}
+    body = resp.json()   # V1.0.1: + email_verified / terms_required
+    assert {k: body[k] for k in ("driver_id", "display_name")} == {"driver_id": account["driver_id"], "display_name": "Driver"}
+    assert body["terms_required"] is True     # a token-only account never accepted the terms
     assert resp.cookies.get("garage16_session") == token
     client.cookies.set("garage16_session", token)
     me = client.get("/accounts/me")

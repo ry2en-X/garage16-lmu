@@ -26,12 +26,15 @@ self-service refuses, admin may force a transfer.
 
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timedelta, timezone
 from typing import List
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from .models import (
+    DeviceToken,
     DiscordChannel,
     Driver,
     EmailVerificationToken,
@@ -60,6 +63,7 @@ HANDLED_DRIVER_REFERENCES = frozenset(
         ("password_reset_tokens", "driver_id"),
         ("email_verification_tokens", "driver_id"),
         ("link_codes", "driver_id"),
+        ("device_tokens", "driver_id"),
     }
 )
 
@@ -88,6 +92,7 @@ def delete_driver_rows(db: Session, driver: Driver) -> List[str]:
     db.query(PasswordResetToken).filter(PasswordResetToken.driver_id == driver_id).delete(synchronize_session=False)
     db.query(EmailVerificationToken).filter(EmailVerificationToken.driver_id == driver_id).delete(synchronize_session=False)
     db.query(LinkCode).filter(LinkCode.driver_id == driver_id).delete(synchronize_session=False)
+    db.query(DeviceToken).filter(DeviceToken.driver_id == driver_id).delete(synchronize_session=False)
     # V0.9.7: the upload log of this driver (no FK — it is a log — but it is their data)
     db.query(UploadEvent).filter(UploadEvent.driver_id == driver_id).delete(synchronize_session=False)
     # No FK here (registered_by is a plain string) but it's the driver's data.
@@ -101,3 +106,31 @@ def delete_driver_rows(db: Session, driver: Driver) -> List[str]:
     audit.append(db, "driver.deleted", actor="system", detail={"laps": len(lap_ids)})
     db.commit()
     return telemetry_paths
+
+
+logger = logging.getLogger("lmu_garage.accounts")
+
+
+def prune_unverified_signups(db: Session, days: int, now: datetime | None = None) -> int:
+    """V1.0.1: deletes accounts made on the sign-up form (terms recorded) whose email was never
+    confirmed within `days`, as long as they have no laps and are in no team — nothing of theirs
+    is lost, and the address can sign up again. Called at server start and on every sign-up.
+    Returns how many were deleted. `days` <= 0 does nothing."""
+    if days <= 0:
+        return 0
+    now = (now or datetime.now(timezone.utc)).replace(tzinfo=None)
+    cutoff = now - timedelta(days=days)
+    has_laps = db.query(Lap.id).filter(Lap.driver_id == Driver.id).exists()
+    in_team = db.query(TeamMembership.id).filter(TeamMembership.driver_id == Driver.id).exists()
+    candidates = (
+        db.query(Driver)
+        .filter(Driver.terms_version.isnot(None), Driver.email_verified.is_(False),
+                Driver.created_at < cutoff, ~has_laps, ~in_team)
+        .limit(200)
+        .all()
+    )
+    for driver in candidates:
+        delete_driver_rows(db, driver)
+    if candidates:
+        logger.info("Removed %d account(s) whose email was not confirmed within %d days", len(candidates), days)
+    return len(candidates)

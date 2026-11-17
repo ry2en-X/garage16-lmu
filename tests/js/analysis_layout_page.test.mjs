@@ -914,7 +914,7 @@ assert.equal(dialog(), null);
 assert.equal(window.location.hash, "#/analysis?a=1&b=8&note=already_best_team_best");
 app = await open(window.location.hash);
 assert.ok(text(app).includes("You already are Team Best — compared with the next-fastest team lap."), "the analysis explains why this lap was picked");
-assert.deepEqual(parseAnalysisExtras("#/analysis?a=1&b=8&note=<script>"), { laps: [], quick: null, ref: null, track: null, model: null, note: null }, "the note parameter is whitelisted");
+assert.deepEqual(parseAnalysisExtras("#/analysis?a=1&b=8&note=<script>"), { laps: [], quick: null, ref: null, track: null, model: null, scope: null, note: null }, "the note parameter is whitelisted");
 
 // server trouble: a safe sentence, never the raw error
 const realFetch = globalThis.fetch;
