@@ -100,6 +100,39 @@ async def announce_loop() -> None:
         await asyncio.sleep(POLL_SECONDS)
 
 
+# V1.0.2 fix for announcements repeating every 10 s: an event used to be stamped "announced" only
+# when EVERY registered channel took it. One channel the bot cannot reach (deleted, bot removed,
+# no permission) — or a failed stamp — left the event pending, so the next turn of the loop sent
+# it again to the channels that had already shown it, and again, every POLL_SECONDS. Now:
+#  * each channel gets an event at most once per bot process (_delivered);
+#  * a channel that does not exist or refuses the bot is skipped for good (warning in the log);
+#  * other errors retry, but at most MAX_SEND_ATTEMPTS times, then the event is dropped;
+#  * a stamp that fails is retried without sending anything again;
+#  * of several waiting events for the same record (same type, team, track, car) only the newest
+#    is posted — after a pause the channel gets one message, not a backlog.
+MAX_SEND_ATTEMPTS = 30            # about five minutes at POLL_SECONDS = 10
+_delivered: dict[int, set[str]] = {}
+_attempts: dict[int, int] = {}
+
+
+def _record_key(event: RecordEvent) -> tuple:
+    return (event.record_type, event.team_id, event.track_name, event.car_name)
+
+
+def _coalesce(pending: list) -> tuple[list, list]:
+    """(newest event per record, the older ones it replaces). `pending` is oldest first."""
+    newest: dict[tuple, RecordEvent] = {}
+    for event in pending:
+        newest[_record_key(event)] = event
+    keep = {event.id for event in newest.values()}
+    return [e for e in pending if e.id in keep], [e for e in pending if e.id not in keep]
+
+
+def _is_permanent(exc: Exception) -> bool:
+    """Errors that sending again will not fix: the channel is gone or the bot may not post there."""
+    return isinstance(exc, (discord.NotFound, discord.Forbidden))
+
+
 async def _post_pending_events() -> None:
     # Read pending events and their data in a short-lived session, then
     # close it BEFORE awaiting Discord sends. The V0.5.2 approach held
@@ -110,20 +143,22 @@ async def _post_pending_events() -> None:
         pending = (
             db.query(RecordEvent)
             .filter(RecordEvent.announced_at.is_(None))
-            .order_by(RecordEvent.created_at.asc())
+            .order_by(RecordEvent.created_at.asc(), RecordEvent.id.asc())
             .limit(50)
             .all()
         )
+        pending, superseded = _coalesce(pending)
+        superseded_ids = [event.id for event in superseded]
         # Materialize everything we need into plain dicts so the session
         # can close before any network I/O.
         events_to_send = []
         for event in pending:
-            driver = db.query(Driver).get(event.driver_id)
+            driver = db.get(Driver, event.driver_id)
             is_wr = event.record_type == "WR"
             if is_wr:
                 channel_rows = db.query(DiscordChannel).filter(DiscordChannel.team_id.is_(None)).all()
             else:
-                team = db.query(Team).get(event.team_id) if event.team_id else None
+                team = db.get(Team, event.team_id) if event.team_id else None
                 # A team can opt out of TEAM_BEST announcements via
                 # the web dashboard (PATCH /teams/{id}). Treat "opted out"
                 # the same as "no channels registered" — the send loop
@@ -143,10 +178,14 @@ async def _post_pending_events() -> None:
                 "previous_best": event.previous_best,
                 "driver_name": driver.display_name if driver else "Unknown driver",
                 "is_wr": is_wr,
-                "channel_ids": [row.channel_id for row in channel_rows],
+                # set: the same channel registered twice still gets one message
+                "channel_ids": sorted({str(row.channel_id) for row in channel_rows}),
             })
     finally:
         db.close()
+
+    for event_id in superseded_ids:
+        _stamp_announced(event_id)
 
     # Now send — no DB session held.
     for evt in events_to_send:
@@ -178,32 +217,52 @@ async def _post_pending_events() -> None:
             color=discord.Color.gold() if evt["is_wr"] else discord.Color.blue(),
         )
 
-        all_sent = True
+        event_id = evt["event_id"]
+        done = _delivered.setdefault(event_id, set())
+        retry = False
         for ch_id in evt["channel_ids"]:
+            if ch_id in done:
+                continue
             channel = client.get_channel(int(ch_id))
             if channel is None:
-                logger.warning("Channel %s not found/accessible; will retry", ch_id)
-                all_sent = False
+                logger.warning("Channel %s not found or not visible to the bot; skipping it for event %s "
+                               "(re-register it with /link_team or /link_global)", ch_id, event_id)
+                done.add(ch_id)
                 continue
             try:
                 await channel.send(embed=embed)
-            except discord.DiscordException:
-                logger.exception("Failed to send announcement to channel %s", ch_id)
-                all_sent = False
+                done.add(ch_id)
+            except discord.DiscordException as exc:
+                if _is_permanent(exc):
+                    logger.warning("Channel %s refuses the bot (%s); skipping it for event %s", ch_id, exc, event_id)
+                    done.add(ch_id)
+                else:
+                    logger.exception("Failed to send announcement to channel %s", ch_id)
+                    retry = True
 
-        if all_sent:
-            _stamp_announced(evt["event_id"])
+        if retry:
+            _attempts[event_id] = _attempts.get(event_id, 0) + 1
+            if _attempts[event_id] < MAX_SEND_ATTEMPTS:
+                continue
+            logger.error("Giving up on announcing event %s after %s attempts", event_id, _attempts[event_id])
+        _stamp_announced(event_id)
 
 
 def _stamp_announced(event_id: int) -> None:
-    """Short-lived session to stamp announced_at — no lock held during sends."""
+    """Short-lived session to stamp announced_at — no lock held during sends. If the stamp fails,
+    the event stays pending, but _delivered keeps its channels from getting it a second time."""
     db = _db()
     try:
-        event = db.query(RecordEvent).get(event_id)
+        event = db.get(RecordEvent, event_id)
         if event is not None:
             event.announced_at = datetime.now(timezone.utc)
             db.add(event)
             db.commit()
+        _delivered.pop(event_id, None)
+        _attempts.pop(event_id, None)
+    except Exception:
+        db.rollback()
+        logger.exception("Could not mark event %s as announced; will try again (without re-sending)", event_id)
     finally:
         db.close()
 

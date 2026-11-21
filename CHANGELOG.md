@@ -39,6 +39,11 @@ changes.
   `min_client_version` is 1.0.2. `/health` stays at the root (Docker, old clients).
 - Client 1.0.2 calls `/api/v1/...` and falls back to the old path once for a server that is not
   updated yet (`client/api_paths.py`).
+- **Discord bot: announcements no longer repeat.** A team or global channel the bot could not
+  reach (deleted, bot removed, no permission) kept the event "not announced", so every 10 s the
+  bot posted it again to the channels that worked. Each channel now gets an event once; a channel
+  that is gone or refuses the bot is skipped (warning in the bot log); other errors retry for about
+  five minutes; several waiting improvements of the same record become one message (the newest).
 - **Installer: autostart in two steps.** "Start Garage16 automatically when I log in to Windows"
   (off unless ticked), and under it "Open the Garage16 window" (default) or "Start minimized (only
   in the taskbar)" — the shortcut then starts `Garage16.exe --minimized`. Running the setup again
