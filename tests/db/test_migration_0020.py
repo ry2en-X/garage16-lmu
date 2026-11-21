@@ -3,6 +3,8 @@ leaderboard indexes. Additive, filled for existing rows, reversible."""
 
 from __future__ import annotations
 
+import pytest
+
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -41,6 +43,8 @@ def test_the_leaderboard_query_can_use_the_index(client):
 
     from server.core.database import engine
 
+    if engine.dialect.name != "sqlite":
+        pytest.skip("EXPLAIN QUERY PLAN is SQLite's; PostgreSQL picks its plan by statistics")
     with engine.connect() as conn:
         plan = " ".join(str(r) for r in conn.execute(text(
             "EXPLAIN QUERY PLAN SELECT id FROM laps WHERE track_name = 'x' AND car_class = 'y' AND is_valid = 1 ORDER BY lap_time")))
