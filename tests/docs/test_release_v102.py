@@ -56,7 +56,9 @@ def test_source_folders_named_like_output_folders_are_released_and_tracked():
                  "scripts/release/test_requirements.py"):
         assert name in files, name
     assert not any(f.startswith(("release/", "build/", "dist/")) for f in files)
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=ROOT, capture_output=True, text=True)
+    if top.returncode != 0 or Path(top.stdout.strip()).resolve() != ROOT.resolve():
+        return   # not the checkout itself (an unpacked release, or the gate's staged copy inside one)
     ignored = subprocess.run(["git", "check-ignore", "scripts/release/build_web.py", "scripts/release/__init__.py"],
                              cwd=ROOT, capture_output=True, text=True)
-    if ignored.returncode != 128:   # 128: not a git checkout (an unpacked release) — nothing to check
-        assert ignored.stdout.strip() == "", ignored.stdout
+    assert ignored.stdout.strip() == "", ignored.stdout
