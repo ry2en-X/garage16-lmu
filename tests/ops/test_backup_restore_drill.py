@@ -376,14 +376,14 @@ def test_a_second_backup_copies_only_the_new_files_and_cleaning_up_keeps_what_is
     _check_backup(stack, second)
     # the first backup ages out: its files stay, the second lists them all
     shutil.rmtree(first)
-    run = subprocess.run(["sh", "-c", f". {ROOT / 'docker' / 'telemetry-store.sh'} && store_prune {stack.backups / 'telemetry-store'} {stack.backups}"],
+    run = subprocess.run(["sh", "-c", f". {shlex.quote(str(ROOT / 'docker' / 'telemetry-store.sh'))} && store_prune {shlex.quote(str(stack.backups / 'telemetry-store'))} {shlex.quote(str(stack.backups))}"],
                          capture_output=True, text=True)
     assert run.returncode == 0, run.stderr
     _check_backup(stack, second)
     # a file no backup lists any more is removed
     stray = stack.backups / "telemetry-store" / "not-listed.parquet"
     stray.write_bytes(b"x")
-    subprocess.run(["sh", "-c", f". {ROOT / 'docker' / 'telemetry-store.sh'} && store_prune {stack.backups / 'telemetry-store'} {stack.backups}"], check=True)
+    subprocess.run(["sh", "-c", f". {shlex.quote(str(ROOT / 'docker' / 'telemetry-store.sh'))} && store_prune {shlex.quote(str(stack.backups / 'telemetry-store'))} {shlex.quote(str(stack.backups))}"], check=True)
     assert not stray.exists()
 
 

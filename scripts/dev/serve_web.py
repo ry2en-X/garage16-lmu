@@ -38,7 +38,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         headers = {k: v for k, v in self.headers.items() if k.lower() not in ("host", "content-length", "connection")}
         request = urllib.request.Request(self.api + self.path, data=body, method=self.command, headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=60) as resp:   # noqa: S310 — the developer's own API
+            with urllib.request.urlopen(request, timeout=60) as resp:   # noqa: S310  # nosec B310 — the developer's own API (http://localhost)
                 status, resp_headers, data = resp.status, resp.headers.items(), resp.read()
         except urllib.error.HTTPError as exc:
             status, resp_headers, data = exc.code, exc.headers.items(), exc.read()

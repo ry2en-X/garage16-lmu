@@ -99,6 +99,6 @@ def test_the_gate_checks_the_archive_and_measures_the_new_logic():
 
     for target in ("lap_decision", "integrity", "official", "upload_limits", "audit_chain", "decision_status"):
         assert target in TARGETS
-    from scripts.release.release_check import EXCLUDE_DIRS
+    from scripts.release.release_check import EXCLUDE_DIRS, EXCLUDE_TOP_DIRS
 
-    assert {".hypothesis", "release-archive", "release-verify"} <= EXCLUDE_DIRS
+    assert ".hypothesis" in EXCLUDE_DIRS and {"release-archive", "release-verify"} <= EXCLUDE_TOP_DIRS

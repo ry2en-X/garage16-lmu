@@ -42,3 +42,21 @@ def test_the_update_backs_up_first_and_has_a_way_back_over_the_migration():
 def test_the_old_env_names_still_work_and_are_documented():
     assert "LMU_GARAGE_" in _read(".env.example")
     assert "${LMU_GARAGE_" in _read("docker-compose.yml"), "compose falls back to the old names"
+
+
+def test_source_folders_named_like_output_folders_are_released_and_tracked():
+    """V1.0.2 regression: scripts/release/ was dropped from the release tree (and ignored by git),
+    because "release" was excluded at any depth — the CI gate then could not import it."""
+    import subprocess
+
+    from scripts.release.release_check import released_files
+
+    files = {str(p).replace("\\", "/") for p in released_files()}
+    for name in ("scripts/release/__init__.py", "scripts/release/release_check.py", "scripts/release/build_web.py",
+                 "scripts/release/test_requirements.py"):
+        assert name in files, name
+    assert not any(f.startswith(("release/", "build/", "dist/")) for f in files)
+    ignored = subprocess.run(["git", "check-ignore", "scripts/release/build_web.py", "scripts/release/__init__.py"],
+                             cwd=ROOT, capture_output=True, text=True)
+    if ignored.returncode != 128:   # 128: not a git checkout (an unpacked release) — nothing to check
+        assert ignored.stdout.strip() == "", ignored.stdout

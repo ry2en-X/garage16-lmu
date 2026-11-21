@@ -71,9 +71,12 @@ from scripts.release.test_requirements import missing_test_dependencies  # noqa:
 EXIT_OK, EXIT_FAILED, EXIT_INFRASTRUCTURE = 0, 1, 6
 
 # Never in a release archive (keep in sync with .gitignore / package_release.bat).
-EXCLUDE_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", ".git", ".venv", ".venv-build", "venv", "env", "node_modules",
-                "build", "dist", "dist-installer", "server_telemetry_storage", "lmu_garage_data", ".lmu_garage",
-                "test-backups", ".vscode", ".idea", "__MACOSX", "secrets", "release", "release-archive", "release-verify", ".cache", ".hypothesis"}
+EXCLUDE_DIRS = {"__pycache__", ".pytest_cache", ".ruff_cache", ".git", ".venv", ".venv-build", "node_modules",
+                "server_telemetry_storage", "lmu_garage_data", ".lmu_garage",
+                "test-backups", ".vscode", ".idea", "__MACOSX", "secrets", ".cache", ".hypothesis"}
+# Output folders: only at the top of the project — V1.0.2 has source folders of the same name
+# (scripts/release/), which a match at any depth silently dropped from the release.
+EXCLUDE_TOP_DIRS = {"venv", "env", "build", "dist", "dist-installer", "release", "release-archive", "release-verify"}
 EXCLUDE_FILES = ("*.db", "*.db-journal", "*.sqlite", "*.sqlite3", "*.pyc", "*.pyo", ".env", "*.pem", "*.key",
                  "client_config.json", "*.log", "test_*.csv", "test_*_log.txt", "Tests_Garage16.txt",
                  "lmu_dump_*.csv", "smoketest_*.py", "*.sql.gz", "*.tar.gz", "*.zip", ".DS_Store", "Thumbs.db")
@@ -131,7 +134,7 @@ def version_differences(pins: dict, installed: dict) -> list:
 def released_files(root: Path = ROOT):
     for path in sorted(root.rglob("*")):
         rel = path.relative_to(root)
-        if any(part in EXCLUDE_DIRS for part in rel.parts):
+        if any(part in EXCLUDE_DIRS for part in rel.parts) or rel.parts[0] in EXCLUDE_TOP_DIRS:
             continue
         if path.is_dir() or any(fnmatch.fnmatch(path.name, pattern) for pattern in EXCLUDE_FILES):
             continue

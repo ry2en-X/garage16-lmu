@@ -48,9 +48,10 @@ node_modules/
 # The installer, the portable zip and PyInstaller's working folders are
 # BUILD ARTIFACTS — publish them as a GitHub Release, never commit them.
 .venv-build/
-build/
-dist/
-dist-installer/
+# Leading slash: only the output folders at the top — scripts/release/ is source (V1.0.2).
+/build/
+/dist/
+/dist-installer/
 
 # --- Logs (the desktop client writes garage16-client.log) ---
 *.log
@@ -63,12 +64,11 @@ Thumbs.db
 __MACOSX/
 
 # --- Release gate output (scripts/release/release_check.py) ---
-release/
+/release/
 
 # --- Test downloads (scripts/dev/setup_test_env.sh) ---
 tests/.cache/
 .ruff_cache/
-release-archive/
-release-verify/
+/release-archive/
+/release-verify/
 .hypothesis/
-build/

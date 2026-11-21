@@ -33,7 +33,7 @@ def _shipped_text_files():
 
 def test_gitignore_keeps_secrets_data_and_build_output_out_of_git():
     for entry in (".env", "*.db", "lmu_garage_data/", "client_config.json", "*.sql.gz", "*.tar.gz",
-                  ".venv-build/", "build/", "dist/", "dist-installer/", "node_modules/", "*.log"):
+                  ".venv-build/", "/build/", "/dist/", "/dist-installer/", "node_modules/", "*.log"):
         assert entry in GITIGNORE.splitlines(), f".gitignore is missing {entry!r}"
     assert ".env.example" not in GITIGNORE.splitlines()  # the template must stay committable
 
