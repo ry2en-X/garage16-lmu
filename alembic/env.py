@@ -2,11 +2,11 @@
 alembic/env.py — wires Alembic up to the server's actual models and DB URL
 instead of a separate, hand-maintained copy of either.
 
-- The target metadata is server.database.Base.metadata, after importing
-  server.models so every table is registered on it. That's what makes
+- The target metadata is server.core.database.Base.metadata, after importing
+  server.core.models so every table is registered on it. That's what makes
   `alembic revision --autogenerate` able to diff "what's in models.py" vs
   "what's actually in the DB".
-- The DB URL comes from server.config.settings.database_url — the same
+- The DB URL comes from server.core.config.settings.database_url — the same
   LMU_GARAGE_DB_URL env var (or sqlite default) the FastAPI app itself
   uses — so migrations always run against the DB the app is configured
   for, never a separately-configured one that could drift out of sync.
@@ -21,9 +21,9 @@ from sqlalchemy import engine_from_config, pool
 
 # Import the server's Base *and* models so all tables are registered on
 # Base.metadata before Alembic looks at it.
-from server.database import Base
-from server import models  # noqa: F401  (registers tables on Base.metadata)
-from server.config import settings
+from server.core.database import Base
+from server.core import models  # noqa: F401  (registers tables on Base.metadata)
+from server.core.config import settings
 
 config = context.config
 

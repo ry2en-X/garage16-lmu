@@ -20,7 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     with op.batch_alter_table("drivers") as batch_op:
         # Both nullable: existing drivers stay valid, token-only accounts
-        # (the desktop client never needs one — see server/auth.py) remain
+        # (the desktop client never needs one — see server/accounts/auth.py) remain
         # supported forever. Non-breaking by construction, same approach
         # as every other migration in this project (0005's car_class/
         # car_model, 0006's team roles).

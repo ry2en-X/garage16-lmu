@@ -18,8 +18,8 @@ const setNavigator = (language, languages) => {
 };
 setNavigator("en-US");
 
-const i18n = await import("../../web/js/i18n.js");
-const { DE } = await import("../../web/js/i18n/de.js");
+const i18n = await import("../../web/js/core/i18n.js");
+const { DE } = await import("../../web/js/core/i18n/de.js");
 const { t, tp, getLanguage, setLanguage, hasChosenLanguage, suggestedLanguage, locale, hooks } = i18n;
 let reloads = 0;
 hooks.reload = () => { reloads += 1; };

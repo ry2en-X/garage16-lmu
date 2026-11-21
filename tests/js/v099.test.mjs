@@ -10,7 +10,7 @@ globalThis.localStorage = dom.window.localStorage;
 globalThis.sessionStorage = dom.window.sessionStorage;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
-dom.window.LMU_GARAGE_API_BASE_URL = "";
+dom.window.GARAGE16_API_BASE_URL = "";
 dom.window.localStorage.setItem("garage16_language", "en");
 
 const calls = [];
@@ -20,10 +20,10 @@ globalThis.fetch = async (url, init = {}) => {
   const u = new URL(url, "http://x");
   calls.push(`${init.method || "GET"} ${u.pathname}${u.search}`);
   const json = (body, status = 200) => ({ ok: status < 400, status, statusText: String(status), json: async () => body, text: async () => JSON.stringify(body) });
-  if (u.pathname === "/admin/integrity") return json({ quarantined, laps: 12, unsigned: 3, audit_head: { id: 41, mac: "v1:abcd1234:ff" } });
-  if (u.pathname === "/admin/audit") return json({ events: [{ id: 41, at: "2026-10-20T12:00:00", kind: "lap.quarantined", actor: "system", lap_id: 7, driver_id: 2, request_id: "req-1", detail: {} }], head: { id: 41, mac: "x" } });
-  if (u.pathname === "/admin/audit/verify") return json({ ok: false, rows: 41, first_broken: 12, problem: "content (this row was changed)" });
-  if (u.pathname === "/admin/laps/7/integrity") {
+  if (u.pathname === "/api/v1/admin/integrity") return json({ quarantined, laps: 12, unsigned: 3, audit_head: { id: 41, mac: "v1:abcd1234:ff" } });
+  if (u.pathname === "/api/v1/admin/audit") return json({ events: [{ id: 41, at: "2026-10-20T12:00:00", kind: "lap.quarantined", actor: "system", lap_id: 7, driver_id: 2, request_id: "req-1", detail: {} }], head: { id: 41, mac: "x" } });
+  if (u.pathname === "/api/v1/admin/audit/verify") return json({ ok: false, rows: 41, first_broken: 12, problem: "content (this row was changed)" });
+  if (u.pathname === "/api/v1/admin/laps/7/integrity") {
     const release = u.searchParams.get("release") === "true";
     if (release) quarantined = [];
     return json({ lap_id: 7, result: { status: "ok", mac: "ok" }, review_status: release ? null : "quarantined", released: release });
@@ -34,7 +34,7 @@ const text = (node) => node.textContent.replace(/\s+/g, " ");
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 // ---------------------------------------------------------------- finding texts
-const { findingText, ruleTitle, tierText } = await import("../../web/js/findings.js");
+const { findingText, ruleTitle, tierText } = await import("../../web/js/core/findings.js");
 assert.match(findingText({ code: "signals_missing", detail: { missing: ["lap_invalidated"], empty: ["track_edge"] } }), /lap_invalidated, track_edge/);
 assert.match(findingText({ code: "coverage_gap", detail: { seconds: 1.4 } }), /1\.4 s/);
 assert.match(findingText({ code: "position_jump", detail: { advance_m: 312, by_speed_m: 12 } }), /312 m .*12 m/);
@@ -69,13 +69,13 @@ assert.ok(tab.querySelector('[data-audit="lap.quarantined"]'), "the audit log is
 // check again: nothing released
 row.querySelectorAll("button")[0].click();
 await tick(); await tick();
-assert.ok(calls.includes("POST /admin/laps/7/integrity"), calls.join("\n"));
+assert.ok(calls.includes("POST /api/v1/admin/laps/7/integrity"), calls.join("\n"));
 assert.ok(tab.querySelector('[data-quarantined="7"]'));
 
 // release: the lap disappears from the list
 tab.querySelector('[data-quarantined="7"]').querySelectorAll("button")[1].click();
 await tick(); await tick(); await tick();
-assert.ok(calls.includes("POST /admin/laps/7/integrity?release=true"), calls.join("\n"));
+assert.ok(calls.includes("POST /api/v1/admin/laps/7/integrity?release=true"), calls.join("\n"));
 assert.equal(tab.querySelector('[data-quarantined="7"]'), null);
 assert.match(text(tab), /Nothing set aside/);
 

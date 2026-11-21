@@ -5,7 +5,7 @@ Kein Python, kein Terminal, keine Konfigurationsdateien, nichts zu kopieren. Der
 **1. Konto anlegen → 2. Herunterladen und installieren → 3. Client verbinden → 4. LMU starten → 5. Fahren**
 
 Die gleiche Anleitung steht auch auf der Website unter **Einrichtung**
-(`#/setup`). Wenn etwas nicht klappt: ganz unten steht eine Liste der Meldungen, die
+(`/setup`). Wenn etwas nicht klappt: ganz unten steht eine Liste der Meldungen, die
 du sehen kannst, und was du dann tust.
 
 ## 1. Konto anlegen (ab V1.0 ohne Kennwort vom Admin)
@@ -44,8 +44,15 @@ Anmeldung und deine Runden bleiben. Startet der Download nicht, gibt es unter de
 
 Doppelklick auf die Setup-Datei, den Assistenten durchklicken. Du
 brauchst dafür **keine Administrator-Rechte**. Wenn du magst, setz die
-Haken für eine Desktop-Verknüpfung und "Garage16 automatisch starten,
-wenn ich mich bei Windows anmelde".
+Haken für eine Desktop-Verknüpfung und "Start Garage16 automatically when I log in to Windows"
+(Garage16 mit Windows starten). Mit diesem Haken wählst du darunter noch, wie es startet:
+
+- **"Open the Garage16 window"** — das Fenster geht auf (Standard).
+- **"Start minimized (only in the taskbar)"** — Garage16 läuft und zeichnet auf, das Fenster bleibt
+  als Knopf in der Taskleiste; ein Klick darauf öffnet es.
+
+Ändern geht jederzeit: die Setup-Datei einfach noch einmal ausführen und anders wählen (Anmeldung
+und Runden bleiben).
 
 > **Windows zeigt eine Warnung** ("Der Computer wurde durch Windows
 > geschützt" / SmartScreen)? Das ist bei neuen, nicht digital signierten
@@ -209,7 +216,7 @@ Server kommen, bleiben dabei unverändert (Servermeldungen sind englisch).
 ## Runden analysieren und vergleichen (ab V0.9)
 
 **Zwei Dashboards (ab V0.9.4):**
-- **LapTime Analyzer** — eine Runde gegen eine andere: Diagramme, Zeitunterschied, Kurven.
+- **Rundenanalyse** (englisch: LapTime Analyzer) — eine Runde gegen eine andere: Diagramme, Zeitunterschied, Kurven.
   Neu: das Fenster **Ideallinien** zeigt deine Linie und die der Vergleichsrunde auf einer
   Karte, die du bis in eine einzelne Kurve hineinzoomen kannst (Mausrad, „+“/„−“ oder zwei
   Finger). Dreiecke/Rauten/Punkte markieren pro Runde Bremspunkt ▲, Einlenkpunkt ◆ (aus der
@@ -218,7 +225,7 @@ Server kommen, bleiben dabei unverändert (Servermeldungen sind englisch).
   **Kurve im Detail** zeigt dann, in welcher Phase (Bremsen, Einlenken, Scheitel, Ausgang)
   die Zeit liegt, alle Messwerte beider Runden und dieselbe Kurve in deinen früheren Runden.
   Mit **+ Runde 3/4 darüberlegen** kommen bis zu zwei weitere Runden dazu (gestrichelt/gepunktet).
-- **Stint Analyzer** — ganze Sessions: Pace und Konstanz, Stints und Reifensätze,
+- **Stint-Analyse** (englisch: Stint Analyzer) — ganze Sessions: Pace und Konstanz, Stints und Reifensätze,
   Reifenabbau, Kraftstoff und Energie (wie viele Runden reichen noch, welcher Verbrauch nötig
   ist), Boxenstopps, Verkehr, eine Prognose für den laufenden Stint und ein
   **Strategierechner**. Oben wählst du, welche Runden als „sauber“ zählen (z. B. Runden im
@@ -278,11 +285,11 @@ Im Web:
 - **Schnellstart**: auf der Analysis-Startseite vergleichen die Knöpfe **Du vs. Garage16
   Best**, **Du vs. Team Best** und **Du vs. Meine Beste** deine letzte Strecke mit
   einem Klick.
-- **Neu in 0.9.7 — Zahlen, denen man trauen kann:** Im LapTime Analyzer gibt es die Kachel
+- **Neu in 0.9.7 — Zahlen, denen man trauen kann:** In der Rundenanalyse gibt es die Kachel
   **„Datenqualität“**: Sie zeigt für jede Runde, wie gut die Aufzeichnung ist (Lücken, Frames pro
   Sekunde, wie genau ein Bremspunkt überhaupt bestimmbar ist). Die Tipps unter „Wo finde ich Zeit“
   nennen ihre Messgenauigkeit (± m) und erscheinen nur noch, wenn der Unterschied größer ist; die
-  Kurven-Tabelle lässt sich nach Zeitverlust sortieren. Im Stint Analyzer stehen bei Reifenabbau und
+  Kurven-Tabelle lässt sich nach Zeitverlust sortieren. In der Stint-Analyse stehen bei Reifenabbau und
   Sprit-Effekt jetzt Bereiche in Klammern (95 %), und „Konstanz (ohne Trend)“ zeigt, wie gleichmäßig
   du fährst — ohne dass nachlassende Reifen dir angerechnet werden. Am Client ändert sich nichts.
 - **Neu in 0.9.6 — alles etwas aufgeräumter:** Das Menü ist in Gruppen sortiert (Meine Garage ·

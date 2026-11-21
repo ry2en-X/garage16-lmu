@@ -26,7 +26,7 @@ globalThis.sessionStorage = dom.window.sessionStorage;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
 globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0);
-dom.window.LMU_GARAGE_API_BASE_URL = "";
+dom.window.GARAGE16_API_BASE_URL = "";
 dom.window.localStorage.setItem("lmu_garage_session", JSON.stringify({ driverId: 1, displayName: "Me", viaCookie: true }));
 
 // ---- a 2D context that records what is drawn
@@ -114,33 +114,33 @@ globalThis.fetch = async (url) => {
   const u = new URL(url, "http://x");
   const json = (body, status = 200) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) });
   const p = u.pathname;
-  if (p === "/telemetry/analysis/channels") return json(CATALOG);
-  if (p === "/telemetry/analysis/compare") {
+  if (p === "/api/v1/public/analysis/channels") return json(CATALOG);
+  if (p === "/api/v1/analysis/compare") {
     const requested = (u.searchParams.get("channels") || "").split(",").filter(Boolean);
     const withB = u.searchParams.get("lap_b") !== null;
     return json(compareBody(requested, { withB, basicA: lapABasic, aLacks: lapAHasNoPhysics || lapABasic ? requested.filter((k) => k.startsWith("susp") || k.startsWith("tire") || k.startsWith("slip") || k.startsWith("grip")) : [] }));
   }
-  if (p === "/telemetry/analysis/laps/2") return json({ lap: compareBody(["speed"]).laps.b, available_channels: ["speed"] });
-  if (p === "/telemetry/analysis/drivers/1/laps") {
+  if (p === "/api/v1/laps/2/analysis") return json({ lap: compareBody(["speed"]).laps.b, available_channels: ["speed"] });
+  if (p === "/api/v1/drivers/1/laps") {
     return json({ driver_id: 1, driver_name: "Me", laps: [{ id: 11, lap_number: 3, lap_time: 91.2, is_valid: true, track_name: "Le Mans", car_name: "#7", car_model: "Ferrari 499P", uploaded_at: "2026-10-01T10:00:00", data_level: myLapsBasic ? "basic" : "full" }] });
   }
-  if (p === "/telemetry/laps") return json([{ id: 12, track_name: "Le Mans", car_name: "#7", lap_number: 4, lap_time: 92.0, is_valid: true, uploaded_at: "2026-10-01T10:00:00", data_level: myLapsBasic ? "basic" : "full" }]);
-  if (p === "/drivers/1/public") return json({ personal_records: [], recent_activity: [] });
-  if (p === "/teams/mine") return json([]);
-  if (p === "/leaderboard/catalog/class-options") return json([{ name: "Hypercar", lap_count: 2 }, { name: "GT3", lap_count: 0 }]);
-  if (p.startsWith("/leaderboard/car/") || p.startsWith("/leaderboard/class/")) {
+  if (p === "/api/v1/laps") return json([{ id: 12, track_name: "Le Mans", car_name: "#7", lap_number: 4, lap_time: 92.0, is_valid: true, uploaded_at: "2026-10-01T10:00:00", data_level: myLapsBasic ? "basic" : "full" }]);
+  if (p === "/api/v1/public/drivers/1") return json({ personal_records: [], recent_activity: [] });
+  if (p === "/api/v1/teams/mine") return json([]);
+  if (p === "/api/v1/public/catalog/class-options") return json([{ name: "Hypercar", lap_count: 2 }, { name: "GT3", lap_count: 0 }]);
+  if (p.startsWith("/api/v1/public/leaderboards/car/") || p.startsWith("/api/v1/public/leaderboards/class/")) {
     return json([
       { lap_id: 2, driver_id: 9, driver_name: "Rival", lap_time: 85.0, sector_times: [28, 29, 28], is_valid: true, uploaded_at: "2026-10-01T10:00:00", data_level: rivalBasic ? "basic" : "full" },
       { lap_id: 1, driver_id: 1, driver_name: "Me", lap_time: 90.0, sector_times: [30, 30.5, 29.5], is_valid: true, uploaded_at: "2026-10-01T10:00:00", data_level: "full" },
     ]);
   }
-  if (p === "/telemetry/analysis/circuits") {
+  if (p === "/api/v1/public/circuits") {
     return json({ venues: [
       { venue: "Circuit de la Sarthe (Le Mans)", lap_count: 2, layouts: [{ track_name: "Le Mans", lap_count: 2, driver_count: 2, classes: ["Hypercar"], fastest: { lap_id: 7, lap_time: 85.0, driver_id: 9, driver_name: "Rival", car_model: "Ferrari 499P", car_class: "Hypercar" } }] },
       { venue: "Monza", lap_count: 0, layouts: [] },
     ] });
   }
-  if (p === "/telemetry/analysis/circuits/outline") {
+  if (p === "/api/v1/circuits/outline") {
     const c = compareBody(["speed"]);
     return json({ track_name: "Le Mans", source_lap_id: 7, length_m: 13626.0, x: c.map.x_a, y: c.map.y_a, grid, sectors: [800, 1600], mirrored: false });
   }
@@ -157,9 +157,13 @@ const useV090Selection = () => {
   localStorage.removeItem("garage16_analysis_layout");
   localStorage.setItem("garage16_analysis_channels", JSON.stringify(V090_DEFAULT_CHANNELS));
 };
+// V1.0.2: readable addresses — an old "#/analysis?..." test address becomes /analysis/... (quick
+// links keep their query in the hash: their track names are only resolved by the router)
+const { legacyHashToPath } = await import("../../web/js/core/routes.js");
+const visit = (hash) => window.history.replaceState(null, "", /quick=/.test(hash) ? `/analysis${hash}` : legacyHashToPath(hash));
 const { renderAnalysis, parseAnalysisQuery } = await import("../../web/js/pages/analysis.js");
 const { renderCircuits } = await import("../../web/js/pages/circuits.js");
-const { store } = await import("../../web/js/state.js");
+const { store } = await import("../../web/js/core/state.js");
 
 function fresh() {
   document.body.innerHTML = `<main class="panel" id="app"></main>`;
@@ -177,7 +181,7 @@ assert.deepEqual(parseAnalysisQuery("#/analysis?a=1.5"), { a: null, b: null });
 // ---------------------------------------------------------------- signed out
 store.signOut();
 let app = fresh();
-window.location.hash = "#/analysis?a=1&b=2";
+visit("#/analysis?a=1&b=2");
 await renderAnalysis(app);
 assert.ok(/sign in/i.test(text(app)), "signed-out visitors are asked to sign in");
 assert.equal(app.querySelectorAll(".chart").length, 0);
@@ -186,18 +190,18 @@ store.setSession({ driverId: 1, displayName: "Me", viaCookie: true });
 
 // ---------------------------------------------------------------- nothing chosen: pick Lap 1
 app = fresh();
-window.location.hash = "#/analysis";
+visit("#/analysis");
 await renderAnalysis(app);
 await settle();
 assert.ok(text(app).includes("Choose Lap 1"));
 assert.ok(text(app).includes("#4"), "my laps are listed");
 const pickBtn = [...app.querySelectorAll("button")].find((b) => b.textContent === "Select");
 pickBtn.click();
-assert.equal(window.location.hash, "#/analysis?a=12");
+assert.equal(window.location.pathname + window.location.search, "/analysis/12");
 
 // ---------------------------------------------------------------- only Lap 2 given: pick Lap 1 at that track
 app = fresh();
-window.location.hash = "#/analysis?b=2";
+visit("#/analysis?b=2");
 await renderAnalysis(app);
 await settle();
 assert.ok(text(app).includes("Rival"), "Lap 2's driver is named");
@@ -209,18 +213,18 @@ mineTab.click();
 await settle();
 assert.ok(text(app).includes("91.2") || text(app).includes("1:31.200"), "my laps at that track listed");
 [...app.querySelectorAll("button")].find((b) => b.textContent === "Select").click();
-assert.equal(window.location.hash, "#/analysis?a=11&b=2");
+assert.equal(window.location.pathname + window.location.search, "/analysis/11/vs/2");
 
 // ---------------------------------------------------------------- full comparison
 useV090Selection();
 for (const key of Object.keys(drawn)) drawn[key] = Array.isArray(drawn[key]) ? [] : 0;
 calls.length = 0;
 app = fresh();
-window.location.hash = "#/analysis?a=1&b=2";
+visit("#/analysis?a=1&b=2");
 await renderAnalysis(app);
 await settle(60);
 
-const compareCall = calls.find((u) => u.includes("/telemetry/analysis/compare"));
+const compareCall = calls.find((u) => u.includes("/api/v1/analysis/compare"));
 const cu = new URL(compareCall, "http://x");
 assert.equal(cu.searchParams.get("lap_a"), "1");
 assert.equal(cu.searchParams.get("lap_b"), "2");
@@ -335,7 +339,7 @@ useV090Selection();
 
 // ---------------------------------------------------------------- physics view loads on demand
 app = fresh();
-window.location.hash = "#/analysis?a=1&b=2";
+visit("#/analysis?a=1&b=2");
 await renderAnalysis(app);
 await settle(60);
 calls.length = 0;
@@ -366,7 +370,7 @@ lapAHasNoPhysics = false;
 // ---------------------------------------------------------------- one lap only: picker for Lap 2 is open right away
 calls.length = 0;
 app = fresh();
-window.location.hash = "#/analysis?a=1";
+visit("#/analysis?a=1");
 await renderAnalysis(app);
 await settle(80);
 assert.ok(!new URL(calls.find((u) => u.includes("/compare")), "http://x").searchParams.has("lap_b"));
@@ -377,11 +381,11 @@ assert.ok(text(app).includes("Rival"), "leaderboard tab lists the number one");
 const selectButtons = [...app.querySelectorAll(".picker button")].filter((b) => b.textContent === "Select" || b.textContent === "Already chosen");
 assert.ok(selectButtons.some((b) => b.textContent === "Already chosen" && b.disabled), "the lap already open cannot be chosen twice");
 selectButtons.find((b) => b.textContent === "Select").click();
-assert.equal(window.location.hash, "#/analysis?a=1&b=2", "one click on the leaderboard's number one compares against it");
+assert.equal(window.location.pathname + window.location.search, "/analysis/1/vs/2", "one click on the leaderboard's number one compares against it");
 
 // ---------------------------------------------------------------- channel missing for lap A
 app = fresh();
-window.location.hash = "#/analysis?a=1&b=2";
+visit("#/analysis?a=1&b=2");
 localStorage.removeItem("garage16_analysis_layout");
 localStorage.setItem("garage16_analysis_channels", JSON.stringify(["speed", "susp_travel_fl"]));
 lapAHasNoPhysics = true;
@@ -397,11 +401,11 @@ useV090Selection();
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url) => {
   const u = new URL(url, "http://x");
-  if (u.pathname === "/telemetry/analysis/compare") return { ok: false, status: 404, statusText: "Not Found", json: async () => ({ detail: "The telemetry of this lap is no longer stored." }) };
+  if (u.pathname === "/api/v1/analysis/compare") return { ok: false, status: 404, statusText: "Not Found", json: async () => ({ detail: "The telemetry of this lap is no longer stored." }) };
   return realFetch(url);
 };
 app = fresh();
-window.location.hash = "#/analysis?a=1&b=2";
+visit("#/analysis?a=1&b=2");
 await renderAnalysis(app);
 await settle(40);
 assert.ok(text(app).includes("no longer stored"));
@@ -411,7 +415,7 @@ globalThis.fetch = realFetch;
 // ---------------------------------------------------------------- laps from clients older than 0.9.0
 lapABasic = true;
 app = fresh();
-window.location.hash = "#/analysis?a=1&b=2";
+visit("#/analysis?a=1&b=2");
 await renderAnalysis(app);
 await settle(60);
 const basicBox = app.querySelector('[data-notice="basic-data"]');
@@ -433,7 +437,7 @@ lapABasic = false;
 // one lap only, old client: same notice, no "Lap 2"
 lapABasic = true;
 app = fresh();
-window.location.hash = "#/analysis?a=1";
+visit("#/analysis?a=1");
 await renderAnalysis(app);
 await settle(60);
 assert.ok(text(app.querySelector('[data-notice="basic-data"]')).includes("Lap 1 (Me)"));
@@ -443,7 +447,7 @@ lapABasic = false;
 rivalBasic = true;
 myLapsBasic = true;
 app = fresh();
-window.location.hash = "#/analysis?a=1";
+visit("#/analysis?a=1");
 await renderAnalysis(app);
 await settle(80);
 const pickerTags = [...app.querySelectorAll(".picker .tag--basic")].map((t) => t.textContent);
@@ -456,7 +460,7 @@ assert.equal(meRow.querySelector(".tag--basic"), null, "the full-data lap is not
 // ... and an old lap can still be chosen
 const rivalSelect = [...rivalRow.querySelectorAll("button")].find((b) => b.textContent === "Select");
 rivalSelect.click();
-assert.equal(window.location.hash, "#/analysis?a=1&b=2");
+assert.equal(window.location.pathname + window.location.search, "/analysis/1/vs/2");
 
 // "My laps" tab
 const mineTab2 = [...app.querySelectorAll(".picker__tabs button")].find((b) => b.textContent === "My laps");
@@ -492,7 +496,7 @@ assert.ok(text(app).includes("13.63 km"), "length from the outline");
 assert.ok(calls.some((u) => u.includes("/circuits/outline") && u.includes("track_name=Le+Mans")));
 assert.equal(app.querySelectorAll(".circuit__canvas").length, 1, "only layouts with laps get an outline");
 const link = [...app.querySelectorAll("a")].find((a) => a.textContent === "Compare my lap with it");
-assert.equal(link.getAttribute("href"), "#/analysis?quick=wr&track=Le%20Mans", "the server pairs my best lap here with the fastest one");
+assert.equal(link.getAttribute("href"), "/analysis/le-mans/vs/garage16-best", "the server pairs my best lap here with the fastest one");
 assert.ok(text(app).includes("My Best") && text(app).includes("1:31.200"), "my best lap on the layout is shown");
 const first = [...app.querySelectorAll(".circuit h2")].map((h) => h.textContent);
 assert.equal(first[0], "Circuit de la Sarthe (Le Mans)", "driven tracks are listed before empty ones");

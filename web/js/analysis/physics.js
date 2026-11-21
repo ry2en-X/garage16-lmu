@@ -7,11 +7,11 @@
 // pin a spot, and these numbers follow. A lap recorded before V0.9.0 has no such
 // channels; its card says so instead of showing zeros.
 
-import { el } from "../format.js";
+import { el } from "../core/format.js";
 import { clamp, formatValue, LAP_COLORS, niceTicks, physicsSnapshot, WHEEL_LABEL, WHEELS } from "./model.js";
 import { coalesce, cssVar, fitCanvas, onResize } from "./charts.js";
 
-import { t } from "../i18n.js";
+import { t } from "../core/i18n.js";
 const GG_SIZE = 300;
 const SLIP_NEEDLE_DEGREES_PER_DEGREE = 4; // a 5° slip angle is easier to see as a 20° needle
 const MAX_NEEDLE = 50;

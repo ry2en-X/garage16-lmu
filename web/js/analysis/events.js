@@ -1,15 +1,15 @@
-// analysis/events.js — what happened where on the lap (V0.9.3): the server's track-limits
-// findings (stored at upload, server/track_limits.py) and the measured wheel events
+// analysis/events.js — what happened where on the lap: the server's track-limits
+// findings (stored at upload, server/laps/track_limits.py) and the measured wheel events
 // (lock-ups, wheelspin) from GET /telemetry/analysis/events.
 //
 // One small store per opened comparison loads them ONCE; the events window, the track
 // map (markers) and the coaching window read it. Moving the cursor never asks the server.
 
-import { el } from "../format.js";
+import { el } from "../core/format.js";
 import { formatMetres, indexForDistance, LAP_COLORS, WHEEL_LABEL } from "./model.js";
 
-import { t } from "../i18n.js";
-import { findingText, tierText } from "../findings.js";
+import { t } from "../core/i18n.js";
+import { findingText, tierText } from "../core/findings.js";
 
 export { findingText };
 

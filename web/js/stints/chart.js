@@ -1,4 +1,4 @@
-// stints/chart.js — small SVG charts for the Stint Analyzer (V0.9.4): lap times over the
+// stints/chart.js — small SVG charts for the Stint Analyzer: lap times over the
 // session, lap time over tyre age, consumption per lap. SVG (not canvas) so the charts scale
 // with the page, are readable by screen readers through <title>, and are testable in jsdom.
 

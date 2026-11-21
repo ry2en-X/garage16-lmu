@@ -1,4 +1,4 @@
-"""client/migration.py — Automatic server-migration handling (V0.8.6).
+"""client/migration.py — Automatic server-migration handling.
 
 Replaces the V0.8.1 manual `--follow-migration` command as the primary
 UX: a friend running the packaged app never types a command. The client

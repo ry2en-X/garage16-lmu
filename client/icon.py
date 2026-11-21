@@ -1,4 +1,4 @@
-"""client/icon.py — the Garage16 icon (V0.9.4): an angular "16", every corner cut at 45°.
+"""client/icon.py — the Garage16 icon: an angular "16", every corner cut at 45°.
 
 Shown in the title bar and the Windows taskbar while the client window is open (the packaged
 Garage16.exe carries the same icon itself — packaging/garage16.spec — so Explorer, Alt+Tab and

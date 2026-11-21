@@ -1,5 +1,5 @@
 """
-Reference laps with KNOWN values (V0.9.7) — the analysis is checked against a truth that does not
+Reference laps with KNOWN values — the analysis is checked against a truth that does not
 come from the analysis code.
 
 How a reference lap is made
@@ -45,7 +45,7 @@ RELEASE_S = 0.6
 COAST_S = 0.15
 THROTTLE_RAMP_S = 0.4
 
-BRAKE_ON = 0.10      # the server's thresholds (server/telemetry_analysis.py), as fractions
+BRAKE_ON = 0.10      # the server's thresholds (server/analysis/telemetry_analysis.py), as fractions
 THROTTLE_ON = 0.05
 THROTTLE_HALF = 0.50
 THROTTLE_FULL = 0.95

@@ -2,8 +2,7 @@
 // plan's §"Landing Page": not just a login form + dashboard, but a real
 // racing-platform front page). Public, no auth required.
 //
-// V1.0.1:
-//   - "What Garage16 does" comes right after the hero and shows the analysis — the reason to use
+// //   - "What Garage16 does" comes right after the hero and shows the analysis — the reason to use
 //     Garage16 — with a small drawing per feature (LapTime Analyzer, racing lines, Stint Analyzer,
 //     leaderboards). The drawings are illustrations (inline SVG, no image files, no data), marked
 //     as such for screen readers.
@@ -12,12 +11,13 @@
 //     (laps, best lap, the records the session brought). Data: GET /leaderboard/recent (the
 //     server says which records each lap set).
 
-import { api } from "../api.js";
-import { store } from "../state.js";
-import { el, formatLapTime, formatDate, recordTypeLabel } from "../format.js";
-import { loadTrackNames, trackLabel } from "../tracks.js";
+import { api } from "../core/api.js";
+import { store } from "../core/state.js";
+import { el, formatLapTime, formatDate, recordTypeLabel } from "../core/format.js";
+import { loadTrackNames, trackLabel } from "../core/tracks.js";
 
-import { t, tp } from "../i18n.js";
+import { t, tp } from "../core/i18n.js";
+import { link } from "../core/link.js";
 
 const RECENT_LAPS = 50;          // what the server sends at most
 const SESSIONS_SHOWN = 6;
@@ -32,15 +32,15 @@ export async function renderLanding(container) {
       el("h1", { class: "hero__title" }, t("GARAGE16")),
       el("p", { class: "subtitle hero__claim" }, t("Your LMU Data. Your Records. Your Team.")),
       el("p", { class: "hero__lead" }, t("Record every lap in Le Mans Ultimate, compare it channel by channel with your best or the fastest lap, and race your friends on the leaderboards.")),
-      // V0.9.6: the main button is what this visitor most likely wants next
+      // The main button is what this visitor most likely wants next
       el("div", { class: "inline-form hero__actions" }, signedIn ? [
-        el("a", { href: "#/dashboard", class: "btn" }, t("Go to your Garage")),
-        el("a", { href: "#/analysis", class: "btn btn--ghost" }, t("LapTime Analyzer")),
-        el("a", { href: "#/leaderboard", class: "btn btn--ghost" }, t("Explore Leaderboards")),
+        el("a", { href: "/dashboard", class: "btn" }, t("Go to your Garage")),
+        el("a", { href: "/analysis", class: "btn btn--ghost" }, t("LapTime Analyzer")),
+        el("a", { href: "/leaderboard", class: "btn btn--ghost" }, t("Explore Leaderboards")),
       ] : [
-        el("a", { href: "#/account", class: "btn" }, t("Get Garage16")),
-        el("a", { href: "#/leaderboard", class: "btn btn--ghost" }, t("Explore Leaderboards")),
-        el("a", { href: "#/setup", class: "btn btn--ghost" }, t("How it works")),
+        el("a", { href: "/account", class: "btn" }, t("Get Garage16")),
+        el("a", { href: "/leaderboard", class: "btn btn--ghost" }, t("Explore Leaderboards")),
+        el("a", { href: "/setup", class: "btn btn--ghost" }, t("How it works")),
       ]),
     ])
   );
@@ -73,11 +73,11 @@ export async function renderLanding(container) {
     activity.removeAttribute("aria-busy");
   }
 
-  // V1.0: the legal pages, one click from the front page
+  // The legal pages, one click from the front page
   container.appendChild(el("footer", { class: "site-footer" }, [
-    el("a", { href: "#/legal" }, t("Legal notice")),
-    el("a", { href: "#/legal?tab=privacy" }, t("Privacy")),
-    el("a", { href: "#/legal?tab=terms" }, t("Terms of use")),
+    el("a", { href: "/impressum" }, t("Legal notice")),
+    el("a", { href: "/datenschutz" }, t("Privacy")),
+    el("a", { href: "/terms" }, t("Terms of use")),
     el("span", {}, t("Garage16 is a private hobby project and not affiliated with Studio 397 or Le Mans Ultimate.")),
   ]));
 }
@@ -122,12 +122,12 @@ function renderSessions(sessions) {
       el("div", { class: "activity__main" }, [
         s.records.length ? el("div", { class: "activity__badges" }, s.records.map((type) => el("span", { class: type === "WR" ? "tag tag--gold" : type === "TEAM_BEST" ? "tag tag--team" : "tag" }, recordTypeLabel(type)))) : null,
         el("div", { class: "activity__what" }, [
-          el("a", { href: `#/driver/${s.driver_id}` }, el("strong", { class: "activity__who" }, s.driver_name)),
+          el("a", { href: link.driver(s.driver_id, s.driver_name) }, el("strong", { class: "activity__who" }, s.driver_name)),
           el("span", { class: "activity__where" }, `${trackLabel(s.track_name)} · ${s.car}`),
         ]),
       ]),
       el("div", { class: "activity__side" }, [
-        s.best.lap_id != null ? el("a", { href: `#/analysis?a=${s.best.lap_id}`, title: t("Analyse this lap") }, time) : time,
+        s.best.lap_id != null ? el("a", { href: link.analysis({ a: s.best.lap_id }), title: t("Analyse this lap") }, time) : time,
         el("div", { class: "subtitle activity__when" }, `${tp("{0} lap", "{0} laps", s.laps, [s.laps])} · ${formatDate(s.newest)}`),
       ]),
     ]));

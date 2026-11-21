@@ -2,7 +2,7 @@
 // which channel, which colours. Pure data + a thin storage wrapper; no DOM, so every rule is
 // testable in plain Node.
 //
-// V0.9.5: a real 2-D grid. Every tile has a cell position and a size in cells
+// A real 2-D grid. Every tile has a cell position and a size in cells
 // (x, y, w, h on a 12-column grid with fixed-height rows) instead of "the n-th window,
 // small / medium / large". Tiles are placed where the user puts them — gaps are allowed —
 // and can never overlap: whatever lands on a tile pushes it down (see pushDown()).
@@ -14,7 +14,7 @@
 //     "layout": [ { "type": "chart", "channel": "speed", "x": 0, "y": 5, "w": 12, "h": 4 }, ... ],
 //     "colors": { "lapA": "#e0472b", "lapB": "#4fb3e8", "delta": "#ecedee" } }
 //
-// A version-1 layout (V0.9.1 – V0.9.4: an ordered list with small/medium/large) is migrated
+// A version-1 layout is migrated
 // once, flowed onto the grid in its old order (MIGRATIONS[1]) — nobody loses their view.
 //
 // Rules this module guarantees:

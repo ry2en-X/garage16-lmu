@@ -1,17 +1,17 @@
 """
 config.py — Client credential loading.
 
-Previously the client hard-required LMU_GARAGE_AUTH_TOKEN and
-LMU_GARAGE_CLIENT_SECRET as environment variables, set manually in every
+Previously the client hard-required GARAGE16_AUTH_TOKEN and
+GARAGE16_CLIENT_SECRET as environment variables, set manually in every
 new shell before `python -m client.main` — easy to forget, and gone the
 moment you close the terminal.
 
 Resolution order (highest priority first):
-  1. Environment variables (LMU_GARAGE_API_URL / _AUTH_TOKEN / _CLIENT_SECRET).
+  1. Environment variables (GARAGE16_API_URL / _AUTH_TOKEN / _CLIENT_SECRET).
      Kept as the top priority on purpose: useful for CI, service accounts,
      or anyone who deliberately wants to override the saved config for one
      run without touching the file.
-  2. A local config file at ~/.lmu_garage/client_config.json, written once
+  2. A local config file at ~/.garage16/client_config.json (until 1.0.1 ~/.lmu_garage), written once
      by an interactive setup wizard and reused on every future run.
   3. If neither is present, run the wizard: prompt for the three values,
      save them, and continue.
@@ -20,12 +20,12 @@ Threat model note: the client_secret has to be readable by the client
 process (it's used to HMAC-sign every upload) — an env var isn't
 meaningfully safer than a file, and is easier to accidentally leak (shell
 history, process listing, CI logs). The file is written with owner-only
-permissions where the OS supports it (POSIX chmod 600). V1.0.1: on Windows,
+permissions where the OS supports it (POSIX chmod 600). On Windows,
 where chmod does nothing, the auth token and the client secret are stored
 encrypted with the Windows Data Protection API (client/secret_store.py) —
 only the same Windows user on the same PC can read them; a plain-text file
 from 1.0.0 is rewritten encrypted the first time it is read.
-Run with --reconfigure or --rotate-secret (server/routers/accounts.py) if
+Run with --reconfigure or --rotate-secret (server/api/v1/accounts.py) if
 a secret needs to change.
 """
 
@@ -40,20 +40,37 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from client import secret_store
+from client.env import env
 
 logger = logging.getLogger("lmu_garage.client_config")
 
-CONFIG_DIR = Path(os.environ.get("LMU_GARAGE_CONFIG_DIR", Path.home() / ".lmu_garage"))
+def _default_config_dir() -> Path:
+    """~/.garage16 (until 1.0.1: ~/.lmu_garage). An existing old folder is moved once — the
+    login stays, nobody has to connect again (the credentials are bound to the Windows user, not to
+    the folder). If the move is not possible (another client still running), the old folder is used."""
+    override = env("CONFIG_DIR")
+    if override:
+        return Path(override)
+    new, old = Path.home() / ".garage16", Path.home() / ".lmu_garage"
+    if not new.exists() and old.is_dir():
+        try:
+            old.rename(new)
+        except OSError:
+            return old
+    return new
+
+
+CONFIG_DIR = _default_config_dir()
 CONFIG_PATH = CONFIG_DIR / "client_config.json"
 
 DEFAULT_API_URL = "http://localhost:8000"
 
-# V0.8.6: the person who builds/distributes the friend-facing package can
+# The person who builds/distributes the friend-facing package can
 # drop a one-line text file with their server's URL next to the
 # executable (or, running from source, next to this file) — friends then
 # never have to type or even see a server address during setup. See
 # docs/CLIENT_BUILD.md. Resolution order for the pre-filled default:
-# LMU_GARAGE_API_URL env var > this file > DEFAULT_API_URL (localhost,
+# GARAGE16_API_URL env var > this file > DEFAULT_API_URL (localhost,
 # only sensible for developers).
 BUNDLED_SERVER_FILENAME = "garage16_server.txt"
 
@@ -61,7 +78,7 @@ BUNDLED_SERVER_FILENAME = "garage16_server.txt"
 def bundled_file_candidates(filename: str) -> list:
     """Where a file baked into the package (next to the executable) can be:
     the executable's folder, PyInstaller's _MEIPASS, or — running from source —
-    next to this file. Used for garage16_server.txt and (V0.9.2) garage16_edition.txt."""
+    next to this file. Used for garage16_server.txt and garage16_edition.txt."""
     import sys
     candidates = []
     if getattr(sys, "frozen", False):  # PyInstaller
@@ -110,7 +127,7 @@ def write_setting(key: str, value) -> None:
 
 
 def default_api_url() -> str:
-    env_url = os.environ.get("LMU_GARAGE_API_URL")
+    env_url = env("API_URL")
     if env_url:
         return env_url
     for candidate in _bundled_server_file_candidates():
@@ -132,12 +149,12 @@ class ClientConfig:
 
 
 def _from_env() -> Optional[ClientConfig]:
-    auth_token = os.environ.get("LMU_GARAGE_AUTH_TOKEN")
-    client_secret = os.environ.get("LMU_GARAGE_CLIENT_SECRET")
+    auth_token = env("AUTH_TOKEN")
+    client_secret = env("CLIENT_SECRET")
     if not auth_token or not client_secret:
         return None
     return ClientConfig(
-        # V1.0.1: without LMU_GARAGE_API_URL the server baked into the package (garage16_server.txt),
+        # Without GARAGE16_API_URL the server baked into the package (garage16_server.txt),
         # like the setup window — before, it fell back to http://localhost:8000
         api_url=default_api_url(),
         auth_token=auth_token,
@@ -163,7 +180,7 @@ def _from_file() -> Optional[ClientConfig]:
         # copied from another PC or Windows user: the credentials cannot be decrypted here
         logger.warning("The saved Garage16 credentials belong to another PC or user — connect again.")
         return None
-    # V1.0.1: a plain-text file from 1.0.0 is rewritten encrypted (Windows)
+    # A plain-text file from 1.0.0 is rewritten encrypted (Windows)
     if secret_store.available() and not (secret_store.is_protected(stored_token) and secret_store.is_protected(stored_secret)):
         try:
             save_config(config)
@@ -181,7 +198,7 @@ def save_config(config: ClientConfig) -> None:
     POSIX and Windows when source and destination are on the same
     filesystem, which a sibling file always is."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    # V0.9.1: keep settings this dataclass does not model (e.g. "local_retention_days").
+    # Keep settings this dataclass does not model (e.g. "local_retention_days").
     # Reconnecting an account or a server migration rewrites this file; it must not
     # silently reset a setting the user chose — "0" (never delete local laps) falling
     # back to the 14-day default would delete files the user wanted to keep.
@@ -193,7 +210,7 @@ def save_config(config: ClientConfig) -> None:
     except (OSError, ValueError):
         pass
     stored = asdict(config)
-    # V1.0.1: encrypted on Windows (client/secret_store.py), unchanged elsewhere
+    # Encrypted on Windows (client/secret_store.py), unchanged elsewhere
     stored["auth_token"] = secret_store.protect(config.auth_token)
     stored["client_secret"] = secret_store.protect(config.client_secret)
     merged.update(stored)
@@ -240,7 +257,7 @@ def load_config(force_setup: bool = False, setup_ui: Optional[Callable[[str], Op
     straight to the wizard and overwrites the saved file — use this after
     rotating a token/secret via the server's /accounts/rotate-* endpoints.
 
-    `setup_ui` (V0.8.6): an optional `(default_api_url: str) ->
+    `setup_ui`: an optional `(default_api_url: str) ->
     Optional[ClientConfig]` callable, used INSTEAD of the console
     `input()` wizard when interactive setup is actually needed. The
     packaged friend-facing app (client/main.py) passes a Tkinter dialog
@@ -278,9 +295,9 @@ MAX_LOCAL_RETENTION_DAYS = 3650
 
 
 def local_retention_days() -> float:
-    """How long a lap's local telemetry file is kept AFTER it was uploaded (V0.9.1).
+    """How long a lap's local telemetry file is kept AFTER it was uploaded.
 
-    Order: env LMU_GARAGE_LOCAL_RETENTION_DAYS, then "local_retention_days" in
+    Order: env GARAGE16_LOCAL_RETENTION_DAYS, then "local_retention_days" in
     client_config.json, then 14. `0` means "never delete anything". A value that is
     not a non-negative number is ignored (the default applies): a typo must never
     turn into a surprise deletion policy. Capped at ten years.
@@ -296,7 +313,7 @@ def local_retention_days() -> float:
             return None
         return min(number, float(MAX_LOCAL_RETENTION_DAYS))
 
-    from_env = parse(os.environ.get("LMU_GARAGE_LOCAL_RETENTION_DAYS"))
+    from_env = parse(env("LOCAL_RETENTION_DAYS"))
     if from_env is not None:
         return from_env
     try:
@@ -308,7 +325,7 @@ def local_retention_days() -> float:
 
 
 def resolve_data_dir() -> Path:
-    """Where recorded laps (and pending uploads) live. V0.8.6: the
+    """Where recorded laps (and pending uploads) live. The
     previous hardcoded `./lmu_garage_data` was relative to the CURRENT
     WORKING DIRECTORY — fine when a developer runs `python -m client.main`
     from the project folder, broken for an installed app started from a
@@ -316,23 +333,25 @@ def resolve_data_dir() -> Path:
     folder).
 
     Resolution order:
-      1. LMU_GARAGE_DATA_DIR env var (explicit override)
+      1. GARAGE16_DATA_DIR env var (explicit override)
       2. an existing ./lmu_garage_data in the cwd — keeps a developer's or
          early tester's already-recorded, possibly still-pending laps
          where the client will find them, instead of silently orphaning
          them behind a new default
       3. the per-user application data folder (%LOCALAPPDATA%\\Garage16 on
-         Windows, ~/.lmu_garage otherwise) + /laps
+         Windows, ~/.garage16 otherwise) + /laps
     """
-    override = os.environ.get("LMU_GARAGE_DATA_DIR")
+    override = env("DATA_DIR")
     if override:
         return Path(override)
     legacy = Path("lmu_garage_data")
     if legacy.is_dir():
         return legacy.resolve()
     local_appdata = os.environ.get("LOCALAPPDATA")
-    base = Path(local_appdata) / "Garage16" if local_appdata else Path.home() / ".lmu_garage"
-    return base / "laps"
+    if local_appdata:
+        return Path(local_appdata) / "Garage16" / "laps"
+    old = Path.home() / ".lmu_garage" / "laps"      # Laps recorded before stay where they are
+    return old if old.is_dir() and not (Path.home() / ".garage16" / "laps").exists() else Path.home() / ".garage16" / "laps"
 
 
 def log_file_path() -> Path:

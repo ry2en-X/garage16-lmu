@@ -1,4 +1,4 @@
-// analysis/widgets.js — the renderers of the analysis windows (V0.9.1). Each one
+// analysis/widgets.js — the renderers of the analysis windows. Each one
 // takes (widget, ctx) and returns { element, destroy() }; they only READ the shared
 // view state (cursor, zoom) and the already-loaded data — none of them calls the
 // server while the cursor moves.
@@ -16,7 +16,7 @@
 //   pinAt            (baseIndex) => void — moves + pins the shared cursor
 // }
 
-import { el, formatLapTime } from "../format.js";
+import { el, formatLapTime } from "../core/format.js";
 import { createChart } from "./charts.js";
 import { createPhysicsView } from "./physics.js";
 import { createTrackMap } from "./trackmap.js";
@@ -27,10 +27,11 @@ import {
 } from "./model.js";
 import { T } from "./strings.js";
 
-import { t } from "../i18n.js";
+import { t } from "../core/i18n.js";
+import { link } from "../core/link.js";
 const noop = () => {};
 const CHART_HEIGHT = { small: 80, medium: 110, large: 140 };
-// V0.9.5: a tile on the grid has a fixed height (widget.boxHeight, from grid.js); a chart fills
+// A tile on the grid has a fixed height (widget.boxHeight, from grid.js); a chart fills
 // what is left of it after its head and x axis (and, for the delta, the controls around it).
 const CHART_CHROME_PX = 46;
 export function chartHeight(widget, reserved = 0, fallback = 110) {
@@ -48,7 +49,7 @@ function lapCard(side, lap, recording) {
   return el("div", { class: "card analysis-lap", style: `border-top:3px solid ${color};` }, [
     el("div", { class: "analysis-lap__tag", style: `color:${color};` }, ({ a: t("LAP 1"), b: t("LAP 2"), c: t("LAP 3"), d: t("LAP 4") })[side]),
     basic ? el("div", { class: "tag tag--basic", title: t("Recorded by a client older than 0.9.0 — fewer channels") }, basic) : null,
-    el("div", { class: "analysis-lap__who" }, [el("a", { href: `#/driver/${lap.driver_id}` }, lap.driver_name)]),
+    el("div", { class: "analysis-lap__who" }, [el("a", { href: link.driver(lap.driver_id, lap.driver_name) }, lap.driver_name)]),
     el("div", { class: "subtitle", style: "margin:0 0 8px;" }, `${lap.car_model || lap.car_name} · ${t("lap #{0}", [lap.lap_number])}${lap.is_valid ? "" : ` · ${t("invalid")}`}`),
     el("div", { class: "lap-time analysis-lap__time" }, formatLapTime(lap.lap_time)),
     el("div", { class: "analysis-lap__sectors" }, (lap.sector_times || []).map((s, i) => el("span", {}, `S${i + 1} ${s > 0 ? s.toFixed(3) : "—"}`))),
@@ -106,10 +107,10 @@ export function renderSummary(widget, ctx) {
     lapCard("a", data.laps.a, data.recording && data.recording.a),
     hasB ? lapCard("b", data.laps.b, data.recording && data.recording.b) : null,
     hasB ? differenceCard(data) : null,
-    // V0.9.4: Lap 3 / Lap 4
+    // Lap 3 / Lap 4
     ...EXTRA_SIDES.filter((side) => data.laps[side]).map((side) => lapCard(side, data.laps[side], data.recording && data.recording[side])),
   ]);
-  // V0.9.7: one line on how trustworthy the recordings are (details: the "Data quality" tile)
+  // One line on how trustworthy the recordings are (details: the "Data quality" tile)
   if (ctx.health) {
     const sides = [["a", t("Lap 1")], ...(hasB && ctx.health.b ? [["b", t("Lap 2")]] : [])];
     Promise.all(sides.map(([side]) => ctx.health[side].get().catch(() => null))).then((reports) => {
@@ -132,12 +133,12 @@ function factChip(label, signed, at, tag, onPin) {
   return chip;
 }
 
-// V0.9.4: Lap 3 / Lap 4 against the reference lap, drawn over the delta (dashed / dotted)
+// Lap 3 / Lap 4 against the reference lap, drawn over the delta (dashed / dotted)
 const extraDeltaSeries = (data) => EXTRA_SIDES.filter((s) => data.extra_delta && data.extra_delta[s]).map((s) => ({
   values: data.extra_delta[s], color: lapColor(s), dash: LAP_DASH[s], name: t("{0} − reference", [lapName(s)]), side: s,
 }));
 
-// V0.9.4: "Time" view — the elapsed time of every lap along the track instead of the difference
+// "Time" view — the elapsed time of every lap along the track instead of the difference
 function timeSeries(data) {
   return ["a", "b", ...EXTRA_SIDES].filter((s) => data.time && data.time[s]).map((s) => ({ values: data.time[s], color: lapColor(s), dash: LAP_DASH[s], name: lapName(s), side: s }));
 }
@@ -206,7 +207,7 @@ export function renderDelta(widget, ctx) {
   return { element, destroy: () => { offData(); if (chart) chart.destroy(); } };
 }
 
-// ---------------------------------------------------------------- corners (V0.9.1)
+// ---------------------------------------------------------------- corners
 
 // Lap 1 brakes `diff` metres later (> 0) or earlier (< 0) than Lap 2.
 function brakingText(a, b) {
@@ -217,7 +218,7 @@ function brakingText(a, b) {
 }
 const speedPair = (a, b) => `${a === null || a === undefined ? "—" : a.toFixed(1)} / ${b === null || b === undefined ? "—" : b.toFixed(1)}`;
 
-// V0.9.7: the corners by time lost — rank, the share of all the time Lap 1 loses in corners
+// The corners by time lost — rank, the share of all the time Lap 1 loses in corners
 // it is slower in, and the bar for the list view. Pure (tested).
 export function rankCorners(corners) {
   const lost = corners.reduce((sum, c) => sum + (c.delta > 0 ? c.delta : 0), 0);
@@ -258,7 +259,7 @@ export function renderCorners(widget, ctx) {
       el("td", {}, speedPair(c.a.exit, c.b.exit)),
     ]);
     const open = () => {
-      if (ctx.selection) ctx.selection.set(c.n);   // V0.9.4: the corner window and the line map follow
+      if (ctx.selection) ctx.selection.set(c.n);   // The corner window and the line map follow
       // the braking zone, the apex and the way out — then the finer data arrives on its own
       const first = Math.min(...[c.a.brake, c.b.brake, c.entry ?? c.start].filter((v) => v !== null && v !== undefined));
       const last = Math.max(...[c.a.throttle, c.b.throttle, c.apex + 150].filter((v) => v !== null && v !== undefined));
@@ -284,7 +285,7 @@ export function renderCorners(widget, ctx) {
       el("td", { colspan: "2" }, T.sectorTotal), el("td", { class: tone(total) }, `${formatDelta(total)} s`), el("td", { colspan: "4" }, ""),
     ]));
   };
-  // V0.9.7: along the lap, or the biggest losses first (a click still zooms and selects)
+  // Along the lap, or the biggest losses first (a click still zooms and selects)
   const order = el("select", { class: "corners__order", "aria-label": t("Order") }, [
     el("option", { value: "lap" }, t("Along the lap")),
     el("option", { value: "loss" }, t("Biggest loss first")),
@@ -316,7 +317,7 @@ export function renderChart(widget, ctx) {
   const colors = widget.colors || {};
   const series = [{ values: entry.a, spikes: entry.a_spikes || null, color: colors.a || LAP_COLORS.a, name: t("Lap 1"), side: "a" }];
   if (hasB && !entry.pair) series.push({ values: entry.b, spikes: entry.b_spikes || null, color: colors.b || LAP_COLORS.b, name: t("Lap 2"), side: "b" });
-  // V0.9.4: Lap 3 / Lap 4 drawn over the pair, dashed / dotted
+  // Lap 3 / Lap 4 drawn over the pair, dashed / dotted
   const extras = entry.pair ? [] : EXTRA_SIDES.filter((s) => entry[s]);
   for (const s of extras) series.push({ values: entry[s], color: lapColor(s), dash: LAP_DASH[s], name: lapName(s), side: s });
   if (entry.pair) series[0].name = t("Lap 2 vs Lap 1");
@@ -348,7 +349,7 @@ export function renderTrackmap(widget, ctx) {
     mode: widget.mode,
     ensureChannels: ctx.ensureChannels,
     onModeChange: ctx.onTrackmapMode,
-    events: ctx.events, // V0.9.3: track-limits findings and lock-ups as markers
+    events: ctx.events, // Track-limits findings and lock-ups as markers
     height: Number.isFinite(widget.boxHeight) ? Math.max(widget.boxHeight - 134, 160) : undefined,
   });
   return { element: el("div", { class: "card" }, [el("h2", {}, t("Track")), map.element]), destroy: () => map.destroy() };

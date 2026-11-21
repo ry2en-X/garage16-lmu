@@ -2,7 +2,7 @@
 
 ## The release gate
 
-`python -m scripts.release_check [--zip OUT.zip]` (CI: `.github/workflows/ci.yml`) decides whether a
+`python -m scripts.release.release_check [--zip OUT.zip]` (CI: `.github/workflows/ci.yml`) decides whether a
 state may be released. In this order:
 
 | Step | Fails the release when | Not run (exit 6) when |
@@ -25,9 +25,9 @@ tested tree is in the report.
 ## Metric definitions
 
 Comparison axis: **distance along the lap** (metres from the line), V0.9.5 telemetry-rate axis
-(`server/distance_axis.py`). Every value is measured on the raw samples; the grid only finds
+(`server/analysis/distance_axis.py`). Every value is measured on the raw samples; the grid only finds
 corners and draws charts. Reference: `tests/helpers/reference_lap.py` (2 kHz simulation, recorded
-like LMU: 50 Hz frames, 60 Hz polls, `lap_dist` at 5 Hz) — `tests/test_v097_reference_laps.py`.
+like LMU: 50 Hz frames, 60 Hz polls, `lap_dist` at 5 Hz) — `tests/analysis/test_reference_laps.py`.
 
 | Metric | Unit | Definition | Interpolation | Missing values | Tolerance (proven against the reference) |
 |---|---|---|---|---|---|
@@ -45,7 +45,7 @@ like LMU: 50 Hz frames, 60 Hz polls, `lap_dist` at 5 Hz) — `tests/test_v097_re
 | Consistency | s | robust spread (1.4826 × MAD) of clean laps around the Theil–Sen trend | — | ≥ 4 clean laps | — |
 
 Invalid input is never interpreted silently: a restart inside a file is refused, a corner without
-speed data is not reported, the data-quality check (`server/telemetry_health.py`) states gaps,
+speed data is not reported, the data-quality check (`server/analysis/telemetry_health.py`) states gaps,
 backward steps, speed vs distance and the resolution per lap.
 
 Results change only together with `ANALYSIS_CACHE_VERSION` / `INSIGHTS_VERSION`
@@ -53,10 +53,10 @@ Results change only together with `ANALYSIS_CACHE_VERSION` / `INSIGHTS_VERSION`
 
 ## Track limits: VALID, INVALID, REVIEW (V0.9.9)
 
-Every upload is judged by one pipeline (`server/lap_check.py`), each step a module of its own:
-input (`schemas.LapMetadata`, `server/validation.py`) → time axis and position (`validation.py`,
-`server/lap_decision.py`) → track limits (`server/track_limits.py`) → decision
-(`server/lap_decision.py`) → record (laps.validation + audit log).
+Every upload is judged by one pipeline (`server/laps/lap_check.py`), each step a module of its own:
+input (`schemas.LapMetadata`, `server/laps/validation.py`) → time axis and position (`validation.py`,
+`server/laps/lap_decision.py`) → track limits (`server/laps/track_limits.py`) → decision
+(`server/laps/lap_decision.py`) → record (laps.validation + audit log).
 
 | Status | Meaning | Effect |
 |---|---|---|
@@ -93,7 +93,7 @@ here is calibrated.
 | four_wheels_off (V0.9.3) | all four on grass/dirt/gravel, ≥ 3 samples and ≥ 0.05 s | LMU's surface types |
 
 **None of these limits has been checked against labelled REAL laps yet** — the empirical basis is
-the synthetic set below plus the V0.9.7 reference laps. `scripts/trackcheck_eval.py --labels` runs
+the synthetic set below plus the V0.9.7 reference laps. `scripts/ops/trackcheck_eval.py --labels` runs
 the same measurement on real laps (docs/NAS_MESSUNGEN.md).
 
 ### Reference set and measured error rates
@@ -116,7 +116,7 @@ What the rates mean: they depend on the mix of situations in the set. Every fals
 one kind — **all four wheels beyond the line but still on the kerb (or a few centimetres beyond
 it), with LMU reporting nothing**: no wheel on grass, the car's centre less than 2 m beyond LMU's
 approximate edge. Without LMU's verdict such a lap cannot be told from legal kerb use. Pinned in
-`tests/reference/trackcheck_metrics.json`; `python -m scripts.trackcheck_eval` reproduces both tables.
+`tests/reference/trackcheck_metrics.json`; `python -m scripts.ops.trackcheck_eval` reproduces both tables.
 
 ### Limits of the detection
 
@@ -133,8 +133,8 @@ approximate edge. Without LMU's verdict such a lap cannot be told from legal ker
 What is guaranteed, and only that: a lap file changed, swapped, truncated or removed **after** the
 server stored it is detected — by its size and sha256 (on every analysis access, cached per
 unchanged file for at most 10 min — unchanged meaning same size, mtime, ctime and inode; V0.9.9.1
-added the ctime, which a program cannot set back — and in full by `scripts/integrity_check.py`), and an edit of the
-stored hash, size or lap time in the database by the server's MAC (key: `LMU_GARAGE_INTEGRITY_KEY`).
+added the ctime, which a program cannot set back — and in full by `scripts/ops/integrity_check.py`), and an edit of the
+stored hash, size or lap time in the database by the server's MAC (key: `GARAGE16_INTEGRITY_KEY`).
 Such a lap goes to quarantine (not official, not visible to others) and an audit event records it.
 **Not** guaranteed: that the file was authentic before the upload (the client computes its hash),
 and protection against somebody holding the integrity key AND write access to the database.
@@ -145,9 +145,9 @@ Floors per critical module in `tests/coverage_floors.json` (rounded down from th
 they may rise, never fall). Goal for critical logic: 90 % lines, 85 % branches.
 
 V0.9.9 — the new security-critical modules, measured over the whole suite in the release gate
-(lines / branches): `server/integrity.py` 99.0 / 98.0, `server/lap_decision.py` 97.8 / 93.8,
-`server/audit.py` 97.2 / 93.8, `server/official.py` and `server/request_context.py` 100 / 100,
-`server/lap_check.py` 96.9 / 92.9 (it had fallen to 89.0 % lines, below its floor of 90, when the
+(lines / branches): `server/laps/integrity.py` 99.0 / 98.0, `server/laps/lap_decision.py` 97.8 / 93.8,
+`server/ops/audit.py` 97.2 / 93.8, `server/laps/official.py` and `server/core/request_context.py` 100 / 100,
+`server/laps/lap_check.py` 96.9 / 92.9 (it had fallen to 89.0 % lines, below its floor of 90, when the
 crash paths were new — the floor caught it; tests that make each step crash on purpose fixed it).
 Floors set from these, rounded down. Coverage only says a line ran; the mutation check below says
 whether a test would notice it being wrong.
@@ -156,14 +156,14 @@ Below the goal since V0.9.8:
 
 | Module | Why lower | Covered elsewhere |
 |---|---|---|
-| `server/write_lock.py`, `server/consistency.py` (parts) | the cross-process paths run in subprocesses (backup containers, scripts) | `tests/test_v098_backup_restore.py` runs them for real |
-| `server/security.py` (branches) | error branches of header parsing | — (to do) |
-| `server/crypto.py` (branches) | the import-time fallback runs once per process | `tests/test_v098_crypto.py` (functions) |
+| `server/ops/write_lock.py`, `server/ops/consistency.py` (parts) | the cross-process paths run in subprocesses (backup containers, scripts) | `tests/ops/test_backup_restore_drill.py` runs them for real |
+| `server/core/security.py` (branches) | error branches of header parsing | — (to do) |
+| `server/core/crypto.py` (branches) | the import-time fallback runs once per process | `tests/security/test_crypto.py` (functions) |
 | `client/main.py`, `discord_bot/bot.py` | GUI / Discord event loops | window tests under xvfb, `test_discord_*` |
 
 ## Mutation check
 
-`python -m scripts.mutation_check` breaks the critical decisions one small change at a time
+`python -m scripts.dev.mutation_check` breaks the critical decisions one small change at a time
 (comparison, arithmetic, boolean operator, constant) and runs the tests that guard them; every
 change must make a test fail. Targets: the client address (`client_ip`), records, the write lock,
 rate-limit windows, the distance axis, pedal crossings / point resolution / braking run. Mutants that
@@ -180,37 +180,37 @@ its reason), 343 run — all 343 killed.** The same run on the code of the first
 of 340 killed — but there 27 keys skipped 31 mutants, because two identical changes on one line had
 the same description (e.g. both `- 1` in `clip(x - 1, 0, n - 1)`); three of those skipped mutants
 were not equivalent (run separately: all three killed). Since V0.9.9.1 every description is unique
-("… #2") and `tests/test_v099_mutation_keys.py` fails on a stale key or a key that would skip more
+("… #2") and `tests/quality/test_mutation_keys.py` fails on a stale key or a key that would skip more
 than one mutant.
 The first V0.9.9 run had 39 survivors in `lap_decision` — the tests checked outcomes, not exact
-values and limits; `tests/test_v099_decision_units.py` pins them with hand-computed numbers.
+values and limits; `tests/laps/test_decision_units.py` pins them with hand-computed numbers.
 Run it after changing one of these functions (~40 minutes on 2 vCPU; not part of the gate).
 
 ## V1.0.1 — what the new account rules are tested with
 
 | Rule | Tests |
 |---|---|
-| desktop sign-in only with a confirmed email; switch-off | `tests/test_v101_accounts.py`, `tests/test_v101_client.py` (real server over HTTP) |
-| terms accepted again (website dialog, client checkbox, changed `TERMS_VERSION`) | `tests/test_v101_accounts.py`, `tests/test_v101_client.py` (real Tk window under xvfb), `tests/js/v101.test.mjs` |
-| one token per PC: two PCs, list, disconnect, limit, revoke only that PC, locked account, export, deletion | `tests/test_v101_accounts.py`, `tests/test_driver_deletion.py` (every FK table incl. `device_tokens`) |
-| no enumeration: same sign-up answer, dummy hash for unknown addresses | `tests/test_v101_accounts.py` |
-| failed sign-ins per address (a correct password never counts), emails per address, expired windows dropped | `tests/test_v101_accounts.py` |
-| unique names (NFKC, case, invisible characters, reserved) and legacy duplicates | `tests/test_v101_accounts.py`, `tests/test_team_invitations.py` |
-| unconfirmed sign-ups deleted (and the ones that must stay) | `tests/test_v101_accounts.py` |
-| fair-play hold, admin release with records, off switch, kept by revalidation | `tests/test_v101_fair_play.py` |
-| DPAPI storage (simulated: Linux has no DPAPI), migration of 1.0.0 files, foreign files, failing DPAPI | `tests/test_v101_client.py` |
-| migration 0019 up/down on SQLite and PostgreSQL, on filled databases | `tests/test_migrations.py`, `tests/test_v097_migrate_filled_db.py`, `scripts/test_against_postgres.sh` |
-| security headers, no inline scripts/handlers, docs links, versions | `tests/test_v101_docs.py`, `tests/test_reverse_proxy.py` (real Caddy) |
+| desktop sign-in only with a confirmed email; switch-off | `tests/accounts/test_open_server_accounts.py`, `tests/client/test_credentials.py` (real server over HTTP) |
+| terms accepted again (website dialog, client checkbox, changed `TERMS_VERSION`) | `tests/accounts/test_open_server_accounts.py`, `tests/client/test_credentials.py` (real Tk window under xvfb), `tests/js/v101.test.mjs` |
+| one token per PC: two PCs, list, disconnect, limit, revoke only that PC, locked account, export, deletion | `tests/accounts/test_open_server_accounts.py`, `tests/accounts/test_driver_deletion.py` (every FK table incl. `device_tokens`) |
+| no enumeration: same sign-up answer, dummy hash for unknown addresses | `tests/accounts/test_open_server_accounts.py` |
+| failed sign-ins per address (a correct password never counts), emails per address, expired windows dropped | `tests/accounts/test_open_server_accounts.py` |
+| unique names (NFKC, case, invisible characters, reserved) and legacy duplicates | `tests/accounts/test_open_server_accounts.py`, `tests/teams/test_team_invitations.py` |
+| unconfirmed sign-ups deleted (and the ones that must stay) | `tests/accounts/test_open_server_accounts.py` |
+| fair-play hold, admin release with records, off switch, kept by revalidation | `tests/laps/test_fair_play.py` |
+| DPAPI storage (simulated: Linux has no DPAPI), migration of 1.0.0 files, foreign files, failing DPAPI | `tests/client/test_credentials.py` |
+| migration 0019 up/down on SQLite and PostgreSQL, on filled databases | `tests/db/test_migrations.py`, `tests/db/test_migrate_filled_db.py`, `scripts/dev/test_against_postgres.sh` |
+| security headers, no inline scripts/handlers, docs links, versions | `tests/docs/test_release_v101.py`, `tests/deploy/test_reverse_proxy.py` (real Caddy) |
 
 ## Not yet proven (the 9.9/10 checklist, honestly)
 
 | Item | State |
 |---|---|
 | Clean-room install + full CI run | done locally in a fresh Python 3.12 environment; the GitHub pipeline runs on the next push |
-| Mutation tests for critical calculations | done for the listed targets (`scripts/mutation_check.py`), V0.9.9 including the track-limit decision, integrity, quarantine, upload limits, record release; `server/track_limits.py`'s rule functions and `server/validation.py` are not yet targets |
-| False positives / negatives of the track-limit check on labelled data | done on **synthetic** labelled laps (truth from geometry); **open on real laps** — `docs/NAS_MESSUNGEN.md` Teil D, `scripts/trackcheck_eval.py --labels` |
+| Mutation tests for critical calculations | done for the listed targets (`scripts/dev/mutation_check.py`), V0.9.9 including the track-limit decision, integrity, quarantine, upload limits, record release; `server/laps/track_limits.py`'s rule functions and `server/laps/validation.py` are not yet targets |
+| False positives / negatives of the track-limit check on labelled data | done on **synthetic** labelled laps (truth from geometry); **open on real laps** — `docs/NAS_MESSUNGEN.md` Teil D, `scripts/ops/trackcheck_eval.py --labels` |
 | Real LMU laps as versioned regression corpus | **open** — needs recorded laps from the NAS (reference values must not come from the same algorithm) |
-| Load test with fixed data volume on the target hardware | **open** — `scripts/load_test.py` exists; to be run on the NAS with a defined data set; p95/p99 to be recorded per release |
+| Load test with fixed data volume on the target hardware | **open** — `scripts/dev/load_test.py` exists; to be run on the NAS with a defined data set; p95/p99 to be recorded per release |
 | Monitoring with alerting | partial — readiness endpoint, Docker health, operations view; **no alert channel yet** |
 | Migration and rollback in staging | partial — every migration on filled databases (SQLite) and on PostgreSQL; no staging instance |
 | External penetration test | **open** |

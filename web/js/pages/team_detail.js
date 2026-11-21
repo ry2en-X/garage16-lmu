@@ -1,15 +1,17 @@
-// pages/team_detail.js — the Team Dashboard (V0.6.8): overview, member
+// pages/team_detail.js — the Team Dashboard: overview, member
 // list, team-scoped leaderboard, team records, and an activity console.
 // Reuses the same api.js/el() patterns as the rest of the app.
 
-import { api } from "../api.js";
-import { store } from "../state.js";
-import { renderActivityList } from "../activity.js";
-import { el, formatLapTime, formatDate, inviteStatusLabel, roleLabel } from "../format.js";
+import { api } from "../core/api.js";
+import { store } from "../core/state.js";
+import { renderActivityList } from "../core/activity.js";
+import { el, formatLapTime, formatDate, inviteStatusLabel, roleLabel } from "../core/format.js";
 import { renderSignInPrompt } from "./auth.js";
 
-import { t, tp } from "../i18n.js";
-import { loadTrackNames, trackLabel } from "../tracks.js";
+import { t, tp } from "../core/i18n.js";
+import { loadTrackNames, trackLabel } from "../core/tracks.js";
+import { link } from "../core/link.js";
+import { setTitle } from "../core/router.js";
 export async function renderTeamDetail(container, teamId) {
   if (!store.isSignedIn()) {
     renderSignInPrompt(container, t("Sign in to view this team."));
@@ -28,11 +30,12 @@ export async function renderTeamDetail(container, teamId) {
   const canManage = detail.my_role === "owner" || detail.my_role === "admin";
   const isOwner = detail.my_role === "owner";
 
-  container.appendChild(el("a", { href: "#/teams", class: "subtitle" }, t("← All teams")));
+  container.appendChild(el("a", { href: "/teams", class: "subtitle" }, t("← All teams")));
   container.appendChild(el("h1", {}, detail.name));
+  setTitle(detail.name);   // The tab says which team
   if (detail.description) container.appendChild(el("p", { class: "subtitle" }, detail.description));
 
-  // V0.9.6 — one order for everyone: what the team achieved first (overview, bests, leaderboard,
+  // One order for everyone: what the team achieved first (overview, bests, leaderboard,
   // activity), the people next, the settings last (folded away). The sections load in PARALLEL
   // into their places (before: one after the other).
   const section = (title, extra = null) => {
@@ -131,7 +134,7 @@ function renderSettingsCard(teamId, detail, isOwner) {
       if (!confirm(t("Delete \"{0}\"? This can't be undone.", [detail.name]))) return;
       try {
         await api.deleteTeam(teamId);
-        window.location.hash = "#/teams";
+        navigate("/teams");
       } catch (err) {
         out.innerHTML = "";
         out.appendChild(el("div", { class: "notice notice--error" }, err.message));
@@ -148,7 +151,7 @@ function renderMembersTable(teamId, members, myRole, myDriverId, isOwner, onChan
   const rows = members.map((m) => {
     const isMe = m.driver_id === myDriverId;
     const cells = [
-      el("td", {}, [el("a", { href: `#/driver/${m.driver_id}` }, m.display_name), isMe ? t(" (you)") : ""]),
+      el("td", {}, [el("a", { href: link.driver(m.driver_id, m.display_name) }, m.display_name), isMe ? t(" (you)") : ""]),
       el("td", {}, el("span", { class: "tag" }, roleLabel(m.role))),
       el("td", {}, el("span", { class: `tag ${m.is_active ? "tag--valid" : "tag--invalid"}` }, m.is_active ? t("active") : t("inactive"))),
       el("td", {}, String(m.lap_count)),
@@ -193,7 +196,7 @@ function renderMembersTable(teamId, members, myRole, myDriverId, isOwner, onChan
 
 async function renderTeamLeaderboard(teamId) {
   const wrap = el("div", { class: "card" });
-  // V0.8.9: searchable track list, grouped by venue with every layout that has
+  // Searchable track list, grouped by venue with every layout that has
   // laps (only those can have a team board), instead of a flat list of raw names.
   const trackSearch = el("input", { type: "search", placeholder: t("Search a track, e.g. Fuji…"), autocomplete: "off" });
   const trackSelect = el("select", {}, [el("option", { value: "" }, t("Loading tracks…"))]);
@@ -222,10 +225,10 @@ async function renderTeamLeaderboard(teamId) {
   });
   const initial = await loadTracks("");
   const classSelect = el("select", {}, [el("option", { value: "" }, t("Pick a track first"))]);
-  // V0.7.2 §9.5: third cascade level. "All cars in this class" keeps the
+  // Third cascade level. "All cars in this class" keeps the
   // previous class-wide behavior as the default — picking a specific
   // model narrows further to that exact car (ignoring livery/number, see
-  // server/models.py's car_model docstring).
+  // server/core/models.py's car_model docstring).
   const carSelect = el("select", {}, [el("option", { value: "" }, t("Pick a class first"))]);
   const resultsBox = el("div");
 
@@ -259,13 +262,13 @@ async function renderTeamLeaderboard(teamId) {
       classSelect.appendChild(el("option", { value: "" }, t("Pick a track first")));
       return;
     }
-    // Every class is offered (V0.8.9), with its lap count at this track.
+    // Every class is offered, with its lap count at this track.
     const classes = await api.catalogClassOptions(track);
     classSelect.appendChild(el("option", { value: "" }, t("Choose…")));
     classes.forEach((c) =>
       classSelect.appendChild(el("option", { value: c.name }, `${c.name} · ${c.lap_count ? tp("{0} lap", "{0} laps", c.lap_count) : t("no laps yet")}`))
     );
-    // V0.9.6: the class with the most laps right away
+    // The class with the most laps right away
     const busiest = [...classes].filter((c) => c.lap_count > 0).sort((a, b) => b.lap_count - a.lap_count)[0];
     if (busiest) {
       classSelect.value = busiest.name;
@@ -297,7 +300,7 @@ async function renderTeamLeaderboard(teamId) {
     el("div", { class: "field" }, [el("label", {}, t("Car")), carSelect]),
   ]));
   wrap.appendChild(resultsBox);
-  // V0.9.6: open on the busiest track instead of an empty form
+  // Open on the busiest track instead of an empty form
   const busiestLayout = initial.flatMap((v) => v.layouts).sort((a, b) => b.lap_count - a.lap_count)[0];
   if (busiestLayout) {
     trackSelect.value = busiestLayout.track_name;
@@ -313,7 +316,7 @@ const _STATS_WINDOWS = [
   ["all", t("All Time")],
 ];
 
-// V0.9.6: the overview and the time-windowed statistics in ONE card (they were two, half the
+// The overview and the time-windowed statistics in ONE card (they were two, half the
 // numbers twice): members and team bests held, then laps / PBs / active drivers / new team bests
 // for the chosen period.
 async function renderTeamStatsCard(teamId, detail) {
@@ -360,7 +363,7 @@ function renderDeltaTable(entries) {
   const rows = entries.map((e, i) =>
     el("tr", {}, [
       el("td", {}, String(i + 1)),
-      el("td", {}, el("a", { href: `#/driver/${e.driver_id}` }, e.driver_name)),
+      el("td", {}, el("a", { href: link.driver(e.driver_id, e.driver_name) }, e.driver_name)),
       el("td", {}, formatLapTime(e.lap_time)),
       el("td", {}, i === 0 ? "—" : `+${e.delta_to_leader.toFixed(3)}`),
     ])
@@ -407,7 +410,7 @@ async function renderTeamRecords(teamId) {
 async function renderActivity(teamId) {
   try {
     const activity = await api.teamActivity(teamId);
-    // V0.9.6: one row per lap with all its records (activity.js) instead of one sentence per record
+    // One row per lap with all its records (activity.js) instead of one sentence per record
     return renderActivityList(activity, { showDriver: true, limit: 15, emptyText: t("Nothing yet — go set some times.") });
   } catch (err) {
     return el("div", { class: "notice notice--error" }, err.message);

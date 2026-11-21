@@ -3,14 +3,14 @@
 // lap at the shared cursor. Hover moves the cursor, a click pins it.
 //
 // The plan-view coordinates come from the server already corrected for LMU's
-// world handedness (server/telemetry_analysis.py map_mirror), so what is drawn is
+// world handedness (server/analysis/telemetry_analysis.py map_mirror), so what is drawn is
 // the real track, not its mirror image.
 //
 // The coloured track is rendered once into an offscreen canvas and only re-rendered
 // when the size, the data or the colour mode change; moving the cursor just blits it
 // and draws two dots — the map must stay smooth while the mouse sweeps a chart.
 
-import { el } from "../format.js";
+import { el } from "../core/format.js";
 import {
   distanceAt, divergingColor, fitView, formatChannelValue, formatDelta, indexForDistance, LAP_COLORS,
   nearestIndex, normalizeForColor, rampColor,
@@ -18,7 +18,7 @@ import {
 import { coalesce, cssVar, fitCanvas, onResize } from "./charts.js";
 import { bindTouchGestures } from "./touch.js";
 
-import { t } from "../i18n.js";
+import { t } from "../core/i18n.js";
 const HEIGHT = 380;
 const COLOR_MODE_CHANNELS = ["speed", "throttle", "brake", "gear", "rpm", "lat_g", "long_g"];
 const LEVELS = 28; // colour levels: neighbouring segments of one level are drawn in one stroke
@@ -111,7 +111,7 @@ export function createTrackMap(state, opts = {}) {
 
   let mode = defaultMode;
   let colored = colorsForMode(data, mode);
-  // V0.9.3: events from the shared store (loaded once by the page); markers only for things
+  // Events from the shared store (loaded once by the page); markers only for things
   // with a place on the lap, and not the "info" kind (wheels off without consequence etc.)
   const eventMarkers = () => {
     const store = opts.events;
@@ -193,7 +193,7 @@ export function createTrackMap(state, opts = {}) {
     marker(ctx, mainXs, mainYs, 0, "S/F");
     const sectors = (data.sectors && data.sectors.a) || [];
     sectors.forEach((distance, k) => marker(ctx, mainXs, mainYs, indexForDistance(data.grid, distance), `S${k + 2}`));
-    // V0.9.3: where something happened — red: the lap does not count there, orange: under
+    // Where something happened — red: the lap does not count there, orange: under
     // review, yellow: a measured lock-up / wheelspin. Drawn on the line of the lap it belongs to.
     for (const e of eventMarkers()) {
       const xs = e.side === "b" && xsB ? xsB : mainXs;
@@ -310,7 +310,7 @@ export function createTrackMap(state, opts = {}) {
     const index = indexAtPointer(event);
     if (index >= 0) state.pinCursor(index);
   });
-  // Touch (V0.9.1): tap = cursor; a plain swipe scrolls the page; hold pins the cursor
+  // Touch: tap = cursor; a plain swipe scrolls the page; hold pins the cursor
   // and dragging on after the hold moves it along the track (analysis/touch.js).
   const atXY = (x, y) => indexAtPointer({ clientX: x, clientY: y });
   bindTouchGestures(canvas, {

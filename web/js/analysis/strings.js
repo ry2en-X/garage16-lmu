@@ -7,7 +7,7 @@
 // difference, "biggest gain / loss", "net"): LAP 1 MINUS LAP 2. Negative = Lap 1 faster
 // (time gained, shown green), positive = Lap 1 slower (time lost, shown red).
 
-import { t } from "../i18n.js";
+import { t } from "../core/i18n.js";
 
 export const T = {
   compareButton: t("Compare lap"),

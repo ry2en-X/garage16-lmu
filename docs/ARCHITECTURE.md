@@ -1,4 +1,4 @@
-# Garage16 — architecture (V1.0.1)
+# Garage16 — architecture (V1.0.2)
 
 How the parts fit together, where data lives, and the decisions behind the design. Written so
 that someone who has never seen the project can run, change and repair it.
@@ -8,7 +8,7 @@ that someone who has never seen the project can run, change and repair it.
 ```
  Windows PC (each driver)                       Server host (Synology NAS or VPS, Docker)
  ┌──────────────────────────┐                   ┌─────────────────────────────────────────────────────┐
- │ Le Mans Ultimate          │                  │  caddy (reverse proxy, TLS, web/ static files)       │
+ │ Le Mans Ultimate          │                  │  caddy (reverse proxy; web/ only without Pages)      │
  │   shared memory           │                  │     │  X-Forwarded-For rewritten / appended          │
  │        │ 60 Hz            │   HTTPS          │     ▼                                                │
  │ Desktop client (0.9.4)    │ ───────────────▶ │  server (FastAPI, uvicorn, 1 worker)                 │
@@ -18,7 +18,7 @@ that someone who has never seen the project can run, change and repair it.
  │  optional analysis window │ ◀── web pages ── │     ▲                      (one parquet file per lap) │
  └──────────────────────────┘                   │     │                      ▲                         │
                                                 │  discord_bot (reads records, announces)              │
- Browser (any device) ── HTTPS ───────────────▶ │  backup (optional profile: consistent backups)       │
+ Browser ─▶ Cloudflare Pages (web/, function) ▶ │  backup (optional profile: consistent backups)       │
                                                 │  cloudflared (optional: tunnel instead of open port) │
                                                 └─────────────────────────────────────────────────────┘
 ```
@@ -28,9 +28,49 @@ that someone who has never seen the project can run, change and repair it.
 | Desktop client (`client/`) | read LMU's shared memory, cut laps, write one parquet file per lap with its metadata, sign and upload, retry transient failures, keep laps until accepted | judge validity on its own authority (the server decides, the client's verdict is one input) |
 | Server (`server/`) | authenticate, verify the upload signature, validate the lap (plausibility, track limits), store file + row atomically, compute records, serve the analysis | trust client-supplied paths, names or headers without checking |
 | Web frontend (`web/`) | the pages; every analysis is computed by the server, the browser only draws and filters | hold data the server does not have |
+| Pages function (`web/functions/_middleware.js`) | on Cloudflare Pages: pass `/api/*` and the old API paths to the NAS with the visitor's address, fill each page's title for link previews | cache anything private |
 | Discord bot (`discord_bot/`) | announce new records | write anything but its own announcement marks |
-| Caddy (`docker/Caddyfile`) | TLS, static files, compression, forward the API, set the forwarding header | — |
-| Backup (`docker/backup-loop.sh`, `scripts/backup.sh`) | database dump + file archive from ONE moment, checked, with manifest | publish an unchecked or partial backup |
+| Caddy (`docker/Caddyfile`) | TLS, compression, forward the API (and the old API paths), set the forwarding header; static files and page titles only when the NAS serves the website | — |
+| Backup (`docker/backup-loop.sh`, `scripts/ops/backup.sh`) | database dump + file archive from ONE moment, checked, with manifest | publish an unchecked or partial backup |
+
+## Code layout (V1.0.2)
+
+```
+server/
+  main.py            the app: middlewares, /health, mounts api/v1 under /api/v1
+  api/legacy.py      the paths of V1.0.1, translated before routing (old clients)
+  api/caching.py     Cache-Control + ETag of public and analysis reads
+  api/v1/            one module per area: telemetry (laps/upload), analysis, circuits, stints,
+                     leaderboard, drivers, accounts, web_sessions, account_data, teams, admin,
+                     legal, pages (slugs, page titles)
+  core/              config, env (GARAGE16_* / LMU_GARAGE_*), database, models, slugs, security,
+                     crypto, rate_limit, client_ip, request_context, storage, versioning
+  laps/              validation, lap_check, lap_decision, track_limits, track_surface, official,
+                     records, integrity, leaderboard_ranking, fair_play, schemas (upload contract)
+  analysis/          telemetry_analysis (loading, grid, delta), corners, racing_line, distribution,
+                     comparison, lap_access, telemetry_channels, distance_axis, lap_insights,
+                     analysis_cache, analysis_reference, stints, telemetry_health
+  accounts/          auth, sessions, names, driver_lifecycle, email_provider, discord_link,
+                     team_lifecycle, schemas, team_schemas
+  catalog/           catalog (venues, layouts, classes), car_identity, schemas
+  ops/               write_lock, audit, upload_log, telemetry_lifecycle, consistency
+web/
+  index.html         loads /v/<version>/js/main.js (versioned files, cached a year)
+  js/main.js         starts the router
+  js/core/           api, router (history API), routes (THE table of pages), link (THE link
+                     builder), copy_link, i18n, format, state, tracks, activity, terms_gate, …
+  js/pages/          one module per page, loaded when opened
+  js/analysis/, js/stints/, js/legal/   the analysers' parts, the legal texts
+  functions/         the Cloudflare Pages function
+scripts/ops|dev|release/   operator tools · developer tools · release gate and website build
+tests/<topic>/      accounts, analysis, api, client, core, db, deploy, docs, laps, leaderboard,
+                     ops, quality, security, teams, web — plus tests/js (jsdom) and helpers
+```
+
+A page address (`/leaderboard/fuji-speedway/hypercar`) is matched by `web/js/core/routes.js`, which
+turns slugs back into names (the catalog) and hands the page its parameters (`routeQuery()`); every
+link is built by `web/js/core/link.js`. The server knows the same pages for link previews
+(`server/api/v1/pages.py`, tests keep both lists equal).
 
 ## Data
 
@@ -39,7 +79,7 @@ that someone who has never seen the project can run, change and repair it.
 | PostgreSQL | drivers, connected PCs (`device_tokens`, V1.0.1), laps (metadata, verdict, figures), records, teams, sessions, invitations, upload log, audit log | until deleted; upload log 30 days; audit log 365 days; unconfirmed sign-ups 7 days |
 | `telemetry_data` volume | one parquet file per lap, content-addressed (`<sha256>.parquet`) | as long as its lap |
 | Client PC | laps not yet accepted, the client's config (token and secret DPAPI-encrypted on Windows, V1.0.1) and log | until uploaded / by the driver |
-| Backups | `garage16_<stamp>/` = dump + archive + manifest | 14 days (configurable) |
+| Backups | `garage16_<stamp>/` = dump + file list + manifest; the files once in `telemetry-store/` (V1.0.2) | 14 days (configurable); a stored file as long as a backup lists it |
 
 Details per field and the deletion rules: `docs/DATA_PROTECTION.md`.
 
@@ -51,12 +91,12 @@ Details per field and the deletion rules: `docs/DATA_PROTECTION.md`.
    envelope is a JSON object → client not too old (426 `UPDATE_REQUIRED`) → signature (401) →
    metadata schema (400) → file streamed to a temp file in the target folder with a size limit
    (413) → sha256 matches (400) → already stored? (idempotent: same answer, `duplicate: true`).
-3. Under the **shared write lock** (`server/write_lock.py`; 503 `MAINTENANCE` while a backup runs):
+3. Under the **shared write lock** (`server/ops/write_lock.py`; 503 `MAINTENANCE` while a backup runs):
    temp file renamed to its final content-addressed name (atomic, same folder) → one transaction:
    validity check, lap row, record evaluation (serialised per track and car model: advisory lock on
    PostgreSQL) → commit. Any failure: rollback, and the file is removed unless a committed lap
    points at it.
-4. Every attempt is recorded in `upload_events` with its request id (`server/upload_log.py`).
+4. Every attempt is recorded in `upload_events` with its request id (`server/ops/upload_log.py`).
 
 V0.9.9 additions, in the same order: the temp file is created new-only and never through a symlink
 (`O_EXCL | O_NOFOLLOW`, mode 0600) in a folder that must resolve inside the storage root; the file's
@@ -81,11 +121,11 @@ file ──► 1 input        schema, ranges, required fields          schemas.p
                  ├─ REVIEW   is_valid = true, review_status = held: stored, analysable, NOT official
                  │           until an admin clears it → then records are evaluated (admin.review_lap)
                  └─ VALID    official at once: records evaluated in the upload transaction
-official = is_valid AND review_status NOT IN (held, quarantined)            server/official.py
+official = is_valid AND review_status NOT IN (held, quarantined)            server/laps/official.py
 ```
 
 One function judges both new uploads and stored laps (`lap_check.check_lap`, used by
-`scripts/revalidate_laps.py` and `scripts/trackcheck_eval.py`): the same file, stored inputs and rule
+`scripts/ops/revalidate_laps.py` and `scripts/ops/trackcheck_eval.py`): the same file, stored inputs and rule
 versions give the same verdict. A lap already stored is never taken out of the leaderboards by a
 later re-judgement or by a finding linked from its next lap — it stays `pending` (counting
 provisionally) until an admin decides or `revalidate_laps --apply --hold` is run on purpose.
@@ -100,7 +140,7 @@ provisionally) until an admin decides or `revalidate_laps --apply --hold` is run
 | history | `audit_events` (chained HMAC), `upload_events` (30 days) | append-only (trigger); pruning records its anchor |
 
 Integrity is checked on every analysis access (size, sha256 — cached per unchanged file for at most
-10 min, "unchanged" = same size, mtime, ctime, inode — and MAC), by `scripts/integrity_check.py`,
+10 min, "unchanged" = same size, mtime, ctime, inode — and MAC), by `scripts/ops/integrity_check.py`,
 before every re-judgement, and when a backup is restored (`consistency_check --deep`: hash, size,
 MAC, audit chain; V0.9.9.1 also the chain head against the manifest's `audit_head`, before the
 switch). A failure quarantines the lap.
@@ -123,7 +163,7 @@ game), and an attacker with the integrity key AND database write access (ADR-12)
 ## The analysis pipeline
 
 `load_lap` (parquet, memory-mapped) → time must not run backwards (a restart is refused) →
-**distance axis** at telemetry rate (`server/distance_axis.py`: LMU's `lap_dist` where it advances,
+**distance axis** at telemetry rate (`server/analysis/distance_axis.py`: LMU's `lap_dist` where it advances,
 the samples in between placed by integrated speed; repeated polls dropped; short NaN gaps bridged
 for the axis only) → resampling onto a common distance grid → channels, delta (time at equal
 distance), corners (detected on the mean speed of both laps, measured on raw samples, each point
@@ -135,17 +175,29 @@ same metre. Definitions, units and tolerances of every metric: `docs/QUALITY.md`
 
 ## Consistency and recovery
 
-* `server/consistency.py` / `scripts/consistency_check.py`: database ↔ files, figures versions,
+* `server/ops/consistency.py` / `scripts/ops/consistency_check.py`: database ↔ files, figures versions,
   metadata, dangling rows; dry run by default; deletions re-check right before deleting.
-* Backup: write lock exclusive → dump + archive → checks → manifest → one rename publishes.
-* Restore (`scripts/restore.sh`): check → stage in a new database and volume → validate there
+* Backup: write lock exclusive → dump + the new files into the store + the list → checks → manifest
+  → one rename publishes (`docker/telemetry-store.sh`).
+* Restore (`scripts/ops/restore.sh`): check → stage in a new database and volume → validate there
   (migrations, every file's sha256) → swap the databases in one transaction → swap the files →
   verify the running server; any failure returns to the state before (`docs/ROLLBACK.md`).
 
 ## Architecture decisions
 
+**ADR-16 Website on Cloudflare Pages, the NAS answers the API (V1.0.2).** The files come from
+Cloudflare, versioned under `/v/<hash>/` (cached a year); the Pages function keeps ONE address for
+pages and API, so cookies, CSRF checks and CSP stay as they were, and sends the visitor's address
+with a shared secret (otherwise every visitor shares one rate limit). Caddy can still serve the
+website (the same code), so Pages is a choice, not a dependency.
+
+**ADR-17 The old API paths translated inside the server (V1.0.2).** No redirects (a POST would lose
+its body with many clients), one table (`server/api/legacy.py`); the proxies route precisely the old
+API paths so that look-alike page addresses (`/leaderboard/<track>`, `/teams`) reach the website
+even when a link-preview bot sends `Accept: */*`.
+
 **ADR-1 One server process, state in memory.** Rate limits and the analysis cache live in the
-process (`LMU_GARAGE_WORKERS=1`). For a circle of friends this is enough and needs no Redis; with
+process (`GARAGE16_WORKERS=1`). For a circle of friends this is enough and needs no Redis; with
 more workers each has its own counters (the server logs a warning). Revisit before running several
 workers or hosts: a shared limiter (Redis or the proxy's) is then required.
 
@@ -174,10 +226,10 @@ configurable time so a killed backup cannot block uploads.
 validate, then swap names in one transaction; the old state stays as rollback point until cleaned up.
 
 **ADR-8 Trust forwarding headers only from configured proxies, read from the right.** A header the
-client writes himself cannot change the address the rate limits count (`server/client_ip.py`).
+client writes himself cannot change the address the rate limits count (`server/core/client_ip.py`).
 
 **ADR-9 The tested tree is the published tree.** The release archive is built from the staged copy
-the gate ran on; its hash is in the report (`scripts/release_check.py`).
+the gate ran on; its hash is in the report (`scripts/release/release_check.py`).
 
 **ADR-10 REVIEW holds, VALID needs evidence (V0.9.9).** A lap that cannot be checked is not valid by
 default: missing or unreadable signals, gaps, implausible motion or another driver's file make it
@@ -186,7 +238,7 @@ evaluated at that moment, never retroactively announced for laps that were faste
 Laps flagged before (`pending`) keep counting so that no stored record changes on an update.
 
 **ADR-11 Integrity by hash + server MAC, not by client signatures (V0.9.9).** The sha256 is taken over
-the bytes as received; the server signs (HMAC, its own key, `LMU_GARAGE_INTEGRITY_KEY`, rotatable) the
+the bytes as received; the server signs (HMAC, its own key, `GARAGE16_INTEGRITY_KEY`, rotatable) the
 lap's id, driver, hash, size and lap time. A client cannot produce this proof. It detects any change
 after storage and any edit of hash, size or lap time by somebody without the key — including a
 manipulated backup. It says nothing about the lap before the upload.
@@ -198,21 +250,21 @@ part of the chain so a deletion request can be honoured without breaking it.
 
 **ADR-13 One token per PC, one secret per account (V1.0.1).** `POST /accounts/desktop-login` issues a
 token per PC (`device_tokens`, hash only, a name and dates), so connecting a second PC no longer
-disconnects the first; the oldest is dropped above `LMU_GARAGE_MAX_DEVICES`. The per-driver token
+disconnects the first; the oldest is dropped above `GARAGE16_MAX_DEVICES`. The per-driver token
 (`drivers.token_hash`) stays valid for clients connected before and for the "advanced" token login —
-`server/auth.py` accepts both. The client secret (HMAC key) stays per account: queued laps of every PC
+`server/accounts/auth.py` accepts both. The client secret (HMAC key) stays per account: queued laps of every PC
 keep uploading, and rotating it remains one action. Revoking with a PC's token disconnects only that PC.
 
 **ADR-14 Fair play by review, not by trusting the client (V1.0.1).** The client holds the HMAC key, so
 a signature proves the account, not the lap. Besides the telemetry checks (ADR-4, ADR-10) one cheap
 rule covers the case that matters most on an open server: a driver with fewer than N official laps
-whose lap would beat the Garage16 Best of *others* is held (`server/fair_play.py`) — same mechanism as
+whose lap would beat the Garage16 Best of *others* is held (`server/laps/fair_play.py`) — same mechanism as
 REVIEW, records evaluated when an admin clears it. First laps on a combination and slower laps never
 wait, so normal use does not reach the admin.
 
 **ADR-15 Accounts that do not reveal themselves (V1.0.1).** Sign-up answers the same for a new and a
 registered address (the mailbox learns the difference), unknown addresses cost a password hash on
 sign-in, and failed sign-ins and emails are limited per address (hashed, in memory) as well as per
-IP. Driver names are unique in a normalised form (`server/names.py`: NFKC, case-folded, invisible
+IP. Driver names are unique in a normalised form (`server/accounts/names.py`: NFKC, case-folded, invisible
 characters removed) so a newcomer cannot appear as an existing driver; names duplicated before
 V1.0.1 keep a NULL key rather than being renamed by a migration.

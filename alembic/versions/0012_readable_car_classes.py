@@ -11,10 +11,10 @@ mapping can always be re-derived or corrected from the source.
 
 Data migration: every existing lap gets car_class_raw = its old car_class,
 then car_class is rewritten through the same alias table the server uses
-(server/catalog.py). Unknown classes are left exactly as they were. The alias
+(server/catalog/catalog.py). Unknown classes are left exactly as they were. The alias
 table is copied here on purpose — a migration must keep working even after
 the application code it was written against changes; tests/
-test_readable_classes.py pins this copy to server/catalog.py so they can't
+test_readable_classes.py pins this copy to server/catalog/catalog.py so they can't
 drift apart unnoticed.
 
 Downgrade restores car_class from car_class_raw and drops the column, so the
@@ -34,7 +34,7 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 # alias (uppercase letters+digits only) -> readable name. KEEP IN SYNC with
-# server/catalog.py CLASSES (enforced by a test).
+# server/catalog/catalog.py CLASSES (enforced by a test).
 _ALIASES = {
     "HYPER": "Hypercar", "HYPERCAR": "Hypercar",
     "LMP2WEC": "LMP2 WEC",

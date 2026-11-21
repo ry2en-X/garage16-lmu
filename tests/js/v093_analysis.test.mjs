@@ -17,7 +17,7 @@ globalThis.sessionStorage = dom.window.sessionStorage;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
 globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0);
-dom.window.LMU_GARAGE_API_BASE_URL = "";
+dom.window.GARAGE16_API_BASE_URL = "";
 dom.window.localStorage.setItem("lmu_garage_session", JSON.stringify({ driverId: 1, displayName: "Me", viaCookie: true }));
 dom.window.localStorage.setItem("garage16_language", "en");
 
@@ -40,8 +40,8 @@ globalThis.fetch = async (url) => {
   calls.push(url);
   const u = new URL(url, "http://x");
   const json = (body, status = 200) => ({ ok: status < 400, status, statusText: String(status), json: async () => body, text: async () => JSON.stringify(body) });
-  if (u.pathname === "/telemetry/analysis/sessions") return json(SESSIONS);
-  if (u.pathname === "/telemetry/analysis/theoretical-best") return json(IDEAL);
+  if (u.pathname === "/api/v1/analysis/sessions") return json(SESSIONS);
+  if (u.pathname === "/api/v1/analysis/theoretical-best") return json(IDEAL);
   return json({ detail: "unexpected " + u.pathname }, 500);
 };
 
@@ -266,12 +266,12 @@ await renderSessions(page);
 assert.ok(text(page).includes("Le Mans · Ferrari 499P"));
 assert.ok(text(page).includes("± 0.424 s") && text(page).includes("−0.600 s/lap") && text(page).includes("4.21 L"));
 assert.equal(page.querySelectorAll(".sess__bar").length, 3);
-assert.ok(page.querySelector(".sess__bar--invalid") && page.querySelector(".sess__bar--best").getAttribute("href") === "#/analysis?a=12");
+assert.ok(page.querySelector(".sess__bar--invalid") && page.querySelector(".sess__bar--best").getAttribute("href") === "/analysis/12");
 page.querySelector(".sess__ideal-btn").click();
 await sleep(20);
 assert.ok(text(page).includes("3:29.400"), "the theoretical best");
 assert.ok(text(page).includes("272 stretches of 50 m"));
-assert.ok(page.querySelector('a[href="#/analysis?a=12&b=11"]'), "compare your best with a lap that holds best stretches");
+assert.ok(page.querySelector('a[href="/analysis/12/vs/11"]'), "compare your best with a lap that holds best stretches");
 assert.ok(text(page).includes("1 older lap is not included"));
 assert.ok(calls.some((u) => u.includes("theoretical-best") && u.includes("track_name=Le+Mans") && u.includes("car_model=Ferrari+499P")));
 // V0.9.3.1: labelled as calculated, conditions never mixed silently
@@ -295,7 +295,7 @@ assert.equal(page2.querySelector(".sess__ideal-btn"), null);
 assert.ok(!calls.slice(callsAtSessions).some((u) => u.includes("theoretical-best")));
 
 // V0.9.3.1: findings name their tier and the attribution of late reports
-const { findingText, tierText, allFindings } = await import("../../web/js/findings.js");
+const { findingText, tierText, allFindings } = await import("../../web/js/core/findings.js");
 assert.equal(findingText({ code: "late_track_limits", detail: { seconds_after_line: 2.4, added: 1, points: 0.25, attribution: "ambiguous" } }),
   "Track-limits steps 2.4 s after the finish line (+1 = 0.25 warning points; unclear which lap)");
 assert.equal(findingText({ code: "track_limits_points_previous_lap", detail: { added: 2 } }),

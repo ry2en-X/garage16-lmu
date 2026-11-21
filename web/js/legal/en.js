@@ -8,7 +8,7 @@ export const LABELS = {
   title: "Legal",
   intro: "Garage16 is a private, non-commercial hobby project. This is who runs it, what happens to your data and which rules apply.",
   tabs: { imprint: "Legal notice", privacy: "Privacy", terms: "Terms of use", licenses: "Licences" },
-  operatorMissing: "The operator's details have not been entered on this server yet (LMU_GARAGE_OPERATOR_NAME / _ADDRESS / _EMAIL in .env).",
+  operatorMissing: "The operator's details have not been entered on this server yet (GARAGE16_OPERATOR_NAME / _ADDRESS / _EMAIL in .env).",
   operatorError: "The operator's details could not be loaded right now. Please try again later.",
   email: "Email",
   asOf: "As of",

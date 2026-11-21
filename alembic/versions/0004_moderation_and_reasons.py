@@ -28,7 +28,7 @@ def upgrade() -> None:
         # Distinct from token_revoked_at: revoking a token is something a
         # driver can do to themselves (lost device); locking is a
         # moderation action. A locked driver's existing token still hashes
-        # correctly but get_current_driver() rejects it — see server/auth.py.
+        # correctly but get_current_driver() rejects it — see server/accounts/auth.py.
         batch_op.add_column(
             sa.Column("is_locked", sa.Boolean(), nullable=False, server_default=sa.false())
         )

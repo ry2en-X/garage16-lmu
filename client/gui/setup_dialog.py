@@ -1,10 +1,10 @@
-"""client/gui/setup_dialog.py — GUI first-run / reconfigure dialog (V0.8.6).
+"""client/gui/setup_dialog.py — GUI first-run / reconfigure dialog.
 
 Replaces the console `input()` wizard for the friend-facing app: a
 packaged Windows build has no terminal at all, so setup has to happen in
 a window. The validation logic (`validate_setup_input`) is deliberately a
 plain function separate from the Tkinter widget code — it needs no
-display, so it's directly unit-testable (tests/test_client_setup.py);
+display, so it's directly unit-testable (tests/client/test_client_setup.py);
 only `run_setup_dialog` itself touches Tkinter.
 
 If the person building the package baked a server URL in
@@ -12,14 +12,14 @@ If the person building the package baked a server URL in
 pre-filled and — since friends usually shouldn't touch it — the dialog
 shows it as a normal editable field.
 
-V1.0: the driver signs in with the email and password of their Garage16
+The driver signs in with the email and password of their Garage16
 account (POST /accounts/desktop-login hands the client its credentials) —
 nothing to copy from the website any more. Pasting an auth token and client
 secret is still there, folded away as "advanced" (accounts without a
 password, servers older than 1.0). Links to the website's sign-up, setup
 guide and privacy policy sit right in the window.
 
-V1.0.1: the client sends this PC's name (each PC gets its own token, so the rig and a laptop can
+The client sends this PC's name (each PC gets its own token, so the rig and a laptop can
 both stay connected), understands the server's two new answers — "confirm your email first" and
 "accept the changed terms" (a checkbox appears) — and warns before a password would travel over
 plain http:// to anything but this computer.
@@ -71,7 +71,7 @@ _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
 
 
 def insecure_http(api_url: str) -> bool:
-    """V1.0.1: True if the password would go unencrypted to another computer (http://, not this PC)."""
+    """True if the password would go unencrypted to another computer (http://, not this PC)."""
     parsed = urlparse(normalize_server_url(api_url))
     return parsed.scheme == "http" and (parsed.hostname or "") not in _LOCAL_HOSTS
 
@@ -92,13 +92,15 @@ def desktop_login(api_url: str, email: str, password: str, timeout: float = LOGI
     server errors."""
     from client.uploader.uploader import CLIENT_VERSION
 
+    from client.api_paths import fall_back, url_for
+
+    body = {"email": email.strip(), "password": password, "accept_terms": bool(accept_terms),
+            "device_name": (device_name or this_pc_name())[:80], "client_version": CLIENT_VERSION}
+    path = "/api/v1/accounts/desktop-login"
     try:
-        resp = requests.post(
-            f"{api_url.rstrip('/')}/accounts/desktop-login",
-            json={"email": email.strip(), "password": password, "accept_terms": bool(accept_terms),
-                  "device_name": (device_name or this_pc_name())[:80], "client_version": CLIENT_VERSION},
-            timeout=timeout,
-        )
+        resp = requests.post(url_for(api_url, path), json=body, timeout=timeout)
+        if fall_back(api_url, path, resp):      # A server before 1.0.2 (client/api_paths.py)
+            resp = requests.post(url_for(api_url, path), json=body, timeout=timeout)
     except requests.RequestException:
         return None, "Couldn't reach that server. Check the address and your internet connection, then try again."
     if resp.status_code == 200:
@@ -115,7 +117,7 @@ def desktop_login(api_url: str, email: str, password: str, timeout: float = LOGI
     if resp.status_code == 403:
         return None, LoginError("This account has been locked. Please contact whoever runs the Garage16 server.")
     if resp.status_code == 409:
-        # V1.0.1: {"detail": {"code": ..., "message": ...}}
+        # {"detail": {"code": ..., "message": ...}}
         try:
             detail = resp.json().get("detail")
         except (ValueError, AttributeError):
@@ -236,7 +238,7 @@ def run_setup_dialog(default_api_url: str, parent=None) -> Optional[ClientConfig
     email_var = add_field(login_frame, "Email")
     password_var = add_field(login_frame, "Password", secret=True)
 
-    # V1.0: the old way, folded away — paste the auth token and client secret
+    # The old way, folded away — paste the auth token and client secret
     token_frame = ttk.Frame(frame)
     token_var = add_field(token_frame, "Auth token", secret=True)
     secret_var = add_field(token_frame, "Client secret", secret=True)
@@ -261,7 +263,7 @@ def run_setup_dialog(default_api_url: str, parent=None) -> Optional[ClientConfig
 
     advanced = ttk.Checkbutton(frame, text="Use an auth token instead (advanced)", variable=use_token, command=toggle_token)
     advanced.pack(anchor="w", pady=(0, 6))
-    # V1.0.1: shown (below the password) only when the server says the terms changed
+    # Shown (below the password) only when the server says the terms changed
     # (LoginError code "terms_required")
     terms_box = ttk.Checkbutton(frame, text="I accept the terms of use and have read the privacy policy",
                                 variable=terms_var)

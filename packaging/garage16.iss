@@ -55,14 +55,22 @@ RestartApplications=yes
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"
-Name: "startupentry"; Description: "Start Garage16 automatically when I log in to Windows"; GroupDescription: "Convenience:"; Flags: unchecked
+; V1.0.2: autostart is a choice in two steps — whether Garage16 starts with Windows at all, and
+; if so whether its window opens or it starts minimized to the taskbar (Garage16.exe --minimized).
+; The two sub-options are radio buttons; "open the window" is the default once autostart is ticked.
+Name: "startupentry"; Description: "Start Garage16 automatically when I log in to Windows"; GroupDescription: "Autostart:"; Flags: unchecked
+Name: "startupentry\window"; Description: "Open the Garage16 window"; Flags: exclusive
+Name: "startupentry\minimized"; Description: "Start minimized (only in the taskbar)"; Flags: exclusive unchecked
 
 [InstallDelete]
 ; The app's own program files only (PyInstaller's _internal folder), so that switching
 ; from "Client + analysis app" back to "Client" leaves none of the analysis window's
-; files behind. Never anything outside {app}: the login (%USERPROFILE%\.lmu_garage)
+; files behind. Never anything outside {app}: the login (%USERPROFILE%\.garage16)
 ; and recorded laps (%LOCALAPPDATA%\Garage16) are not in here.
 Type: filesandordirs; Name: "{app}\_internal"
+; V1.0.2: the autostart shortcut is made fresh from this install's choice — without this, an update
+; with autostart switched off (or switched from window to minimized) would leave the old one behind.
+Type: files; Name: "{userstartup}\Garage16.lnk"
 
 [Files]
 Source: "..\dist\Garage16\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion createallsubdirs
@@ -70,12 +78,13 @@ Source: "..\dist\Garage16\*"; DestDir: "{app}"; Flags: recursesubdirs ignorevers
 [Icons]
 Name: "{autoprograms}\Garage16"; Filename: "{app}\Garage16.exe"
 Name: "{autodesktop}\Garage16"; Filename: "{app}\Garage16.exe"; Tasks: desktopicon
-Name: "{userstartup}\Garage16"; Filename: "{app}\Garage16.exe"; Tasks: startupentry
+Name: "{userstartup}\Garage16"; Filename: "{app}\Garage16.exe"; Tasks: startupentry\window
+Name: "{userstartup}\Garage16"; Filename: "{app}\Garage16.exe"; Parameters: "--minimized"; Tasks: startupentry\minimized
 
 [Run]
 Filename: "{app}\Garage16.exe"; Description: "Start Garage16 now"; Flags: postinstall nowait skipifsilent
 
 ; Deliberately NO [UninstallDelete] for user data: the friend's saved
-; login (%USERPROFILE%\.lmu_garage) and recorded laps (%LOCALAPPDATA%\Garage16)
+; login (%USERPROFILE%\.garage16) and recorded laps (%LOCALAPPDATA%\Garage16)
 ; live OUTSIDE the install folder, so uninstalling or updating never
 ; touches them.

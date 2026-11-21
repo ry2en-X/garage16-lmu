@@ -1,0 +1,54 @@
+# The website (web/) on Cloudflare Pages: after every successful CI run on main
+# (the release gate in ci.yml), scripts/release/build_web.py builds build/pages and wrangler deploys
+# it together with the Pages function (web/functions/). The NAS then answers only the API.
+#
+# Needs two repository secrets (Settings -> Secrets and variables -> Actions), docs/DEPLOYMENT.md:
+#   CLOUDFLARE_API_TOKEN   a token with "Cloudflare Pages: Edit"
+#   CLOUDFLARE_ACCOUNT_ID  the account id (Cloudflare dashboard, right column)
+# and the repository variable CLOUDFLARE_PAGES_PROJECT (default: garage16). Without the token the
+# job ends at once with a notice (forks, or before Pages is set up) — never red.
+name: pages
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build the website (assets under /v/<content hash>/)
+        run: python -m scripts.release.build_web --out build/pages
+      - name: Is Cloudflare set up?
+        id: ready
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::notice::CLOUDFLARE_API_TOKEN is not set — the website was built but not deployed (docs/DEPLOYMENT.md, Cloudflare Pages)."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Deploy to Cloudflare Pages (with the function in web/functions)
+        if: steps.ready.outputs.ok == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: web
+          command: pages deploy ../build/pages --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT || 'garage16' }} --branch=main --commit-dirty=true

@@ -1,6 +1,6 @@
 """
-Track-limit reference laps with a KNOWN truth (V0.9.9) — tests/test_v099_trackcheck_reference.py
-and scripts/trackcheck_eval.py.
+Track-limit reference laps with a KNOWN truth — tests/laps/test_trackcheck_reference.py
+and scripts/ops/trackcheck_eval.py.
 
 The truth is defined by geometry, independently of Garage16's rules
 --------------------------------------------------------------------
@@ -367,7 +367,7 @@ def judge(sc: Scenario, *, with_reference: bool = True):
     from pathlib import Path
     from types import SimpleNamespace
 
-    from server.lap_check import check_lap
+    from server.laps.lap_check import check_lap
 
     lap = build(sc)
     df = record(sc, lap)

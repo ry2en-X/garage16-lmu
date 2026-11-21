@@ -22,27 +22,32 @@ class GarageApp:
     """Runs on the main thread; the telemetry/upload loops run in background
     threads and push StatusUpdate objects through a thread-safe queue."""
 
-    def __init__(self, on_reconnect=None, on_open_analysis=None, analysis_choice=None):
+    def __init__(self, on_reconnect=None, on_open_analysis=None, analysis_choice=None, start_minimized=False):
         """on_open_analysis(lap_id or None): opens the analysis (V0.9.2, see
         client/main.py open_analysis). analysis_choice: None in the standard
         edition; in the "Client + analysis app" edition a pair
-        (prefers_browser: bool, set_prefers_browser(bool)) for the checkbox."""
+        (prefers_browser: bool, set_prefers_browser(bool)) for the checkbox.
+        start_minimized (V1.0.2, `Garage16.exe --minimized`, the installer's "start minimized"
+        autostart): the window starts as a button in the taskbar instead of opening."""
         self._on_reconnect = on_reconnect
         self._on_open_analysis = on_open_analysis
         self._analysis_choice = analysis_choice
         self._last_lap_id = None
         from client.icon import apply_to_tk, set_windows_app_id
 
-        set_windows_app_id()          # V0.9.4: the taskbar shows the Garage16 icon, not Python's
+        set_windows_app_id()          # The taskbar shows the Garage16 icon, not Python's
         self.root = tk.Tk()
         apply_to_tk(self.root)
         self.root.title("Garage16 — Client")
-        self.root.geometry("440x400" if analysis_choice is not None else "440x380")   # V0.9.4: three analysis buttons
+        self.root.geometry("440x400" if analysis_choice is not None else "440x380")   # Three analysis buttons
         self.root.resizable(False, False)
 
         self._queue: "queue.Queue[StatusUpdate]" = queue.Queue()
 
         self._build_widgets()
+        if start_minimized:
+            # Before the first mainloop turn, so the window never flashes up: Tk maps it iconic.
+            self.root.iconify()
         self.root.after(200, self._poll_queue)
 
     def _build_widgets(self) -> None:
@@ -81,11 +86,11 @@ class GarageApp:
 
         ttk.Separator(self.root, orient="horizontal").pack(fill="x", **pad)
 
-        # V0.9.2: the analysis — in the browser, or (Client + analysis app) in its own window
+        # The analysis — in the browser, or (Client + analysis app) in its own window
         if self._on_open_analysis is not None:
             row = ttk.Frame(self.root)
             row.pack(fill="x", padx=12, pady=(0, 4))
-            # V0.9.4: two dashboards — one lap in detail, or the whole session
+            # Two dashboards — one lap in detail, or the whole session
             ttk.Button(row, text="LapTime Analyzer", command=lambda: self._on_open_analysis(None)).pack(side="left")
             ttk.Button(row, text="Stint Analyzer", command=lambda: self._on_open_analysis(None, view="stints")).pack(side="left", padx=(6, 0))
             self.last_lap_button = ttk.Button(row, text="Analyse last lap", state="disabled",

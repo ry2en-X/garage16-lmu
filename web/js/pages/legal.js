@@ -1,4 +1,4 @@
-// pages/legal.js — "Legal": legal notice, privacy policy, terms of use, licences (V1.0).
+// pages/legal.js — "Legal": legal notice, privacy policy, terms of use, licences.
 //
 // Public, no sign-in. The texts live in ../legal/de.js and ../legal/en.js and are chosen as a
 // whole by the page language (they do not go through t(): legal texts are translated as a
@@ -8,20 +8,21 @@
 //   #/legal                 legal notice
 //   #/legal?tab=privacy     privacy policy      (also: terms, licenses)
 
-import { api } from "../api.js";
-import { el } from "../format.js";
-import { getLanguage } from "../i18n.js";
+import { api } from "../core/api.js";
+import { el } from "../core/format.js";
+import { getLanguage } from "../core/i18n.js";
 import * as DE from "../legal/de.js";
 import * as EN from "../legal/en.js";
+import { currentRoute } from "../core/router.js";
+import { link } from "../core/link.js";
 
 export const TABS = ["imprint", "privacy", "terms", "licenses"];
 
 const texts = () => (getLanguage() === "de" ? DE : EN);
 
 function currentTab() {
-  const query = new URLSearchParams((window.location.hash.split("?")[1]) || "");
-  const tab = query.get("tab");
-  return TABS.includes(tab) ? tab : "imprint";
+  const route = currentRoute();      // /impressum, /datenschutz, /terms, /licenses (core/routes.js)
+  return route && TABS.includes(route.tab) ? route.tab : "imprint";
 }
 
 function fill(text, values) {
@@ -65,7 +66,7 @@ export async function renderLegal(container) {
   container.appendChild(el("p", { class: "subtitle" }, L.LABELS.intro));
   container.appendChild(el("nav", { class: "inline-form legal-tabs", "aria-label": L.LABELS.title },
     TABS.map((name) => el("a", {
-      href: name === "imprint" ? "#/legal" : `#/legal?tab=${name}`,
+      href: link.legal(name),
       class: `btn btn--ghost${name === tab ? " active" : ""}`,
       "data-tab": name,
       "aria-current": name === tab ? "page" : null,

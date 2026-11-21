@@ -1,11 +1,12 @@
 // pages/setup.js — the step-by-step guide from "no account" to "first lap on the leaderboard"
-// (V1.0). Public. The sign-up form sends new drivers here (#/setup?welcome=1), the download page
+//. Public. The sign-up form sends new drivers here (#/setup?welcome=1), the download page
 // links here, and the desktop client's connect window opens it ("How do I set this up?").
 
-import { api } from "../api.js";
-import { store } from "../state.js";
-import { el } from "../format.js";
-import { t } from "../i18n.js";
+import { api } from "../core/api.js";
+import { store } from "../core/state.js";
+import { el } from "../core/format.js";
+import { t } from "../core/i18n.js";
+import { routeQuery } from "../core/router.js";
 
 const safeLink = (url) => (typeof url === "string" && /^https:\/\/[^\s]+$/i.test(url) ? url : null);
 
@@ -22,7 +23,7 @@ const serverAddress = () => (typeof window !== "undefined" && window.location &&
 const list = (items) => el("ol", { class: "setup-list" }, items.map((i) => el("li", {}, i)));
 
 export async function renderSetup(container) {
-  const query = new URLSearchParams(window.location.hash.split("?")[1] || "");
+  const query = routeQuery();
   const signedIn = store.isSignedIn();
 
   container.appendChild(el("h1", {}, t("Set up Garage16")));
@@ -50,13 +51,13 @@ export async function renderSetup(container) {
   ] : [
     p(t("On the Account page, under \"New driver\": choose a driver name, enter your email and a password, confirm your age and the terms.")),
     p(t("Then open the confirmation link in the email we send you — the desktop client connects only with a confirmed email.")),
-    el("a", { class: "btn", href: "#/account" }, t("Create account")),
+    el("a", { class: "btn", href: "/account" }, t("Create account")),
   ], { done: signedIn }));
 
   const downloadButtons = el("div", { class: "inline-form setup-downloads" }, [
     links.standard
       ? el("a", { class: "btn", href: links.standard, rel: "noopener", "data-download": "standard" }, t("Download Client"))
-      : el("a", { class: "btn", href: "#/download" }, t("Go to the download page")),
+      : el("a", { class: "btn", href: "/download" }, t("Go to the download page")),
     links.analysis
       ? el("a", { class: "btn btn--ghost", href: links.analysis, rel: "noopener", "data-download": "analysis" }, t("Download Client + analysis app"))
       : null,
@@ -79,7 +80,7 @@ export async function renderSetup(container) {
     list([
       t("Double-click the downloaded Garage16-Client-Setup.exe. No administrator rights are needed."),
       t("Windows shows \"Windows protected your PC\"? That is normal for new programs that are not digitally signed: click \"More info\", then \"Run anyway\"."),
-      t("Click through the installer. Tick \"Start Garage16 automatically when I log in to Windows\" if you like — then you never have to think about it again."),
+      t("Click through the installer. Tick \"Start Garage16 automatically when I log in to Windows\" if you like — then you never have to think about it again. Below it you choose whether the window opens or Garage16 starts minimized in the taskbar."),
     ]),
   ]));
 
@@ -104,10 +105,10 @@ export async function renderSetup(container) {
 
   container.appendChild(step(6, t("See your times"), [
     el("div", { class: "inline-form" }, [
-      el("a", { class: "btn btn--ghost", href: "#/dashboard" }, t("Dashboard")),
-      el("a", { class: "btn btn--ghost", href: "#/leaderboard" }, t("Leaderboard")),
-      el("a", { class: "btn btn--ghost", href: "#/analysis" }, t("LapTime Analyzer")),
-      el("a", { class: "btn btn--ghost", href: "#/teams" }, t("Teams")),
+      el("a", { class: "btn btn--ghost", href: "/dashboard" }, t("Dashboard")),
+      el("a", { class: "btn btn--ghost", href: "/leaderboard" }, t("Leaderboard")),
+      el("a", { class: "btn btn--ghost", href: "/analysis" }, t("LapTime Analyzer")),
+      el("a", { class: "btn btn--ghost", href: "/teams" }, t("Teams")),
     ]),
   ]));
 

@@ -18,7 +18,7 @@ Object.assign(globalThis, { window: dom.window, document: dom.window.document, l
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
 globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0);
-dom.window.LMU_GARAGE_API_BASE_URL = "";
+dom.window.GARAGE16_API_BASE_URL = "";
 if (mode !== "none") localStorage.setItem("garage16_language", mode);
 localStorage.setItem("lmu_garage_session", JSON.stringify({ driverId: 1, displayName: "Mika", viaCookie: true }));
 
@@ -30,30 +30,31 @@ const unexpected = [];
 globalThis.fetch = async (url) => {
   const p = new URL(url, "http://x").pathname;
   const json = (body, status = 200) => ({ ok: status < 400, status, statusText: String(status), json: async () => body, text: async () => JSON.stringify(body) });
-  if (p === "/leaderboard/recent") return json([{ driver_name: "Nito", track_name: "Le Mans", car_name: "#7", lap_time: 211.5, created_at: "2026-10-01T10:00:00" }]);
-  if (p === "/teams/mine") return json([{ id: 5, name: "Red", member_count: 3, role: "admin", invite_code: "ABCD" }]);
-  if (p === "/invitations/mine") return json([]);
-  if (p === "/accounts/me") return json({ driver_id: 1, display_name: "Mika", email: "m@x.de", email_verified: false, discord_linked: false, has_password: true });
-  if (p === "/accounts/sessions") return json([]);
-  if (p === "/accounts/devices") return json([]);
-  if (p === "/accounts/discord") return json({ linked: false });
-  if (p === "/drivers/1/public") return json({ driver_id: 1, display_name: "Mika", total_laps: 4, tracks_driven: 2, cars_driven: 1, personal_records: [], teams: [{ team_id: 5, team_name: "Red", role: "owner" }], recent_activity: [
+  if (p === "/api/v1/public/activity") return json([{ driver_name: "Nito", track_name: "Le Mans", car_name: "#7", lap_time: 211.5, created_at: "2026-10-01T10:00:00" }]);
+  if (p === "/api/v1/teams/mine") return json([{ id: 5, name: "Red", member_count: 3, role: "admin", invite_code: "ABCD" }]);
+  if (p === "/api/v1/invitations/mine") return json([]);
+  if (p === "/api/v1/accounts/me") return json({ driver_id: 1, display_name: "Mika", email: "m@x.de", email_verified: false, discord_linked: false, has_password: true });
+  if (p === "/api/v1/accounts/sessions") return json([]);
+  if (p === "/api/v1/accounts/devices") return json([]);
+  if (p === "/api/v1/accounts/discord") return json({ linked: false });
+  if (p.startsWith("/api/v1/public/drivers/by-slug/")) return json({ driver_id: 1, display_name: "Mika", slug: "mika", renamed: false });
+  if (p === "/api/v1/public/drivers/1") return json({ driver_id: 1, display_name: "Mika", total_laps: 4, tracks_driven: 2, cars_driven: 1, personal_records: [], teams: [{ team_id: 5, team_name: "Red", role: "owner" }], recent_activity: [
     { record_type: "WR", track_name: "Spa", car_name: "#7", lap_time: 139.0, created_at: "2026-10-01T10:00:00" },
     { record_type: "TEAM_BEST", track_name: "Spa", car_name: "#7", lap_time: 139.0, created_at: "2026-10-01T10:00:00" },
     { record_type: "PR", track_name: "Spa", car_name: "#7", lap_time: 139.0, created_at: "2026-10-01T10:00:00" }] });
-  if (p === "/telemetry/laps") return json([]);
-  if (p === "/teams/5/records") return json([]);
-  if (p === "/leaderboard/catalog/venues") return json([{ venue: "Le Mans", lap_count: 3, layouts: [] }]);
-  if (p === "/leaderboard/catalog/class-options") return json([{ name: "Hypercar", lap_count: 3 }]);  // V0.9.6: a track is preselected
-  if (p === "/telemetry/analysis/circuits") return json({ venues: [{ venue: "Le Mans", lap_count: 0, layouts: [] }] });
-  if (p === "/telemetry/analysis/channels") return json({ channels: [], default: [] });
-  if (p === "/health") return json({ status: "ok", version: "0.9.2", client_download_url: "https://dl.example/Garage16-Client-Setup.exe" });
-  if (p === "/legal") return json({ operator: { name: "Erika Mustermann", address: ["Musterstraße 1", "12345 Musterstadt"], email: "erika@example.com" }, min_age: 16, terms_version: "2026-10-24", registration: "open" });
+  if (p === "/api/v1/laps") return json([]);
+  if (p === "/api/v1/teams/5/records") return json([]);
+  if (p === "/api/v1/public/catalog/venues") return json([{ venue: "Le Mans", lap_count: 3, layouts: [] }]);
+  if (p === "/api/v1/public/catalog/class-options") return json([{ name: "Hypercar", lap_count: 3 }]);  // V0.9.6: a track is preselected
+  if (p === "/api/v1/public/circuits") return json({ venues: [{ venue: "Le Mans", lap_count: 0, layouts: [] }] });
+  if (p === "/api/v1/public/analysis/channels") return json({ channels: [], default: [] });
+  if (p === "/api/v1/health") return json({ status: "ok", version: "0.9.2", client_download_url: "https://dl.example/Garage16-Client-Setup.exe" });
+  if (p === "/api/v1/public/legal") return json({ operator: { name: "Erika Mustermann", address: ["Musterstraße 1", "12345 Musterstadt"], email: "erika@example.com" }, min_age: 16, terms_version: "2026-10-24", registration: "open" });
   unexpected.push(p);
   return json({ detail: "not mocked" }, 404);
 };
 
-await import("../../web/js/router.js");
+await import("../../web/js/main.js");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 await sleep(80);
 const text = (node) => node.textContent.replace(/\s+/g, " ").trim();
@@ -85,7 +86,7 @@ const WORDS = {
     },
   },
   de: {
-    nav: ["Dashboard", "Teams", "LapTime Analyzer", "Stint Analyzer", "Leaderboard", "Strecken", "Konto", "Download", "Einrichtung", "Rechtliches"], status: "angemeldet als Mika",
+    nav: ["Dashboard", "Teams", "Rundenanalyse", "Stint-Analyse", "Leaderboard", "Strecken", "Konto", "Download", "Einrichtung", "Rechtliches"], status: "angemeldet als Mika",
     pages: {
       "#/": ["Deine LMU-Daten. Deine Rekorde. Dein Team.", "Letzte Aktivität", "Leaderboards ansehen", "Was Garage16 kann"],
       "#/teams": ["Deine Teams", "3 Mitglied(er) — Admin", "Einladung: ABCD", "Team erstellen", "Einem Team beitreten"],
@@ -94,7 +95,7 @@ const WORDS = {
       "#/account": ["Konto", "Anzeigename", "Zugangsdaten des Desktop-Clients"],
       "#/leaderboard": ["Leaderboard", "Nach Klasse", "Le Mans · 3 Runden"],
       "#/circuits": ["Strecken", "Strecke finden", "Noch keine Runden — sei der Erste!"],
-      "#/analysis": ["LapTime Analyzer", "Schnellstart", "Du vs. Garage16 Best", "Du vs. Team Best", "Du vs. Meine Beste", "Runde 1 wählen"],
+      "#/analysis": ["Rundenanalyse", "Schnellstart", "Du vs. Garage16 Best", "Du vs. Team Best", "Du vs. Meine Beste", "Runde 1 wählen"],
       "#/download": ["Garage16 herunterladen", "Client + Analysetool", "Client herunterladen", "Die Analyse im eigenen Fenster — ganz ohne Browser", "Noch nicht verfügbar"],
       "#/setup": ["Garage16 einrichten", "Erledigt — du bist angemeldet.", "Client mit deinem Konto verbinden", "Wenn etwas nicht klappt"],
       "#/legal": ["Impressum", "Angaben gemäß § 5", "Erika Mustermann", "Musterstraße 1"],
@@ -145,7 +146,7 @@ for (const [hash, expected] of Object.entries(words.pages)) {
 if (mode === "none") {
   // choosing a language (done last: it switches this process to German)
   let reloaded = 0;
-  const { hooks } = await import("../../web/js/i18n.js");
+  const { hooks } = await import("../../web/js/core/i18n.js");
   hooks.reload = () => { reloaded += 1; };
   document.querySelector('[data-language-popup] [data-lang="de"]').click();
   assert.equal(localStorage.getItem("garage16_language"), "de");

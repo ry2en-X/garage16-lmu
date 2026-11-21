@@ -1,5 +1,5 @@
 """client/analysis_launcher.py — what the client window's "LapTime Analyzer", "Stint Analyzer"
-and "Analyse last lap" buttons do (V0.9.2; two dashboards since V0.9.4). Kept free of Tk so it
+and "Analyse last lap" buttons do. Kept free of Tk so it
 is testable.
 
   * standard edition, or the driver prefers the browser -> default browser, the web analysis

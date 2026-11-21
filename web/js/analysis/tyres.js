@@ -1,8 +1,8 @@
-// analysis/tyres.js — the tyre window (V0.9.3): tread temperatures inner / middle / outer,
+// analysis/tyres.js — the tyre window: tread temperatures inner / middle / outer,
 // pressure, wear and brake temperature per wheel.
 //
 //   * Lap averages come with the lap header (per-lap figures stored at upload,
-//     server/lap_insights.py) — shown at once, no extra request.
+//     server/analysis/lap_insights.py) — shown at once, no extra request.
 //   * "At the cursor" loads the zone/pressure/brake channels on demand (like the physics
 //     window) and then follows the shared cursor without asking the server again.
 //
@@ -10,10 +10,10 @@
 // frame (rFactor 2 header: "not inside/outside"). Inner/outer follows from the wheel's side:
 // on the left wheels the left zone is the outer one, on the right wheels the inner one.
 
-import { el } from "../format.js";
+import { el } from "../core/format.js";
 import { formatValue, LAP_COLORS, rampColor, WHEEL_LABEL, WHEELS } from "./model.js";
 
-import { t } from "../i18n.js";
+import { t } from "../core/i18n.js";
 
 export const ZONES = ["inner", "middle", "outer"];
 const LEFT_WHEELS = new Set(["fl", "rl"]);

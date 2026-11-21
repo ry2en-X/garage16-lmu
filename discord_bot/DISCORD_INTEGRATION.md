@@ -1,6 +1,6 @@
 # Discord integration — what was added
 
-## New DB tables (server/models.py)
+## New DB tables (server/core/models.py)
 - **Team / TeamMembership** — drivers can belong to teams. A team has a
   permanent `invite_code` used both by drivers joining on the web and by
   a Discord channel subscribing to that team's announcements.
@@ -12,11 +12,11 @@
   (`POST /accounts/discord/link-code`; the old `/teams/discord-link-code` is a deprecated alias) and redeemed with `/link <code>` in
   Discord, connecting a Discord user to a Driver row.
 - **RecordEvent** — the announcement outbox. Written by
-  `server/records.py` right after a lap upload commits; polled and
+  `server/laps/records.py` right after a lap upload commits; polled and
   cleared by the bot every 10s.
 - **Driver.discord_user_id** — new column, set once `/link` succeeds.
 
-## Record detection (server/records.py)
+## Record detection (server/laps/records.py)
 After `telemetry.py`'s `upload_lap` commits a genuinely new lap, it calls
 `evaluate_and_record(db, lap)`, which checks (valid laps only):
 - **PR** — driver's own best on this track/car
@@ -26,7 +26,7 @@ After `telemetry.py`'s `upload_lap` commits a genuinely new lap, it calls
 Each one that's newly broken gets a `RecordEvent` row. PR isn't broadcast
 (only queryable via `/pb`) since it's not team/server-wide news.
 
-## Web endpoints (server/routers/teams.py)
+## Web endpoints (server/api/v1/teams.py)
 - `POST /teams` — create a team (name), creator auto-joins
 - `POST /teams/join` — join via invite code
 - `GET /teams/mine` — list your teams + invite codes
@@ -61,7 +61,7 @@ pip install -r discord_bot/requirements.txt
 export DISCORD_BOT_TOKEN=your-bot-token
 python -m discord_bot.bot
 ```
-Needs `LMU_GARAGE_DB_URL` set the same as the server if you're not using
+Needs `GARAGE16_DB_URL` set the same as the server if you're not using
 the sqlite default, so both processes see the same data.
 
 ## Naming note
@@ -81,8 +81,8 @@ when Python resolves modules relative to the working directory.
 
 ## V0.8.7 — account linking rework
 
-All linking rules live in `server/discord_link.py`, shared by the web API
-and the bot, and are covered by `tests/test_discord_link.py` (real
+All linking rules live in `server/accounts/discord_link.py`, shared by the web API
+and the bot, and are covered by `tests/accounts/test_discord_link.py` (real
 database, including the bot commands driven through their real callbacks).
 Fixed: there was no way to unlink (the bot said "unlink first"), the web UI
 showed no status, an already-linked driver could be silently overwritten,

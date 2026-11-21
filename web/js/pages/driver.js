@@ -1,12 +1,15 @@
-// pages/driver.js — public driver profile (V0.7.2 §4). No auth required,
+// pages/driver.js — public driver profile. No auth required,
 // linked to from leaderboard rows and team member lists (§5).
 
-import { api } from "../api.js";
-import { renderActivityList } from "../activity.js";
-import { el, formatLapTime, formatDate, recordTypeLabel, roleLabel } from "../format.js";
+import { api } from "../core/api.js";
+import { renderActivityList } from "../core/activity.js";
+import { el, formatLapTime, formatDate, recordTypeLabel, roleLabel } from "../core/format.js";
 
-import { t } from "../i18n.js";
-import { loadTrackNames, trackLabel } from "../tracks.js";
+import { t } from "../core/i18n.js";
+import { loadTrackNames, trackLabel } from "../core/tracks.js";
+import { link } from "../core/link.js";
+import { copyLinkButton } from "../core/copy_link.js";
+import { setTitle } from "../core/router.js";
 export async function renderDriverProfile(container, driverId) {
   let profile;
   try {
@@ -16,8 +19,12 @@ export async function renderDriverProfile(container, driverId) {
     return;
   }
 
-  container.appendChild(el("h1", {}, profile.display_name));
+  container.appendChild(el("div", { class: "page-head" }, [
+    el("h1", {}, profile.display_name),
+    copyLinkButton(() => link.driver(profile.driver_id || driverId, profile.display_name)),   // V1.0.2
+  ]));
   container.appendChild(el("p", { class: "subtitle" }, t("Garage16 Driver")));
+  setTitle(profile.display_name);
 
   // --- Statistics ---
   container.appendChild(
@@ -36,7 +43,7 @@ export async function renderDriverProfile(container, driverId) {
     profile.teams.forEach((membership) => {
       teamsCard.appendChild(
         el("div", { class: "card-row" }, [
-          el("a", { href: `#/team/${membership.team_id}` }, [el("strong", {}, membership.team_name)]),
+          el("a", { href: link.team(membership.team_id, membership.team_name) }, [el("strong", {}, membership.team_name)]),
           el("span", { class: "tag" }, roleLabel(membership.role)),
         ])
       );
@@ -68,7 +75,7 @@ export async function renderDriverProfile(container, driverId) {
 
   // --- Recent Activity ---
   container.appendChild(el("h2", {}, t("Recent Activity")));
-  // V0.9.6: one row per lap, every record it set as a badge (activity.js)
+  // One row per lap, every record it set as a badge (activity.js)
   container.appendChild(renderActivityList(profile.recent_activity, { limit: 15 }));
 }
 

@@ -1,5 +1,5 @@
 # Builds the friend-facing Windows client (installer + portable zip) in its two
-# editions (V0.9.2):
+# editions:
 #   standard  Garage16-Client-Setup.exe / Garage16-Portable.zip
 #             the plain client — the analysis opens in the browser
 #   analysis  Garage16-Client-Analysis-Setup.exe / Garage16-Analysis-Portable.zip
@@ -22,7 +22,7 @@ on:
     tags: ["client-v*"]
 
 jobs:
-  # V0.9.7: the release gate first (ci.yml) — no client is built from code that did not pass
+  # The release gate first (ci.yml) — no client is built from code that did not pass
   tests:
     uses: ./.github/workflows/ci.yml
 
@@ -61,7 +61,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: files
-          # V1.0: only the client packages — the test job (ci.yml) also leaves a "test-report"
+          # Only the client packages — the test job (ci.yml) also leaves a "test-report"
           # artifact, whose folders made the release upload fail ("files/release: is a directory")
           pattern: garage16-client-windows-*
           merge-multiple: true
@@ -89,6 +89,6 @@ jobs:
           Windows may say "Windows protected your PC" — the installers are not code-signed yet: "More info" → "Run anyway".
           Check a download: `SHA256SUMS.txt` lists the SHA-256 of every file (PowerShell: `Get-FileHash .\Garage16-Client-Setup.exe`).
           NOTES
-          # V1.0.1: checksums of every file, attached to the release
+          # Checksums of every file, attached to the release
           (cd files && sha256sum *.exe *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt)
           gh release create "$TAG" files/*.exe files/*.zip files/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --title "Garage16 client ${TAG#client-v}" --notes-file notes.md

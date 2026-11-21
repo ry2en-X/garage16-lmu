@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-A `docker` command for the backup / restore tests (V0.9.8): runs what the scripts ask for for
+A `docker` command for the backup / restore tests: runs what the scripts ask for for
 real, on this machine, instead of in containers.
 
   * `alpine` containers run in a real Alpine root file system (chroot) with the requested volumes
@@ -141,10 +141,10 @@ def server_env(extra=None) -> dict:
         "POSTGRES_HOST": PG_HOST if not PG_HOST.startswith("/") else "127.0.0.1",
         "POSTGRES_PORT": PG_PORT, "POSTGRES_USER": os.environ.get("POSTGRES_USER", "garage16"),
         "POSTGRES_PASSWORD": PG_PASSWORD or "x", "POSTGRES_DB": os.environ.get("POSTGRES_DB", "garage16"),
-        "LMU_GARAGE_STORAGE_DIR": "/data/telemetry", "LMU_GARAGE_ENV": "development",
+        "GARAGE16_STORAGE_DIR": "/data/telemetry", "GARAGE16_ENV": "development",
         "PATH": f"{shim_dir()}:{Path(PY).parent}:{env.get('PATH', '/usr/bin:/bin')}",
     })
-    env["LMU_GARAGE_DB_URL"] = (f"postgresql+psycopg://{env['POSTGRES_USER']}:{env['POSTGRES_PASSWORD']}"
+    env["GARAGE16_DB_URL"] = (f"postgresql+psycopg://{env['POSTGRES_USER']}:{env['POSTGRES_PASSWORD']}"
                                 f"@{env['POSTGRES_HOST']}:{env['POSTGRES_PORT']}/{env['POSTGRES_DB']}")
     env.update(extra or {})
     return env

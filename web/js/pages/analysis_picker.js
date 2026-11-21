@@ -9,13 +9,13 @@
 // `context` says what the lap has to match: { track, carClass, carModel }. Without a
 // track (picking the very first lap) only "My laps" is offered, across all tracks.
 
-import { api } from "../api.js";
-import { store } from "../state.js";
-import { el, formatDate, formatLapTime } from "../format.js";
+import { api } from "../core/api.js";
+import { store } from "../core/state.js";
+import { el, formatDate, formatLapTime } from "../core/format.js";
 import { isBasicLap } from "../analysis/model.js";
 
-import { t, tp } from "../i18n.js";
-import { trackLabel } from "../tracks.js";
+import { t, tp } from "../core/i18n.js";
+import { trackLabel } from "../core/tracks.js";
 // Marks laps from clients older than 0.9.0 (fewer channels) next to the lap time.
 function basicTag(item) {
   return isBasicLap(item)
@@ -23,7 +23,7 @@ function basicTag(item) {
     : null;
 }
 
-// V0.9.6: the car MODEL (the livery name is in the tooltip); the fastest valid lap of the list
+// The car MODEL (the livery name is in the tooltip); the fastest valid lap of the list
 // is marked; a click anywhere on the row selects it (the button stays, for keyboards).
 function lapRow(lap, { onPick, excludeId, bestId }) {
   const disabled = excludeId != null && lap.id === excludeId;
@@ -58,7 +58,7 @@ function basicLegend(laps) {
   ]);
 }
 
-// V0.9.6: across all tracks the laps are grouped per track (the most recent track open), so the
+// Across all tracks the laps are grouped per track (the most recent track open), so the
 // first choice is "which track", not a scroll through one long table.
 function lapTable(laps, options) {
   if (!laps.length) return el("div", { class: "empty-state" }, t("No laps found here."));

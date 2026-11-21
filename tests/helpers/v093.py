@@ -51,8 +51,8 @@ def upload_df(client, account, df, *, lap_time=90.0, track="Le Mans", car_model=
 
 
 def lap_row(lap_id):
-    from server.database import SessionLocal
-    from server.models import Lap
+    from server.core.database import SessionLocal
+    from server.core.models import Lap
 
     with SessionLocal() as db:
         lap = db.get(Lap, lap_id)

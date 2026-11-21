@@ -8,7 +8,7 @@ Replaces the case-SENSITIVE unique index on teams.name (ix_teams_name,
 from migration 0001) with a case-INSENSITIVE one on lower(name). Without
 this, "Garage16", "garage16", and "GARAGE16" were three distinct teams —
 the DB-level constraint allowed it even though nothing in the product
-ever intended that (server/routers/teams.py's create_team() only ever
+ever intended that (server/api/v1/teams.py's create_team() only ever
 checked exact-string equality). A functional unique index on lower(name)
 works identically on SQLite and PostgreSQL, so no ORM-level-only check is
 relied on to enforce this (the spec is explicit: "Nicht nur im

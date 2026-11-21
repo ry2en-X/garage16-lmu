@@ -1,15 +1,15 @@
-// analysis/health.js — "Data quality" (V0.9.7): how trustworthy each lap's recording is.
+// analysis/health.js — "Data quality": how trustworthy each lap's recording is.
 //
-// The server measures it (GET /telemetry/analysis/laps/{id}/health, server/telemetry_health.py):
+// The server measures it (GET /telemetry/analysis/laps/{id}/health, server/analysis/telemetry_health.py):
 // channels, samples, gaps, time and distance only forward, how often LMU updated the lap
 // distance, speed vs distance, recorded duration vs lap time, implausible values, and how finely
 // a braking point can be placed at all. This file only turns those numbers into sentences — one
 // per check, with its status — so a surprising result can first be checked against its input.
 // The lap's validity is shown next to it: a valid lap can be a poor recording and vice versa.
 
-import { el, formatLapTime } from "../format.js";
+import { el, formatLapTime } from "../core/format.js";
 import { formatMetres, LAP_COLORS } from "./model.js";
-import { t } from "../i18n.js";
+import { t } from "../core/i18n.js";
 
 const pct = (share, digits = 1) => (share * 100).toFixed(digits);
 const num = (v) => typeof v === "number" && Number.isFinite(v);

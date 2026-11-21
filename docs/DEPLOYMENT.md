@@ -56,7 +56,7 @@ docker compose logs -f server
 testing and development only, without uptime guarantee, and **the address changes every time that
 container is recreated** — every desktop client that has the old address baked in or saved then
 loses the server (only a manual "Reconnect account…" with the new address helps; a move announced
-via `LMU_GARAGE_MIGRATED_TO` needs the old address to still answer). Do not recreate it casually,
+via `GARAGE16_MIGRATED_TO` needs the old address to still answer). Do not recreate it casually,
 and switch to a named tunnel with your own domain before inviting people broadly
 (`docs/ADMIN_GUIDE.md`, chapter 10; `docs/RUNBOOKS.md` has the recovery steps).
 
@@ -112,37 +112,66 @@ No code changes, no rebuild of the application images. On the new host:
 4. `docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d`
    instead of the `--profile tunnel` command.
 5. Point the domain's DNS at the new host and update
-   `LMU_GARAGE_CORS_ORIGINS` / `LMU_GARAGE_FRONTEND_URL` if the domain
+   `GARAGE16_CORS_ORIGINS` / `GARAGE16_FRONTEND_URL` if the domain
    changed. Desktop clients do NOT need reconfiguring by hand any more:
-   set `LMU_GARAGE_MIGRATED_TO` on the old server and they follow
+   set `GARAGE16_MIGRATED_TO` on the old server and they follow
    automatically — see "Moving the server later" below. **The new
-   server must use the SAME `LMU_GARAGE_SECRET_KEY` as the old one:** it
+   server must use the SAME `GARAGE16_SECRET_KEY` as the old one:** it
    encrypts every driver's stored client secret, so with a different key the
    restored secrets can't be decrypted and every desktop upload fails its
    signature check.
 
-### Frontend as a separate deployment (Cloudflare Pages)
+### The website on Cloudflare Pages (V1.0.2, the default for garage16.de)
 
-By default, Caddy serves `web/` from the same domain as the API (see
-`docker/Caddyfile`'s catch-all `handle` block). To deploy the frontend
-independently instead (so it survives a server move/migration untouched,
-and gets Cloudflare's CDN for free):
+The NAS then answers only the API; HTML, JavaScript, CSS, fonts and images come from Cloudflare.
+Pages and API stay on ONE address (`garage16.de`): the Pages function (`web/functions/_middleware.js`)
+passes `/api/*`, `/health` and the old API paths of desktop clients 1.0.x on to the NAS, so cookies,
+CSRF checks and the CSP work unchanged, and it fills in each page's title and link preview from
+`GET /api/v1/public/page-meta`.
 
-1. In the Cloudflare dashboard: Workers & Pages → Create → Pages →
-   connect your repo (or use direct upload) with `web/` as the build
-   output directory (no build step — it's already static files).
-2. Edit `web/config.js` before deploying: set
-   `window.LMU_GARAGE_API_BASE_URL = "https://your-api-domain.example";`
-   (see that file's comments — this is the one line that changes between
-   "frontend bundled with the API" and "frontend on Pages").
-3. Add the Pages domain (e.g. `https://garage16.pages.dev`, or your
-   custom domain on Pages) to `LMU_GARAGE_CORS_ORIGINS` in the API's
-   `.env`, then restart the `server` container.
-4. Optional: remove the catch-all `handle { root * /srv/web ... }` block
-   from `docker/Caddyfile` and the `./web:/srv/web:ro` volume mount from
-   `docker-compose.yml`'s `reverse_proxy` service — the API doesn't need
-   to serve those files anymore. Not required (harmless to leave it
-   serving an unused copy), just tidier.
+1. **Tunnel hostname for the API.** In Zero Trust → Networks → Tunnels → your tunnel → Public
+   Hostnames add `api.garage16.de` → `http://reverse_proxy:80` (Caddy still forwards to the app; the
+   web blocks of the Caddyfile are simply unused). Keep the existing `garage16.de` hostname until
+   step 3 is live.
+2. **Secret for the visitor's address.** `python -c "import secrets; print(secrets.token_urlsafe(32))"`
+   → `GARAGE16_EDGE_KEY=<value>` in the NAS's `.env`, `docker compose up -d server`. Without it every
+   visitor arrives from Cloudflare's address and all share one rate limit.
+3. **Pages project.** Workers & Pages → Create → Pages → *Direct Upload* (the GitHub Action deploys),
+   name `garage16` (or set the repository variable `CLOUDFLARE_PAGES_PROJECT`). Settings →
+   Environment variables (Production): `GARAGE16_API_ORIGIN=https://api.garage16.de`,
+   `GARAGE16_EDGE_KEY=<the same value>`. Custom domains → add `garage16.de` (this replaces the
+   tunnel's `garage16.de` hostname — remove that one).
+4. **GitHub.** Repository → Settings → Secrets and variables → Actions: `CLOUDFLARE_API_TOKEN` (a
+   token with *Cloudflare Pages: Edit*) and `CLOUDFLARE_ACCOUNT_ID`. From then on
+   `.github/workflows/pages.yml` deploys after every green CI run on `main` (or by hand: Actions →
+   pages → Run workflow). The build (`python -m scripts.release.build_web`) puts the files under
+   `/v/<content hash>/` (cached a year), writes `_headers` (the same security headers as Caddy) and
+   `_routes.json` (the function only runs for pages and the API).
+5. **Check.** `https://garage16.de/health` → `{"status":"ok",…}`; a page such as
+   `https://garage16.de/leaderboard` shows; `curl -s https://garage16.de/driver/<name> | grep '<title>'`
+   shows the driver's name.
+
+Clients and bookmarks need nothing: the address stays `garage16.de`. A client still configured with
+a `….trycloudflare.com` address keeps talking to the NAS directly — Caddy serves the website and
+the API there as before.
+
+**Without Pages** (the website stays on the NAS): nothing to do — `docker/Caddyfile` serves `web/`,
+the versioned files with a year of caching and the page titles (`/api/v1/public/page`, the server
+reads `index.html` from the read-only mount `./web:/srv/web`).
+
+### Cloudflare rules in front of the NAS (V1.0.2, free plan)
+
+* **Cache Rule** (Caching → Cache Rules): *URI Path starts with* `/api/v1/public/` → *Eligible for
+  cache*, Edge TTL *Use cache-control header if present*. The server answers those paths with
+  `Cache-Control: public, max-age=30` (catalog and page titles 60, legal data 3600) and an ETag
+  (`server/api/caching.py`): 100 visitors a minute cost the NAS one or two requests.
+  Browser Cache TTL: *Respect existing headers*.
+* **Rate limiting rule** (Security → WAF → Rate limiting rules): *URI Path* is in
+  `/api/v1/accounts/login`, `/api/v1/accounts/signup`, `/api/v1/accounts/desktop-login`,
+  `/api/v1/accounts/register`, `/api/v1/accounts/password-reset/request` (and the old
+  `/accounts/…` twins) *or* starts with `/api/v1/laps/upload` / `/telemetry/upload`; *per IP*;
+  e.g. 20 requests per 10 seconds → *Block* for 10 seconds (the free plan allows one rule with a
+  10-second period). The server's own limits (`GARAGE16_RATELIMIT_*`) stay as the second stage.
 
 ### Backups
 
@@ -155,11 +184,11 @@ Control Panel → Task Scheduler → Create → Scheduled Task → User-defined
 script. Run daily, script:
 ```sh
 cd /volume1/docker/garage16   # wherever this project lives on your NAS
-./scripts/backup.sh /volume2/backups/garage16
+./scripts/ops/backup.sh /volume2/backups/garage16
 ```
-(`scripts/backup.sh` already handles `pg_dump` + a `tar` of the
-telemetry volume together — see that script's header comment. Point the
-destination argument at your second disk/volume.) Ties you to
+(`scripts/ops/backup.sh` already handles `pg_dump` + the telemetry files
+together — see that script's header comment. Point the destination
+argument at your second disk/volume.) Ties you to
 Synology's scheduler; re-do this step manually on a VPS.
 
 **Option 2 — Containerized (works identically on NAS and VPS):**
@@ -175,20 +204,28 @@ it as a Docker-managed volume). No host-level cron or Task Scheduler
 needed at all; the same `docker compose --profile backup up -d`
 continues working unchanged after a NAS → VPS move.
 
-Since V0.9.8 both write one folder `garage16_<stamp>/` (dump, archive, `manifest.json` with
-SHA-256, schema revision, lap count) from ONE moment: the write lock (`server/write_lock.py`)
-holds new uploads off with 503 (the client retries) while running ones finish; the folder only
-appears once both files are checked.
+Both write one folder `garage16_<stamp>/` (dump, file list, `manifest.json` with SHA-256, schema
+revision, lap count) from ONE moment: the write lock (`server/ops/write_lock.py`) holds new uploads
+off with 503 (the client retries) while running ones finish; the folder only appears once
+everything is checked.
+
+**Incremental since V1.0.2 (manifest format 2).** Telemetry files never change after the upload, so
+they are kept ONCE in `<backup dir>/telemetry-store/`; a backup copies only the files that are new
+since the last one and lists all files of that moment in `telemetry-files.txt` (`<bytes> <path>`).
+The database is still dumped completely every time. Cleaning up removes backup folders older than
+the retention (old-format folders with `telemetry.tar.gz` too) and then every stored file that no
+remaining backup lists (`docker/telemetry-store.sh`). Copying a backup elsewhere therefore means
+copying its folder **and** `telemetry-store/`. `restore.sh` takes both formats.
 
 Either way: **periodically test a real restore**, not just that the
-backup file exists. `./scripts/restore.sh <backup-folder>` stages the backup in a new database and
+backup file exists. `./scripts/ops/restore.sh <backup-folder>` stages the backup in a new database and
 volume, validates it there (migrations, every file's SHA-256), and only then switches — ending in
 the validated backup or the state before, never a mix (`--rollback <stamp>`, `--cleanup <stamp>`)
 — see `docs/ROLLBACK.md`.
 
 ### Tracks, classes and cars — nothing to enter by hand (V0.8.9)
 
-Nobody has to maintain track, class or car lists. `server/catalog.py` holds a
+Nobody has to maintain track, class or car lists. `server/catalog/catalog.py` holds a
 small seeded list (12 tracks with search keywords, the 6 LMU classes with the
 spellings LMU uses) so every known track and class exists before its first
 lap, and everything else is **learned from uploaded laps**: a track layout
@@ -198,14 +235,14 @@ string is kept in `laps.car_class_raw` (the readable name, e.g. "Hypercar" for
 LMU's "Hyper", is in `laps.car_class`).
 
 The seeded lists are best-effort. To see what LMU really sends on YOUR server
-(and where a name or grouping should be adjusted in `server/catalog.py`):
+(and where a name or grouping should be adjusted in `server/catalog/catalog.py`):
 ```sh
 docker compose exec -T db psql -U garage16 -d garage16 -c "SELECT track_name, car_class_raw, car_class, car_model, count(*) FROM laps GROUP BY 1,2,3,4 ORDER BY 1,2,4;"
 ```
 
 ### Telemetry storage cleanup
 
-`scripts/telemetry_cleanup.py` (V0.7.2) reports two kinds of drift
+`scripts/ops/telemetry_cleanup.py` (V0.7.2) reports two kinds of drift
 between the DB and the telemetry storage directory: a `Lap` row whose
 file has gone missing (never auto-resolved — that's a data-loss event
 worth a human looking at, not a silent fix), and a file on disk with no
@@ -213,8 +250,8 @@ matching `Lap` row (a genuine cleanup candidate, but only once it's
 older than an hour — recent files might just be mid-upload, see the
 script's own docstring for why that matters). Dry-run by default:
 ```sh
-python -m scripts.telemetry_cleanup          # reports only, deletes nothing
-python -m scripts.telemetry_cleanup --execute  # actually deletes confirmed orphans
+python -m scripts.ops.telemetry_cleanup          # reports only, deletes nothing
+python -m scripts.ops.telemetry_cleanup --execute  # actually deletes confirmed orphans
 ```
 **On a Docker deployment (NAS/VPS) use exactly this** — `docker compose exec`
 does NOT inherit the database URL the container's entrypoint builds for the
@@ -222,9 +259,9 @@ server, so it has to be passed explicitly (otherwise the tool would look at
 an empty SQLite default and every file would look orphaned; since V0.8.8 it
 prints which database it uses and refuses `--execute` when that looks wrong):
 ```sh
-docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.telemetry_cleanup'
+docker compose exec -T server sh -c 'GARAGE16_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.ops.telemetry_cleanup'
 # read the output first — only then, if the orphans are what you expect:
-docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.telemetry_cleanup --execute'
+docker compose exec -T server sh -c 'GARAGE16_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.ops.telemetry_cleanup --execute'
 ```
 Same caution as any destructive tool: read its dry-run output before ever
 passing `--execute`.
@@ -237,10 +274,10 @@ nobody re-installs, re-registers or types a command. What you do:
 
 1. Stand up the new instance (same Docker Compose, new host/domain,
    restore the DB — see Backup/Restore above) **with the same
-   `LMU_GARAGE_SECRET_KEY` in its `.env`** (without it the restored client
+   `GARAGE16_SECRET_KEY` in its `.env`** (without it the restored client
    secrets are undecryptable). It must be reachable via **https://**
    (Cloudflare Tunnel or Caddy both give you that).
-2. On the **old** instance set `LMU_GARAGE_MIGRATED_TO` to the new URL
+2. On the **old** instance set `GARAGE16_MIGRATED_TO` to the new URL
    and restart it. It keeps working normally — this isn't a hard
    cutover — but `GET /health` now advertises the new address.
 3. Every running client checks `/health` at startup and every ~10
@@ -267,7 +304,7 @@ plain-HTTP (LAN) client by hand with `python -m client.main --follow-migration`.
 **A client that is too old for the new server** gets an `UPDATE_REQUIRED`
 answer (HTTP 426), shows a plain-language banner, keeps every lap it
 recorded meanwhile (they upload after the update), and offers an "Open
-download page" button when `LMU_GARAGE_CLIENT_DOWNLOAD_URL` is set. See
+download page" button when `GARAGE16_CLIENT_DOWNLOAD_URL` is set. See
 `docs/CLIENT_BUILD.md` for building and publishing the installer.
 
 ### Monitoring
@@ -319,89 +356,96 @@ Every credential works either way, chosen per-value, no code changes:
 
 ## Server environment variables
 
+Since V1.0.2 every setting is called `GARAGE16_<NAME>`; the old name `LMU_GARAGE_<NAME>` is still
+read when the new one is not set (`server/core/env.py`, and the nested defaults in
+`docker-compose.yml`), so an existing `.env` works unchanged. New in V1.0.2:
+`GARAGE16_EDGE_KEY` (the secret shared with the Pages function, see above; empty = the visitor
+header is ignored) and `GARAGE16_WEB_DIR` (where the server finds `index.html` for the page
+titles; docker-compose.yml sets `/srv/web`).
+
 All optional except where noted "REQUIRED in production" — sensible dev
 defaults apply otherwise. Full list with production notes: `.env.example`.
 
 | Variable | Purpose | Dev default |
 |---|---|---|
-| `LMU_GARAGE_DB_URL` | Database connection string (Docker: assembled from `POSTGRES_*` pieces by the entrypoint script instead — see "Secrets" above) | `sqlite:///./lmu_garage_server.db` |
-| `LMU_GARAGE_STORAGE_DIR` | Where uploaded telemetry files land | `./server_telemetry_storage` |
-| `LMU_GARAGE_MAX_UPLOAD_BYTES` | Per-upload size cap | 50 MB |
-| `LMU_GARAGE_SECRET_KEY` | Fernet key encrypting `client_secret` at rest — **REQUIRED in production** | insecure built-in dev key (loudly logged) |
-| `LMU_GARAGE_REGISTRATION_SECRET` | If set (and registration is not open), sign-up needs this secret (`X-Registration-Secret`) — production needs it **or** `LMU_GARAGE_OPEN_REGISTRATION=1` | unset — registration open |
-| `LMU_GARAGE_ADMIN_TOKEN` | Bearer token for `/admin/*` moderation endpoints — unset means those endpoints 503 | unset |
-| `LMU_GARAGE_REQUIRE_HTTPS` | If `1`/`true`, rejects requests not forwarded as HTTPS by a reverse proxy | unset — off |
-| `LMU_GARAGE_ENV` | Only the literal string `development` gets dev defaults; anything else (including unset) is treated as production and hard-fails without real secrets | `development` |
-| `LMU_GARAGE_CORS_ORIGINS` | Comma-separated allowed origins for the web frontend — include the Cloudflare Pages domain here if the frontend is deployed separately | `http://localhost:5173` |
-| `LMU_GARAGE_MIN_CLIENT_VERSION` | Uploads from an older `client_version` are rejected with 400 | `0.5.3` |
-| `LMU_GARAGE_LOG_FORMAT` | `text` or `json` | `text` |
-| `LMU_GARAGE_DB_POOL_SIZE` / `LMU_GARAGE_DB_MAX_OVERFLOW` | PostgreSQL connection pool sizing (ignored for SQLite) | 5 / 10 |
-| `LMU_GARAGE_INTEGRITY_KEY` | V0.9.9: key of the server's MACs over stored laps and the audit log (`server/integrity.py`); comma-separated for rotation (first signs, all verify). Empty = derived from `LMU_GARAGE_SECRET_KEY`. | empty |
-| `LMU_GARAGE_AUDIT_RETENTION_DAYS` | V0.9.9: days the audit log is kept (minimum 30). | 365 |
-| `LMU_GARAGE_TRUSTED_PROXIES` | V0.9.8: whose `X-Forwarded-For` is believed (addresses / networks, or `private`); read from the right, so a header the visitor writes himself never changes the address the rate limits count (`server/client_ip.py`). docker-compose sets `private` (the app publishes no port). Empty = the socket address. | empty (compose: `private`) |
-| `LMU_GARAGE_RATELIMIT_*_MAX` / `_WINDOW` | Per-bucket rate limits (register, login, upload, …; V1.0.1: `LOGINACCOUNT` = failed sign-ins per email address, `EMAILADDRESS` = emails sent to one address) — see `server/config.py` / `server/rate_limit.py` | see `server/config.py` |
-| `LMU_GARAGE_OPEN_REGISTRATION` | V1.0: `1` = anybody may sign up on the website (terms + minimum age). A production server needs this **or** `LMU_GARAGE_REGISTRATION_SECRET`. | unset |
-| `LMU_GARAGE_MIN_AGE` | V1.0: minimum age asked at sign-up | 16 |
-| `LMU_GARAGE_OPERATOR_NAME` / `_ADDRESS` / `_EMAIL` | V1.0: operator shown on the Legal page (address lines separated by `|`) — kept in `.env`, never in the repository | unset |
-| `LMU_GARAGE_GITHUB_REPO` | V1.0: the download buttons default to this repository's newest release (empty = off) | `ry2en-X/garage16-lmu` |
-| `LMU_GARAGE_REQUIRE_EMAIL_VERIFICATION` | V1.0.1: the desktop client connects only after the email was confirmed (`0` = off) | `1` |
-| `LMU_GARAGE_UNVERIFIED_ACCOUNT_DAYS` | V1.0.1: sign-ups never confirmed (no laps, no team) are deleted after this many days (`0` = never) | 7 |
-| `LMU_GARAGE_NEW_DRIVER_REVIEW_LAPS` | V1.0.1: a driver with fewer official laps whose lap beats the Garage16 Best of others is held for an admin (`server/fair_play.py`, `0` = off) | 10 |
-| `LMU_GARAGE_MAX_DEVICES` | V1.0.1: PCs one account may have connected at once (the one used longest ago is disconnected) | 5 |
-| `LMU_GARAGE_LATEST_CLIENT_VERSION` | V1.0.1: the newest desktop client; older clients show "a new version is available" | the client released with the server |
+| `GARAGE16_DB_URL` | Database connection string (Docker: assembled from `POSTGRES_*` pieces by the entrypoint script instead — see "Secrets" above) | `sqlite:///./lmu_garage_server.db` |
+| `GARAGE16_STORAGE_DIR` | Where uploaded telemetry files land | `./server_telemetry_storage` |
+| `GARAGE16_MAX_UPLOAD_BYTES` | Per-upload size cap | 50 MB |
+| `GARAGE16_SECRET_KEY` | Fernet key encrypting `client_secret` at rest — **REQUIRED in production** | insecure built-in dev key (loudly logged) |
+| `GARAGE16_REGISTRATION_SECRET` | If set (and registration is not open), sign-up needs this secret (`X-Registration-Secret`) — production needs it **or** `GARAGE16_OPEN_REGISTRATION=1` | unset — registration open |
+| `GARAGE16_ADMIN_TOKEN` | Bearer token for `/admin/*` moderation endpoints — unset means those endpoints 503 | unset |
+| `GARAGE16_REQUIRE_HTTPS` | If `1`/`true`, rejects requests not forwarded as HTTPS by a reverse proxy | unset — off |
+| `GARAGE16_ENV` | Only the literal string `development` gets dev defaults; anything else (including unset) is treated as production and hard-fails without real secrets | `development` |
+| `GARAGE16_CORS_ORIGINS` | Comma-separated allowed origins for the web frontend — include the Cloudflare Pages domain here if the frontend is deployed separately | `http://localhost:5173` |
+| `GARAGE16_MIN_CLIENT_VERSION` | Uploads from an older `client_version` are rejected with 400 | `0.5.3` |
+| `GARAGE16_LOG_FORMAT` | `text` or `json` | `text` |
+| `GARAGE16_DB_POOL_SIZE` / `GARAGE16_DB_MAX_OVERFLOW` | PostgreSQL connection pool sizing (ignored for SQLite) | 5 / 10 |
+| `GARAGE16_INTEGRITY_KEY` | V0.9.9: key of the server's MACs over stored laps and the audit log (`server/laps/integrity.py`); comma-separated for rotation (first signs, all verify). Empty = derived from `GARAGE16_SECRET_KEY`. | empty |
+| `GARAGE16_AUDIT_RETENTION_DAYS` | V0.9.9: days the audit log is kept (minimum 30). | 365 |
+| `GARAGE16_TRUSTED_PROXIES` | V0.9.8: whose `X-Forwarded-For` is believed (addresses / networks, or `private`); read from the right, so a header the visitor writes himself never changes the address the rate limits count (`server/core/client_ip.py`). docker-compose sets `private` (the app publishes no port). Empty = the socket address. | empty (compose: `private`) |
+| `GARAGE16_RATELIMIT_*_MAX` / `_WINDOW` | Per-bucket rate limits (register, login, upload, …; V1.0.1: `LOGINACCOUNT` = failed sign-ins per email address, `EMAILADDRESS` = emails sent to one address) — see `server/core/config.py` / `server/core/rate_limit.py` | see `server/core/config.py` |
+| `GARAGE16_OPEN_REGISTRATION` | V1.0: `1` = anybody may sign up on the website (terms + minimum age). A production server needs this **or** `GARAGE16_REGISTRATION_SECRET`. | unset |
+| `GARAGE16_MIN_AGE` | V1.0: minimum age asked at sign-up | 16 |
+| `GARAGE16_OPERATOR_NAME` / `_ADDRESS` / `_EMAIL` | V1.0: operator shown on the Legal page (address lines separated by `|`) — kept in `.env`, never in the repository | unset |
+| `GARAGE16_GITHUB_REPO` | V1.0: the download buttons default to this repository's newest release (empty = off) | `ry2en-X/garage16-lmu` |
+| `GARAGE16_REQUIRE_EMAIL_VERIFICATION` | V1.0.1: the desktop client connects only after the email was confirmed (`0` = off) | `1` |
+| `GARAGE16_UNVERIFIED_ACCOUNT_DAYS` | V1.0.1: sign-ups never confirmed (no laps, no team) are deleted after this many days (`0` = never) | 7 |
+| `GARAGE16_NEW_DRIVER_REVIEW_LAPS` | V1.0.1: a driver with fewer official laps whose lap beats the Garage16 Best of others is held for an admin (`server/laps/fair_play.py`, `0` = off) | 10 |
+| `GARAGE16_MAX_DEVICES` | V1.0.1: PCs one account may have connected at once (the one used longest ago is disconnected) | 5 |
+| `GARAGE16_LATEST_CLIENT_VERSION` | V1.0.1: the newest desktop client; older clients show "a new version is available" | the client released with the server |
 | `CADDY_SITE_ADDRESS` | Reverse proxy access variant switch — `:80` (Tunnel) or a real domain (direct/VPS) | `:80` |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Only used with `--profile tunnel` (Variant A) | unset |
 | `BACKUP_HOST_PATH` / `BACKUP_INTERVAL_SECONDS` / `BACKUP_RETENTION_DAYS` | Only used with `--profile backup` | see `.env.example` |
 
-**Before running this anywhere but localhost:** set `LMU_GARAGE_SECRET_KEY`,
-`LMU_GARAGE_ADMIN_TOKEN`, and either `LMU_GARAGE_REGISTRATION_SECRET` (closed circle) or
-`LMU_GARAGE_OPEN_REGISTRATION=1` (open sign-up), and put a TLS-terminating reverse proxy in front
-of it (this process only ever speaks plain HTTP itself). `LMU_GARAGE_ENV` unset or anything other
-than `development` hard-fails at startup when these are missing — see `server/config.py`.
+**Before running this anywhere but localhost:** set `GARAGE16_SECRET_KEY`,
+`GARAGE16_ADMIN_TOKEN`, and either `GARAGE16_REGISTRATION_SECRET` (closed circle) or
+`GARAGE16_OPEN_REGISTRATION=1` (open sign-up), and put a TLS-terminating reverse proxy in front
+of it (this process only ever speaks plain HTTP itself). `GARAGE16_ENV` unset or anything other
+than `development` hard-fails at startup when these are missing — see `server/core/config.py`.
 
 
 
 ## Credential lifecycle
 
-Since V1.0 a driver signs up on the website with name, email and password (`POST /accounts/signup`;
+Since V1.0 a driver signs up on the website with name, email and password (`POST /api/v1/accounts/signup`;
 V1.0.1: the same answer for every address, the browser is not signed in until the email is
 confirmed). The desktop client connects with the same email and password
-(`POST /accounts/desktop-login`) and receives:
+(`POST /api/v1/accounts/desktop-login`) and receives:
 
 - an **auth token for that PC** (V1.0.1, `device_tokens`: one per PC, up to
-  `LMU_GARAGE_MAX_DEVICES`; listed and disconnectable under Account → Connected PCs,
-  `GET/DELETE /accounts/devices`), and
+  `GARAGE16_MAX_DEVICES`; listed and disconnectable under Account → Connected PCs,
+  `GET/DELETE /api/v1/accounts/devices`), and
 - the account's **client secret** (HMAC key for uploads; the same on every PC).
 
 The client stores both encrypted with the Windows Data Protection API (V1.0.1,
 `client/secret_store.py`). Further endpoints:
 
-- `POST /accounts/rotate-token` / `POST /accounts/rotate-secret` — new per-driver token / secret
+- `POST /api/v1/accounts/rotate-token` / `POST /api/v1/accounts/rotate-secret` — new per-driver token / secret
   (the old token-only accounts and the "advanced" token login use them).
-- `POST /accounts/revoke` — with a PC's token: disconnects that PC; with the per-driver token:
+- `POST /api/v1/accounts/revoke` — with a PC's token: disconnects that PC; with the per-driver token:
   kills it (the web login with email and password keeps working).
-- `POST /accounts/accept-terms` — accept the current terms (V1.0.1; the website asks after
+- `POST /api/v1/accounts/accept-terms` — accept the current terms (V1.0.1; the website asks after
   signing in when they changed).
-- `GET /accounts/me/export` — self-service data export; `DELETE /accounts/me` — full deletion.
+- `GET /api/v1/accounts/me/export` — self-service data export; `DELETE /api/v1/accounts/me` — full deletion.
 
 ## Moderation
 
-`/admin/*` endpoints (bearer-token-gated via `LMU_GARAGE_ADMIN_TOKEN`):
+`/admin/*` endpoints (bearer-token-gated via `GARAGE16_ADMIN_TOKEN`):
 lock/unlock a driver, soft-invalidate a lap with a reason, review/resolve
-driver-submitted lap reports (`POST /telemetry/laps/{id}/report`), delete
+driver-submitted lap reports (`POST /api/v1/laps/{id}/report`), delete
 a driver and all their data, and decide the review queue (`GET /admin/review`): laps the
-track-limits check could not decide, and (V1.0.1, `server/fair_play.py`) laps of new drivers that
-would beat the Garage16 Best of others. See `server/routers/admin.py`.
+track-limits check could not decide, and (V1.0.1, `server/laps/fair_play.py`) laps of new drivers that
+would beat the Garage16 Best of others. See `server/api/v1/admin.py`.
 
 ## Running tests
 
 **The release gate (V0.9.7)** — what decides whether a state may be released:
 
 ```
-bash scripts/setup_test_env.sh          # .venv with the exact versions of constraints.txt + jsdom
+bash scripts/dev/setup_test_env.sh          # .venv with the exact versions of constraints.txt + jsdom
 . .venv/bin/activate
-python -m scripts.release_check         # whole suite, strict: a skipped test is a failure
-python -m scripts.release_check --zip Garage16_Lmu.zip   # ... and the archive, only if green
+python -m scripts.release.release_check         # whole suite, strict: a skipped test is a failure
+python -m scripts.release.release_check --zip Garage16_Lmu.zip   # ... and the archive, only if green
 ```
 
 It first checks the environment (every Python package, Node + jsdom, tkinter, bash/gzip,
@@ -413,35 +457,42 @@ hash over the released files) and goes into the release archive. `.github/workfl
 the same gate on every push, plus the suite against PostgreSQL and the Docker image builds; the
 client build (`build-client.yml`) only starts after it passed.
 
-A quick local run without the gate is still just:
+Without the gate:
 
 ```
 pip install -r requirements-dev.txt -r server/requirements.txt -r client/requirements.txt -c constraints.txt
-pytest
+python -m pytest -m "not slow"     # the quick run for every day, about a minute and a half (V1.0.2)
+python -m pytest                   # everything
 ```
+
+The tests are ordered by topic (`tests/accounts/`, `tests/analysis/`, `tests/api/`, `tests/laps/`,
+`tests/leaderboard/`, `tests/ops/`, `tests/web/`, …; the browser suites in `tests/js/`). "slow" are
+the ones that start other programs or walk long chains (jsdom suites, migration chain, real Caddy,
+backup drill, client build, mutation keys) — `SLOW_TESTS` in `tests/conftest.py`. Before a release
+the whole suite runs (the gate above).
 
 `tests/conftest.py` isolates each test run into a fresh temp SQLite DB
 and storage directory — nothing touches the repo-root `lmu_garage_server.db`
 you get from running the server locally.
 
-A handful of modules (`test_lmu_structs.py`, `test_parser.py`,
-`test_validation.py`, `test_uploader_retry.py`, `test_recorder.py`) need
+A handful of modules (`tests/client/test_lmu_structs.py`, `…/test_parser.py`,
+`tests/laps/test_validation.py`, `tests/client/test_uploader_retry.py`, `…/test_recorder.py`) need
 only pandas/numpy/requests + stdlib — they also run without pytest via
 `python -m tests.run_stdlib_tests`. Everything else (integration,
 concurrency, moderation, rate-limit tests) needs the full stack
 (`fastapi`, `httpx` for `TestClient`) and only runs under `pytest`.
 
-`tests/test_concurrency.py` verifies the SQLite race-safety path for real
+`tests/laps/test_concurrency.py` verifies the SQLite race-safety path for real
 (two threads, real HTTP requests, real DB). **The PostgreSQL
 `pg_advisory_xact_lock` path is now also verified for real** (V0.8.3) —
-run `./scripts/test_against_postgres.sh` against a real PostgreSQL
+run `./scripts/dev/test_against_postgres.sh` against a real PostgreSQL
 instance (see that script's header for how to set one up in ~2 minutes)
 to run the full suite, including the concurrency tests, against it. Do
 this once before a production deploy and after any change touching
-`server/database.py` or `server/records.py` — SQLite alone can't catch a
+`server/core/database.py` or `server/laps/records.py` — SQLite alone can't catch a
 Postgres-specific regression there.
 
-`tests/test_migrations.py` runs the full Alembic chain (upgrade head,
+`tests/db/test_migrations.py` runs the full Alembic chain (upgrade head,
 downgrade base, upgrade head again) against a fresh SQLite DB as part of
 the normal `pytest` run — every future migration gets this round-trip
 check automatically, not just the one being actively written.
@@ -453,9 +504,9 @@ several other assumptions (scoring/telemetry sync timing, `count_lap_flag`
 semantics, `mmap` "not running" detection, car identity/encoding,
 staleness detection) are not, and can't be from this development
 environment (no Windows, no LMU). `docs/LMU_VERIFICATION_PROTOCOL.md` has
-a concrete test procedure for each open item, and `scripts/dump_shared_memory.py`
+a concrete test procedure for each open item, and `scripts/dev/dump_shared_memory.py`
 is the read-only diagnostic tool those procedures use. Set
-`LMU_GARAGE_DEBUG=1` when running the real client to get the matching
+`GARAGE16_DEBUG=1` when running the real client to get the matching
 debug log lines from `client/telemetry/parser.py`.
 
 The protocol's items were run against real LMU sessions on the developer's PC; repeat the relevant
@@ -463,7 +514,7 @@ ones after a change to the shared-memory structs or the parser.
 
 ## Known limitations
 
-- `server/rate_limit.py` is in-process only — correct for a single `uvicorn` worker,
+- `server/core/rate_limit.py` is in-process only — correct for a single `uvicorn` worker,
   under-protective with several workers (each has its own counters). See that module's docstring.
 - The upload endpoint's DB transaction spans lap insert + record evaluation together (by design,
   for atomicity — see `routers/telemetry.py`).
@@ -471,7 +522,7 @@ ones after a change to the shared-memory structs or the parser.
   warns ("More info" → "Run anyway"). Every release carries `SHA256SUMS.txt`.
 - The HMAC signature proves which account sent a lap, not that it was really driven (the client
   holds the key). Protection against forged laps is the server's own check of the telemetry plus
-  the review queue (`server/lap_check.py`, `server/fair_play.py`).
+  the review queue (`server/laps/lap_check.py`, `server/laps/fair_play.py`).
 - Verified on real hardware so far: Variant A (Cloudflare Tunnel) on a Synology NAS, a real
   backup + restore drill, real LMU laps. Not verified: Variant B (VPS), Docker secrets, the
   `--profile backup` loop.

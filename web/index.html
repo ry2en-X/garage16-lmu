@@ -11,24 +11,30 @@
 <meta property="og:site_name" content="Garage16" />
 <meta property="og:title" content="Garage16 — Le Mans Ultimate telemetry &amp; leaderboards" />
 <meta property="og:description" content="Record your Le Mans Ultimate laps, compare them in the LapTime and Stint Analyzer, and race your friends on the leaderboards." />
-<meta property="og:image" content="icon-192.png" />
+<meta property="og:image" content="/icon-192.png" />
+<meta property="og:url" content="/" />
+<link rel="canonical" href="/" />
 <meta name="twitter:card" content="summary" />
 <!-- V0.9.6: the fonts are served from here (web/fonts, SIL Open Font License) — no request to
      Google: faster through the tunnel, works offline in the desktop app, no third-party
      connection for the visitor (DSGVO). -->
-<link rel="preload" href="fonts/ibm-plex-mono-latin-400.woff2" as="font" type="font/woff2" crossorigin />
-<link rel="preload" href="fonts/oswald-latin-wght.woff2" as="font" type="font/woff2" crossorigin />
-<link rel="stylesheet" href="css/styles.css" />
+<link rel="preload" href="/v/1.0.2/fonts/ibm-plex-mono-latin-400.woff2" as="font" type="font/woff2" crossorigin />
+<link rel="preload" href="/v/1.0.2/fonts/oswald-latin-wght.woff2" as="font" type="font/woff2" crossorigin />
+<!-- V1.0.2: the files of this release live under /v/<version>/ and may be kept for a year
+     (Cache-Control: immutable) — a new release has a new address, so no browser ever mixes old and
+     new files. Only this page itself is asked for again every time. The version is written here
+     by scripts/release/build_web.py (Cloudflare Pages) and checked by the release gate. -->
+<link rel="stylesheet" href="/v/1.0.2/css/styles.css" />
 <!-- V0.9.4: the Garage16 icon — an angular "16" -->
-<link rel="icon" href="favicon.svg" type="image/svg+xml" />
-<link rel="icon" href="favicon.ico" sizes="any" />
-<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 </head>
 <body>
 
   <div class="frame">
     <nav class="pitwall" id="pitwall">
-      <a class="pitwall__brand" href="#/" style="text-decoration:none;">
+      <a class="pitwall__brand" href="/" style="text-decoration:none;">
         <span class="pitwall__brand-mark">GARAGE</span>
         <span class="pitwall__brand-name">16</span>
       </a>
@@ -37,24 +43,24 @@
       <div class="pitwall__links" id="navLinks">
         <div class="nav-group">
           <span class="nav-group__label" data-i18n="My garage">My garage</span>
-          <a href="#/dashboard" data-route="dashboard" data-i18n="Dashboard">Dashboard</a>
-          <a href="#/teams" data-route="teams" data-i18n="Teams">Teams</a>
+          <a href="/dashboard" data-route="dashboard" data-i18n="Dashboard">Dashboard</a>
+          <a href="/teams" data-route="teams" data-i18n="Teams">Teams</a>
         </div>
         <div class="nav-group">
           <span class="nav-group__label" data-i18n="Analysis">Analysis</span>
-          <a href="#/analysis" data-route="analysis" data-i18n="LapTime Analyzer">LapTime Analyzer</a>
-          <a href="#/stints" data-route="stints" data-i18n="Stint Analyzer">Stint Analyzer</a>
+          <a href="/analysis" data-route="analysis" data-i18n="LapTime Analyzer">LapTime Analyzer</a>
+          <a href="/stints" data-route="stints" data-i18n="Stint Analyzer">Stint Analyzer</a>
         </div>
         <div class="nav-group">
           <span class="nav-group__label" data-i18n="Racing">Racing</span>
-          <a href="#/leaderboard" data-route="leaderboard" data-i18n="Leaderboard">Leaderboard</a>
-          <a href="#/circuits" data-route="circuits" data-i18n="Circuits">Circuits</a>
+          <a href="/leaderboard" data-route="leaderboard" data-i18n="Leaderboard">Leaderboard</a>
+          <a href="/circuits" data-route="circuits" data-i18n="Circuits">Circuits</a>
         </div>
         <div class="nav-group nav-group--foot">
-          <a href="#/account" data-route="account" data-i18n="Account">Account</a>
-          <a href="#/download" data-route="download" data-i18n="Download">Download</a>
-          <a href="#/setup" data-route="setup" data-i18n="Setup guide">Setup guide</a>
-          <a href="#/legal" data-route="legal" class="nav-legal" data-i18n="Legal">Legal</a>
+          <a href="/account" data-route="account" data-i18n="Account">Account</a>
+          <a href="/download" data-route="download" data-i18n="Download">Download</a>
+          <a href="/setup" data-route="setup" data-i18n="Setup guide">Setup guide</a>
+          <a href="/impressum" data-route="legal" class="nav-legal" data-i18n="Legal">Legal</a>
         </div>
       </div>
 
@@ -67,7 +73,7 @@
     </nav>
 
     <div class="mobile-bar">
-      <a class="mobile-bar__brand" href="#/">GARAGE<span>16</span></a>
+      <a class="mobile-bar__brand" href="/">GARAGE<span>16</span></a>
       <button class="mobile-bar__toggle" id="mobileToggle" aria-label="Toggle menu" data-i18n-aria-label="Toggle menu">☰</button>
     </div>
 
@@ -76,7 +82,7 @@
     </main>
   </div>
 
-  <script src="config.js"></script>
-  <script type="module" src="js/router.js"></script>
+  <script src="/v/1.0.2/config.js"></script>
+  <script type="module" src="/v/1.0.2/js/main.js"></script>
 </body>
 </html>

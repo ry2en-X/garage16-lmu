@@ -12,11 +12,11 @@
 // Drawing is plain Canvas 2D. Every function tolerates a missing 2D context (the
 // jsdom test environment has none) by simply not drawing.
 
-import { el } from "../format.js";
+import { el } from "../core/format.js";
 import { bindTouchGestures } from "./touch.js";
 import { clamp, distanceAt, formatDelta, indexForDistance, LAP_COLORS, niceTicks, valueRange } from "./model.js";
 
-import { t } from "../i18n.js";
+import { t } from "../core/i18n.js";
 const PAD = { left: 58, right: 12, top: 8, bottom: 6 };
 const X_AXIS_HEIGHT = 18;
 const DRAG_THRESHOLD_PX = 4;
@@ -225,7 +225,7 @@ export function createChart(state, spec) {
         ctx.strokeStyle = series.color;
         ctx.lineWidth = spec.kind === "delta" ? 1.6 : 1.5;
         ctx.lineJoin = "round";
-        // V0.9.4: a line style per lap (Lap 3 dashed, Lap 4 dotted)
+        // A line style per lap (Lap 3 dashed, Lap 4 dotted)
         if (ctx.setLineDash) ctx.setLineDash(series.dash || []);
         let penDown = false;
         let lastY = 0;
@@ -250,7 +250,7 @@ export function createChart(state, spec) {
           lastY = y;
         }
         ctx.stroke();
-        // V0.9.1: raw extremes between grid points (brake taps, kerbs) as thin vertical strokes
+        // Raw extremes between grid points (brake taps, kerbs) as thin vertical strokes
         const sp = series.spikes;
         if (sp && sp.i && sp.i.length) {
           ctx.lineWidth = 1.2;
@@ -402,7 +402,7 @@ export function createChart(state, spec) {
     },
     { passive: false }
   );
-  // Touch (V0.9.1): tap = cursor, sideways drag = scrub, up/down = the page scrolls,
+  // Touch: tap = cursor, sideways drag = scrub, up/down = the page scrolls,
   // hold = pin, two fingers = pinch zoom + pan. See analysis/touch.js.
   bindTouchGestures(canvas, {
     tap: (x) => state.setCursor(indexAtClientX(x)),

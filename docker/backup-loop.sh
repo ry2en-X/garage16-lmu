@@ -1,22 +1,25 @@
 #!/bin/sh
 # docker/backup-loop.sh — the `backup` profile service (docker-compose.yml): a CONSISTENT backup
-# on an interval, with retention (V0.9.8; first version V0.8.8).
+# on an interval, with retention.
 #
-# The same guarantees as scripts/backup.sh, inside one container (postgres:16-alpine: pg_dump,
+# The same guarantees as scripts/ops/backup.sh, inside one container (postgres:16-alpine: pg_dump,
 # busybox flock, tar, sha256sum):
 #   * maintenance is announced in the telemetry volume and the write lock taken EXCLUSIVELY
-#     (server/write_lock.py) — new uploads get 503 and are retried by the client, running ones
+#     (server/ops/write_lock.py) — new uploads get 503 and are retried by the client, running ones
 #     finish first; the dump and the archive are made while the lock is held;
-#   * both files are checked (gzip, pg_dump's completion line, the archive lists), a manifest with
-#     sizes, SHA-256, schema revision and lap count is written, and only then the folder
-#     garage16_<stamp>/ appears (it is built as garage16_<stamp>.partial) — scripts/restore.sh
-#     takes that folder;
+#   * V1.0.2: the telemetry files are copied incrementally into /backups/telemetry-store (only the
+#     new ones), the backup folder lists them (docker/telemetry-store.sh) — no full archive per run;
+#   * the dump and the store are checked (gzip, pg_dump's completion line, every listed file in the
+#     store with its size), a manifest with sizes, SHA-256, schema revision and lap count is
+#     written, and only then the folder garage16_<stamp>/ appears (it is built as
+#     garage16_<stamp>.partial) — scripts/ops/restore.sh takes that folder;
 #   * if this container dies mid-backup the kernel releases the lock; the marker file is removed
 #     on the next start, and the server ignores a marker older than 2 hours anyway.
 #
 # Where backups land: /backups, mounted from ${BACKUP_HOST_PATH:-backup_data} — set it to a real
 # path (a second disk, a cloud-synced folder) to have them outside Docker's own storage.
 set -u
+. /garage16/telemetry-store.sh
 
 DATA=/data/telemetry
 LOCK="$DATA/.garage16-write.lock"
@@ -26,7 +29,7 @@ RETENTION="${BACKUP_RETENTION_DAYS:-14}"
 
 mkdir -p /backups
 rm -f "$MARKER"     # a leftover of a killed run
-# V0.9.9.3: this container runs as root — the lock file must keep the owner of the telemetry
+# This container runs as root — the lock file must keep the owner of the telemetry
 # directory (the server's user), or the server cannot open it and every upload fails.
 fix_lock_owner() {
     [ -e "$LOCK" ] || : > "$LOCK"
@@ -66,8 +69,8 @@ one_backup() {
         pg_dump | gzip > "$1/db.sql.gz"
         psql -Atc "select version_num from alembic_version" > "$1/.schema"
         psql -Atc "select count(*) from laps" > "$1/.laps"
-        cd "$2"
-        tar czf "$1/telemetry.tar.gz" --exclude "./.garage16-*" --exclude "./.pre_restore_*" .
+        . /garage16/telemetry-store.sh
+        store_add "$2" /backups/telemetry-store "$1/telemetry-files.txt" > "$1/.store"
     ' sh "$work" "$DATA"; then
         rm -f "$MARKER"
         log "ERROR: dump or archive failed — nothing published"
@@ -78,27 +81,27 @@ one_backup() {
     log "write lock released"
 
     if ! gzip -t "$work/db.sql.gz" || ! gzip -dc "$work/db.sql.gz" | tail -n 5 | grep -q "PostgreSQL database dump complete" \
-            || ! gzip -t "$work/telemetry.tar.gz"; then
+            || ! store_check /backups/telemetry-store "$work/telemetry-files.txt"; then
         log "ERROR: the backup did not pass its checks — nothing published"
         rm -rf "$work"
         return 1
     fi
-    files=$(tar tzf "$work/telemetry.tar.gz" | grep -vc '/$' || true)
+    read -r files new_files data_bytes < "$work/.store"
     schema=$(tr -d '[:space:]' < "$work/.schema")
     laps=$(tr -d '[:space:]' < "$work/.laps")
-    # V0.9.9: head of the audit chain (server/audit.py); V0.9.9.1: from the dump itself (see
-    # scripts/backup.sh — audit rows are also written outside the upload write lock)
+    # Head of the audit chain (server/ops/audit.py); From the dump itself (see
+    # scripts/ops/backup.sh — audit rows are also written outside the upload write lock)
     audit_head="null"
     head_row=$(audit_head_from_dump "$work/db.sql.gz")
     if [ -n "$head_row" ]; then
         audit_head="{\"id\": ${head_row%% *}, \"mac\": \"${head_row#* }\"}"
     fi
-    rm -f "$work/.schema" "$work/.laps"
+    rm -f "$work/.schema" "$work/.laps" "$work/.store"
     db_sha=$(sha256sum "$work/db.sql.gz" | cut -d' ' -f1)
-    tel_sha=$(sha256sum "$work/telemetry.tar.gz" | cut -d' ' -f1)
+    tel_sha=$(sha256sum "$work/telemetry-files.txt" | cut -d' ' -f1)
     cat > "$work/manifest.json.tmp" <<EOF
 {
-  "format": 1,
+  "format": 2,
   "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "program_version": "$(sed -n 's/^VERSION = "\(.*\)"/\1/p' /garage16/main.py 2>/dev/null)",
   "schema_revision": "${schema}",
@@ -106,11 +109,11 @@ one_backup() {
   "lap_count": ${laps:-0},
   "audit_head": ${audit_head},
   "database": {"file": "db.sql.gz", "bytes": $(wc -c < "$work/db.sql.gz" | tr -d ' '), "sha256": "${db_sha}"},
-  "telemetry": {"file": "telemetry.tar.gz", "bytes": $(wc -c < "$work/telemetry.tar.gz" | tr -d ' '), "sha256": "${tel_sha}", "files": ${files:-0}}
+  "telemetry": {"file": "telemetry-files.txt", "store": "../telemetry-store", "bytes": $(wc -c < "$work/telemetry-files.txt" | tr -d ' '), "sha256": "${tel_sha}", "files": ${files:-0}, "new_files": ${new_files:-0}, "data_bytes": ${data_bytes:-0}}
 }
 EOF
     mv "$work/manifest.json.tmp" "$work/manifest.json" && mv "$work" "$final"
-    log "backup OK: $final (schema $schema, $laps laps, $files files)"
+    log "backup OK: $final (schema $schema, $laps laps, $files files, $new_files of them new)"
 }
 
 log "Starting backup loop (interval: ${INTERVAL}s, retention: ${RETENTION} days)"
@@ -122,6 +125,8 @@ while true; do
     # backups of the V0.8.8–V0.9.7 loop (two loose files per run) age out the same way
     find /backups -maxdepth 1 -name 'garage16_*.sql.gz' -mtime "+${RETENTION}" -delete
     find /backups -maxdepth 1 -name 'garage16_*.tar.gz' -mtime "+${RETENTION}" -delete
+    # The store keeps only the files a remaining backup still lists
+    store_prune /backups/telemetry-store /backups || log "WARNING: cleaning the telemetry store failed"
     [ "${BACKUP_ONCE:-0}" = "1" ] && exit 0
     sleep "$INTERVAL"
 done

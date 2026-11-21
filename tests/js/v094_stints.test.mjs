@@ -14,7 +14,7 @@ globalThis.localStorage = dom.window.localStorage;
 globalThis.sessionStorage = dom.window.sessionStorage;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
-dom.window.LMU_GARAGE_API_BASE_URL = "";
+dom.window.GARAGE16_API_BASE_URL = "";
 dom.window.localStorage.setItem("lmu_garage_session", JSON.stringify({ driverId: 1, displayName: "Me", viaCookie: true }));
 dom.window.localStorage.setItem("garage16_language", "en");
 
@@ -23,11 +23,11 @@ globalThis.fetch = async (url) => {
   calls.push(url);
   const u = new URL(url, "http://x");
   const json = (body, status = 200) => ({ ok: status < 400, status, statusText: String(status), json: async () => body, text: async () => JSON.stringify(body) });
-  if (u.pathname === "/telemetry/analysis/stints/sessions") return json(SESSIONS);
-  if (u.pathname === "/telemetry/analysis/stints/session") return json(SESSION);
-  if (u.pathname === "/telemetry/analysis/stints/drivers") return json(DRIVERS);
-  if (u.pathname === "/telemetry/analysis/stints/rule-sets") return json(RULES);
-  if (u.pathname === "/telemetry/analysis/theoretical-best") return json({ found: false });
+  if (u.pathname === "/api/v1/stints/sessions") return json(SESSIONS);
+  if (u.pathname === "/api/v1/stints/session") return json(SESSION);
+  if (u.pathname === "/api/v1/stints/drivers") return json(DRIVERS);
+  if (u.pathname === "/api/v1/stints/rule-sets") return json(RULES);
+  if (u.pathname === "/api/v1/analysis/theoretical-best") return json({ found: false });
   return json({ detail: "unexpected " + u.pathname }, 500);
 };
 
@@ -209,7 +209,7 @@ dom.window.location.hash = "#/stints";
 let root = document.getElementById("root");
 await renderStints(root);
 assert.match(text(root), /Stint Analyzer/);
-assert.ok(root.querySelector('a[href="#/stints?lap=510"]'), "each session opens in the Stint Analyzer");
+assert.ok(root.querySelector('a[href="/stints/lap/510"]'), "each session opens in the Stint Analyzer");
 assert.ok(root.querySelector("select"), "team mates can be picked");
 
 // --- one session

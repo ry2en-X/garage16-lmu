@@ -5,7 +5,7 @@ Revises: 0009
 Create Date: 2026-09-27
 
 Addressed by invited_driver_id only (not invited_email — see this
-migration's accompanying model docstring in server/models.py for why
+migration's accompanying model docstring in server/core/models.py for why
 that's a deliberate scope decision, not an oversight). The existing
 Team.invite_code system is untouched and keeps working exactly as
 before — this is an addition, not a replacement, per the spec's own
@@ -32,7 +32,7 @@ def upgrade() -> None:
         sa.Column("invited_driver_id", sa.Integer(), sa.ForeignKey("drivers.id"), nullable=False),
         sa.Column("created_by_driver_id", sa.Integer(), sa.ForeignKey("drivers.id"), nullable=False),
         # pending | accepted | declined | expired | revoked — see
-        # server/models.py's TeamInvitation docstring for the state
+        # server/core/models.py's TeamInvitation docstring for the state
         # machine. Plain String, not a DB enum: consistent with how this
         # project already does RecordEvent.record_type and
         # TeamMembership.role (no DB-level enum type anywhere in this

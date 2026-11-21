@@ -30,7 +30,7 @@ Migrationslogik, der Unterschied ist nur die Port-Freigabe auf
 
    **Achtung:** Ein `downgrade` das Spalten löscht, die bereits Daten
    enthalten, verliert diese Daten unwiderruflich. Vor jedem Downgrade in
-   Produktion: Backup laufen lassen (`./scripts/backup.sh` oder, falls
+   Produktion: Backup laufen lassen (`./scripts/ops/backup.sh` oder, falls
    der containerisierte Weg genutzt wird, einfach den nächsten
    `--profile backup`-Zyklus abwarten oder manuell antriggern — siehe
    `docs/DEPLOYMENT.md` "Backups").
@@ -38,13 +38,15 @@ Migrationslogik, der Unterschied ist nur die Port-Freigabe auf
 3. **Falls Daten beschädigt/inkonsistent sind: aus einem Backup wiederherstellen** (V0.9.8).
 
    Ein Backup ist seit V0.9.8 **ein Ordner** `garage16_<Zeitstempel>/` mit `db.sql.gz`,
-   `telemetry.tar.gz` und `manifest.json` (beide Wege — `scripts/backup.sh` und
+   `telemetry.tar.gz` und `manifest.json` — seit V1.0.2 statt des Archivs `telemetry-files.txt`
+   (welche Dateien zu diesem Stand gehören); die Dateien selbst liegen einmal im gemeinsamen Ordner
+   `telemetry-store/` daneben. `restore.sh` kann beide Formate (beide Wege — `scripts/ops/backup.sh` und
    `--profile backup` — legen genau das an; ein Ordner mit `.partial` am Ende ist ein abgebrochener
    Lauf und kein Backup). Datenbank und Dateien stammen aus demselben Moment: während des Backups
    werden neue Uploads kurz mit „Wartung“ (HTTP 503) abgewiesen und vom Client später wiederholt.
 
    ```
-   ./scripts/restore.sh /pfad/zu/garage16_20261019_030000
+   ./scripts/ops/restore.sh /pfad/zu/garage16_20261019_030000
    ```
 
    Ablauf — und was bei einem Fehler in jedem Schritt passiert:
@@ -65,16 +67,16 @@ Migrationslogik, der Unterschied ist nur die Port-Freigabe auf
 
    Der alte Stand bleibt als Rückfallpunkt liegen:
    ```
-   ./scripts/restore.sh --rollback 20261019_141500    # zurück zum Stand vor diesem Restore
-   ./scripts/restore.sh --cleanup  20261019_141500    # Rückfallpunkt löschen, wenn alles passt
+   ./scripts/ops/restore.sh --rollback 20261019_141500    # zurück zum Stand vor diesem Restore
+   ./scripts/ops/restore.sh --cleanup  20261019_141500    # Rückfallpunkt löschen, wenn alles passt
    ```
    (den Zeitstempel nennt das Skript am Ende.)
 
    **Backups von vor V0.9.8** (zwei lose Dateien, kein Manifest) gehen mit
-   `./scripts/restore.sh --allow-unverified <db.sql.gz> <telemetry.tar.gz>` — dieselbe sichere
+   `./scripts/ops/restore.sh --allow-unverified <db.sql.gz> <telemetry.tar.gz>` — dieselbe sichere
    Abfolge, nur ohne Prüfsummen-Vergleich; beide Dateien müssen vom selben Lauf stammen.
 
-   **Getestet:** `tests/test_v098_backup_restore.py` führt die ausgelieferten Skripte gegen ein
+   **Getestet:** `tests/ops/test_backup_restore_drill.py` führt die ausgelieferten Skripte gegen ein
    echtes PostgreSQL und echte Alpine-Umgebungen aus — Uploads während des Backups, abgebrochene und
    gekillte Backups, ein Fehler in jedem einzelnen Restore-Schritt, ein scheiterndes Zurückdrehen,
    beschädigte / fremde / manipulierte Backups.
@@ -93,7 +95,7 @@ Migrationslogik, der Unterschied ist nur die Port-Freigabe auf
      -c 'ALTER DATABASE garage16_pre_restore_<stamp> RENAME TO garage16;'
    docker compose up -d server discord_bot
    ```
-   Danach `python -m scripts.consistency_check` im Server-Container (Befehl: ADMIN_GUIDE).
+   Danach `python -m scripts.ops.consistency_check` im Server-Container (Befehl: ADMIN_GUIDE).
 
 ## Nach jedem Rollback
 
@@ -108,7 +110,7 @@ Migrationslogik, der Unterschied ist nur die Port-Freigabe auf
   `docs/DEPLOYMENT.md` "Monitoring") — `unhealthy` dort ist ein zusätzliches, vom
   reinen Log-Grep unabhängiges Signal.
 - **Nach einem Restore (V0.9.7): Datenbank und Telemetrie-Volume gegeneinander prüfen** —
-  `python -m scripts.consistency_check --deep` im Server-Container (genauer Befehl:
+  `python -m scripts.ops.consistency_check --deep` im Server-Container (genauer Befehl:
   `docs/ADMIN_GUIDE.md`, Kapitel 8.2, Schritt 5). Runden ohne Datei oder Dateien mit anderer Prüfsumme
   heißen: DB- und Telemetrie-Backup stammen nicht vom selben Zeitpunkt.
 - Betroffene Fahrer informieren, falls Uploads in der Zwischenzeit
@@ -119,7 +121,7 @@ Migrationslogik, der Unterschied ist nur die Port-Freigabe auf
 ## Client-Kompatibilität nach einem Server-Rollback
 
 Wenn der Server auf eine ältere Version zurückgerollt wird, aber Fahrer
-bereits einen neueren Client haben: prüfe `LMU_GARAGE_MIN_CLIENT_VERSION`
+bereits einen neueren Client haben: prüfe `GARAGE16_MIN_CLIENT_VERSION`
 auf dem zurückgerollten Server — falls der neue Client-Wert höher ist als
 das, was der alte Server als `min_client_version` meldet, laufen Uploads
 weiter normal (die Prüfung ist "mindestens", nicht "exakt"). Nur ein

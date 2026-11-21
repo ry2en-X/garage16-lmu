@@ -23,7 +23,7 @@ Tests_Garage16.txt
 lmu_dump_*.csv
 smoketest_*.py
 
-# --- Backups (scripts/backup.sh output) ---
+# --- Backups (scripts/ops/backup.sh output) ---
 test-backups/
 *.sql.gz
 *.tar.gz
@@ -62,12 +62,13 @@ dist-installer/
 Thumbs.db
 __MACOSX/
 
-# --- Release gate output (scripts/release_check.py) ---
+# --- Release gate output (scripts/release/release_check.py) ---
 release/
 
-# --- Test downloads (scripts/setup_test_env.sh) ---
+# --- Test downloads (scripts/dev/setup_test_env.sh) ---
 tests/.cache/
 .ruff_cache/
 release-archive/
 release-verify/
 .hypothesis/
+build/

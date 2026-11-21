@@ -1,5 +1,5 @@
 """client/update_notice.py — the single place that words the
-"you need a newer Garage16" message (V0.8.6), used both when GET /health
+"you need a newer Garage16" message, used both when GET /health
 says so in advance and when an upload gets a 426 UPDATE_REQUIRED back,
 so a friend always sees the same plain-language text either way."""
 
@@ -22,14 +22,14 @@ def format_update_required_message(min_version: Optional[str], download_url: Opt
 
 
 def format_update_available_message(latest_version: Optional[str], download_url: Optional[str]) -> str:
-    """V1.0.1: an OPTIONAL update (GET /health latest_client_version) — this client keeps working."""
+    """An OPTIONAL update (GET /health latest_client_version) — this client keeps working."""
     head = f"Garage16 v{latest_version} is available." if latest_version else "A newer Garage16 is available."
     tail = f"Download it here: {download_url}" if download_url else "Ask whoever runs your Garage16 server for it."
     return f"{head} This version keeps working — updating is recommended. {tail}"
 
 
 def is_safe_download_url(url: Optional[str]) -> bool:
-    """The download link comes from the SERVER (LMU_GARAGE_CLIENT_DOWNLOAD_URL
+    """The download link comes from the SERVER (GARAGE16_CLIENT_DOWNLOAD_URL
     in /health and 426 responses), so it's treated as untrusted input
     before the GUI offers to open it in a browser: plain http(s) with a
     host only — never file:, javascript:, or anything else a browser or

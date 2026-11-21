@@ -8,33 +8,48 @@ then starts uvicorn without --reload, optionally with --workers N).
 
 from __future__ import annotations
 
-import json
 import contextlib
+import json
 import logging
 import os
 import time
 import uuid
 from typing import Optional
 
-from fastapi import Query
-
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
+from sqlalchemy import text
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from sqlalchemy import text
 
-from . import request_context
-from .config import settings
-from .database import Base, SessionLocal, engine
-from .routers import accounts, admin, analysis, drivers, leaderboard, legal, stints, teams, telemetry
-from .routers.legal import registration_mode
-from .routers.teams import invitations_router
-from .versioning import is_client_outdated
+from server.api.v1 import (
+    account_data,
+    accounts,
+    admin,
+    analysis,
+    circuits,
+    drivers,
+    leaderboard,
+    legal,
+    stints,
+    teams,
+    telemetry,
+    web_sessions,
+    pages,
+)
+from server.api.caching import CacheMiddleware
+from server.api.legacy import LegacyPathMiddleware
+from server.api.v1.legal import registration_mode
+from server.api.v1.teams import invitations_router
+from server.core import request_context
+from server.core.config import settings
+from server.core.database import Base, SessionLocal, engine
+from server.core.versioning import is_client_outdated
+from server.core.env import env
 
-VERSION = "1.0.1"
+VERSION = "1.0.2"
 
 
 def _configure_logging() -> None:
@@ -50,7 +65,7 @@ def _configure_logging() -> None:
                     "logger": record.name,
                     "message": record.getMessage(),
                 }
-                # V0.9.7: the ids that let one upload be followed end to end
+                # The ids that let one upload be followed end to end
                 for key in ("request_id", "lap_id", "driver_id", "outcome", "status", "duration_ms"):
                     value = getattr(record, key, None)
                     if value is not None:
@@ -80,7 +95,7 @@ if not settings.is_production:
 def _docs_urls(cfg) -> dict:
     """Pure decision, factored out so it's unit-testable without spinning
     up (or reloading) a real app/settings singleton — see
-    tests/test_security_headers.py. `cfg` is anything with
+    tests/security/test_security_headers.py. `cfg` is anything with
     `.is_production` and `.enable_api_docs` (in practice, always the real
     `settings`, but a test can pass a stand-in)."""
     enabled = (not cfg.is_production) or cfg.enable_api_docs
@@ -92,8 +107,8 @@ def _docs_urls(cfg) -> dict:
 
 
 def _prune_unverified_signups() -> None:
-    """V1.0.1: sign-ups whose email was never confirmed (server/driver_lifecycle.py)."""
-    from .driver_lifecycle import prune_unverified_signups
+    """Sign-ups whose email was never confirmed (server/accounts/driver_lifecycle.py)."""
+    from server.accounts.driver_lifecycle import prune_unverified_signups
 
     db = SessionLocal()
     try:
@@ -107,16 +122,16 @@ def _prune_unverified_signups() -> None:
 
 @contextlib.asynccontextmanager
 async def _lifespan(_app):
-    """V0.9.8: maintenance at start — the upload log's 30 days, whatever the upload frequency
-    (server/upload_log.py); a warning when several workers split the in-memory state."""
-    from .upload_log import maybe_prune
+    """Maintenance at start — the upload log's 30 days, whatever the upload frequency
+    (server/ops/upload_log.py); a warning when several workers split the in-memory state."""
+    from server.ops.upload_log import maybe_prune
 
     await run_in_threadpool(maybe_prune, True)
     await run_in_threadpool(_prune_unverified_signups)
-    workers = int(os.environ.get("LMU_GARAGE_WORKERS", "1") or 1)
+    workers = int(env("WORKERS", "1") or 1)
     if workers > 1:
-        logger.warning("LMU_GARAGE_WORKERS=%d: rate limits and the analysis cache are per worker process "
-                       "(each worker allows the full limit) — see server/rate_limit.py", workers)
+        logger.warning("GARAGE16_WORKERS=%d: rate limits and the analysis cache are per worker process "
+                       "(each worker allows the full limit) — see server/core/rate_limit.py", workers)
     yield
 
 
@@ -175,11 +190,11 @@ async def request_id_and_timing(request: Request, call_next):
     enough to correlate a slow/failed request across proxy and app logs
     without pulling in a tracing stack."""
     request_id = request.headers.get("x-request-id") or uuid.uuid4().hex[:12]
-    # V0.9.7: an incoming id is only reused when it looks like one (it ends up in logs and the DB)
+    # An incoming id is only reused when it looks like one (it ends up in logs and the DB)
     if not (0 < len(request_id) <= 64 and all(c.isalnum() or c in "-_." for c in request_id)):
         request_id = uuid.uuid4().hex[:12]
     request.state.request_id = request_id
-    token = request_context.set_request_id(request_id)   # V0.9.9: for code without the Request
+    token = request_context.set_request_id(request_id)   # For code without the Request
     start = time.monotonic()
     try:
         response = await call_next(request)
@@ -197,7 +212,7 @@ async def request_id_and_timing(request: Request, call_next):
 
 @app.middleware("http")
 async def require_https(request: Request, call_next):
-    """No-op unless LMU_GARAGE_REQUIRE_HTTPS is set (see config.py).
+    """No-op unless GARAGE16_REQUIRE_HTTPS is set (see config.py).
 
     uvicorn itself only ever speaks plain HTTP here — this process is
     meant to sit behind a TLS-terminating reverse proxy (Caddy, nginx,
@@ -207,8 +222,8 @@ async def require_https(request: Request, call_next):
     plaintext one reaching it directly. /health, /health/live and /health/ready
     are exempt — they must stay reachable over plain HTTP for the reverse
     proxy's / orchestrator's own healthcheck, which hits the container
-    directly (docker-compose.yml probes /health/ready). V0.9.9.2: the two
-    V0.9.8 endpoints were missing here, so with LMU_GARAGE_REQUIRE_HTTPS=1
+    directly (docker-compose.yml probes /health/ready). The two
+    V0.9.8 endpoints were missing here, so with GARAGE16_REQUIRE_HTTPS=1
     (the compose default) the healthcheck got 400 and the server never
     became healthy.
     """
@@ -224,19 +239,24 @@ async def require_https(request: Request, call_next):
     return await call_next(request)
 
 
-app.include_router(telemetry.router)
-app.include_router(analysis.router)
-app.include_router(stints.router)
-app.include_router(leaderboard.router)
-app.include_router(accounts.router)
-app.include_router(teams.router)
-app.include_router(invitations_router)
-app.include_router(admin.router)
-app.include_router(drivers.router)
-app.include_router(legal.router)
+# Short public caching of /api/v1/public/* (server/api/caching.py), then — outermost, so it
+# runs first — the translation of the old API paths (server/api/legacy.py).
+app.add_middleware(CacheMiddleware)
+app.add_middleware(LegacyPathMiddleware)
+
+# The whole API lives under /api/v1 (server/api/v1/, one module per area). The paths of
+# V1.0.1 and older are translated by LegacyPathMiddleware below (server/api/legacy.py).
+API_V1 = "/api/v1"
+for _router in (
+    telemetry.router, analysis.router, circuits.router, stints.router, leaderboard.router, accounts.router,
+    web_sessions.router, account_data.router, teams.router, invitations_router, admin.router, drivers.router,
+    legal.router, pages.router,
+):
+    app.include_router(_router, prefix=API_V1)
 
 
 @app.get("/health")
+@app.get(API_V1 + "/health", tags=["health"])
 def health(client_version: Optional[str] = Query(default=None, max_length=32)) -> dict:
     """Checks DB connectivity (a plain SELECT 1), not just "the process is
     alive" — a process that's up but can't reach its database should fail
@@ -253,7 +273,7 @@ def health(client_version: Optional[str] = Query(default=None, max_length=32)) -
             db.close()
     except Exception as exc:  # noqa: BLE001 — healthcheck must never itself 500
         db_ok = False
-        # V0.9.8: the details (host, user, driver message) go to the log, not to anybody asking
+        # The details (host, user, driver message) go to the log, not to anybody asking
         logger.warning("Health check: database not reachable: %s", exc)
         db_error = "database not reachable"
 
@@ -263,52 +283,54 @@ def health(client_version: Optional[str] = Query(default=None, max_length=32)) -
         "min_client_version": settings.min_client_version,
         "db_ok": db_ok,
         **({"db_error": db_error} if db_error else {}),
-        # V0.7.2 §7: present only during a deliberate server migration
-        # (LMU_GARAGE_MIGRATED_TO set on this, the OLD instance) — see
+        # Present only during a deliberate server migration
+        # (GARAGE16_MIGRATED_TO set on this, the OLD instance) — see
         # client/main.py's startup health-check for how a client acts on it.
         **({"migrated_to": settings.migrated_to_url} if settings.migrated_to_url else {}),
         # V0.8.6 version negotiation: a client that passes its own
         # version (?client_version=0.8.1) gets the server's verdict
         # directly, so the "am I too old" rule lives in exactly one place
-        # (server/versioning.py) instead of being re-implemented per client.
+        # (server/core/versioning.py) instead of being re-implemented per client.
         **({"update_required": is_client_outdated(client_version, settings.min_client_version)} if client_version else {}),
-        # V1.0.1: the newest desktop client — a client that is older shows "a new version is
+        # The newest desktop client — a client that is older shows "a new version is
         # available" (optional, unlike update_required)
         "latest_client_version": settings.latest_client_version,
         **({"update_available": is_client_outdated(client_version, settings.latest_client_version)} if client_version else {}),
         **({"client_download_url": settings.client_download_url} if settings.client_download_url else {}),
-        # V0.9.2: the "Client + analysis app" edition (see config.py) — the website's download
+        # The "Client + analysis app" edition (see config.py) — the website's download
         # page offers both, and an outdated app-edition client points its user here.
         **({"client_app_download_url": settings.client_app_download_url} if settings.client_app_download_url else {}),
-        # V1.0: every download of the newest release, and how a new driver gets an account
+        # Every download of the newest release, and how a new driver gets an account
         **({"client_release_page_url": settings.client_release_page_url} if settings.client_release_page_url else {}),
         "registration": registration_mode(settings),
     }
 
 
 # ---------------------------------------------------------------------------
-# V0.9.8 — liveness / readiness, and a request id in every error response
+# Liveness / readiness, and a request id in every error response
 # ---------------------------------------------------------------------------
 
-DISK_WARN_FREE_BYTES = int(os.environ.get("LMU_GARAGE_DISK_WARN_FREE_MB", "2048")) * 1024 * 1024
+DISK_WARN_FREE_BYTES = int(env("DISK_WARN_FREE_MB", "2048")) * 1024 * 1024
 
 
 @app.get("/health/live")
+@app.get(API_V1 + "/health/live", tags=["health"])
 def health_live() -> dict:
     """The process answers — nothing else checked (a restart is the only cure when this fails)."""
     return {"status": "ok", "version": VERSION}
 
 
 @app.get("/health/ready")
+@app.get(API_V1 + "/health/ready", tags=["health"])
 def health_ready() -> JSONResponse:
     """Can this server do its job right now? 200 = yes, 503 = no (with which part is missing).
 
     Required: the database answers, the telemetry storage exists and is writable. Reported but
     NOT failing: a running backup (uploads wait a moment, reading works), little free disk space
-    (a warning below LMU_GARAGE_DISK_WARN_FREE_MB, default 2048), optional integrations."""
+    (a warning below GARAGE16_DISK_WARN_FREE_MB, default 2048), optional integrations."""
     import shutil
 
-    from .write_lock import maintenance_active
+    from server.ops.write_lock import maintenance_active
 
     checks: dict = {}
     warnings: list = []

@@ -1,11 +1,13 @@
 // pages/teams.js — POST /teams, POST /teams/join, GET /teams/mine.
 
-import { api } from "../api.js";
-import { store } from "../state.js";
-import { el, roleLabel } from "../format.js";
+import { api } from "../core/api.js";
+import { store } from "../core/state.js";
+import { el, roleLabel } from "../core/format.js";
 import { renderSignInPrompt } from "./auth.js";
 
-import { t } from "../i18n.js";
+import { t } from "../core/i18n.js";
+import { link } from "../core/link.js";
+import { navigate } from "../core/router.js";
 export async function renderTeams(container) {
   if (!store.isSignedIn()) {
     renderSignInPrompt(container, t("Sign in to manage teams."));
@@ -17,7 +19,7 @@ export async function renderTeams(container) {
     el("p", { class: "subtitle" }, t("Teams share a best-lap board and can get their own Discord announcements."))
   );
 
-  // --- pending invitations addressed to me (V0.7.2 §9.2) ---
+  // --- pending invitations addressed to me ---
   const invitesBox = el("div", { class: "section" });
   container.appendChild(invitesBox);
 
@@ -42,7 +44,7 @@ export async function renderTeams(container) {
         acceptBtn.disabled = true;
         try {
           await api.acceptInvitation(inv.id);
-          window.location.hash = `#/team/${inv.team_id}`;
+          navigate(link.team(inv.team_id, inv.team_name));
         } catch (err) {
           rowOut.appendChild(el("div", { class: "notice notice--error" }, err.message));
           acceptBtn.disabled = false;
@@ -88,7 +90,7 @@ export async function renderTeams(container) {
       teams.forEach((item) => {
         const row = el("div", { class: "card-row" }, [
           el("div", {}, [
-            el("a", { href: `#/team/${item.id}` }, [el("strong", {}, item.name)]),
+            el("a", { href: link.team(item.id, item.name) }, [el("strong", {}, item.name)]),
             el("div", { class: "subtitle", style: "margin:2px 0 0;" }, t("{0} member(s) — {1}", [item.member_count, roleLabel(item.role)])),
           ]),
           el("span", { class: "tag" }, t("invite: {0}", [item.invite_code])),

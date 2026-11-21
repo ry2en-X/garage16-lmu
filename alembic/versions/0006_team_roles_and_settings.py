@@ -19,7 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     with op.batch_alter_table("team_memberships") as batch_op:
-        # "owner" | "admin" | "member" — see server/routers/teams.py's
+        # "owner" | "admin" | "member" — see server/api/v1/teams.py's
         # permission helpers. Existing rows (pre-migration memberships)
         # default to "member"; a follow-up data migration below promotes
         # each team's earliest member to "owner" so no team is left

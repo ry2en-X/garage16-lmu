@@ -11,7 +11,7 @@ struct layout), and signals updates via a companion named Windows Event,
 "LMU_Data_Event" — not a per-buffer mVersionUpdateBegin/mVersionUpdateEnd
 pair. There is nothing to spin-and-compare on these buffers.
 
-V0.6.2 fix — CONFIRMED via real LMU verification (2026-09-25), reproduced
+CONFIRMED via real LMU verification (2026-09-25), reproduced
 twice in clean, single-process runs: the previous approach
 (`mmap.mmap(-1, size, tagname, access=mmap.ACCESS_READ)`) does NOT reliably
 fail when LMU isn't running. It printed "Connected." and read 0 frames for
@@ -194,7 +194,7 @@ class LMUSharedMemoryReader:
         return type(live).from_buffer_copy(first)
 
     def _read_regions(self) -> Optional[Frame]:
-        """V0.9.1: copies only what a Frame needs — the session info (ScoringInfoV01), the
+        """Copies only what a Frame needs — the session info (ScoringInfoV01), the
         player's TelemInfoV01 (~1.9 KB) and the player's VehicleScoringInfoV01 — instead of the
         whole 317 KiB struct (all vehicles) three times per frame. Measured: ~296 µs and 58 MB/s
         of copying at 60 Hz before, a few µs now. The few integers needed to FIND those regions
@@ -222,12 +222,12 @@ class LMUSharedMemoryReader:
         return None
 
     def read_vehicle_catalog(self) -> list:
-        """V0.9.3: every car in the session as [{"veh_file", "model", "class", "name"}].
+        """Every car in the session as [{"veh_file", "model", "class", "name"}].
 
         Called every few seconds (not per frame) by the telemetry loop. Reads only a few
         short strings per car straight from the live view — no copy of the 317 KiB struct.
         A torn read can at worst garble one string for one call; the next call repeats it,
-        and the server only learns pairs it sees consistently (server/car_identity.py).
+        and the server only learns pairs it sees consistently (server/catalog/car_identity.py).
         Returns [] when nothing can be read (no view, no session, a platform without the
         mapping)."""
         view = self._view
@@ -314,7 +314,7 @@ class LMUSharedMemoryReader:
         restart are handled by the same retry path instead of two
         different ones.
 
-        V0.9.3.1: with `idle_seconds`, None is yielded whenever no frame arrived for that
+        With `idle_seconds`, None is yielded whenever no frame arrived for that
         long (menu, garage) — the caller can then release a lap held for its late window
         (LapParser.idle). Without it, nothing changes for existing callers.
         """
@@ -333,8 +333,8 @@ class LMUSharedMemoryReader:
             time.sleep(period)
 
 
-# V0.9.3.1: LMU's mVehicleModel is char[30] — a longer model name arrives cut after 29
-# characters (server/car_identity.py). The cut is only visible BEFORE whitespace is stripped
+# LMU's mVehicleModel is char[30] — a longer model name arrives cut after 29
+# characters (server/catalog/car_identity.py). The cut is only visible BEFORE whitespace is stripped
 # (a name cut right after a space would look complete), so it is marked here, at the source.
 MODEL_NAME_MAX_CHARS = 29
 CUT_MARK = "…"

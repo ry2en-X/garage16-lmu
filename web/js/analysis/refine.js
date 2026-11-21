@@ -1,4 +1,4 @@
-// analysis/refine.js — zoom-dependent reloading of finer data (V0.9.1).
+// analysis/refine.js — zoom-dependent reloading of finer data.
 //
 // The first load is a coarse overview of the whole lap (at most ~1,000–3,000 points per
 // series). When the user zooms far in, the points that fall inside the view become too
@@ -77,7 +77,7 @@ export function isUsable(response, requested) {
     if (g.start > requested.start + g.step || g.start + g.step * (n - 1) < requested.end - g.step * 2) return false;
     if (!Array.isArray(response.time && response.time.a) || response.time.a.length !== n) return false;
     if (response.delta && response.delta.length !== n) return false;
-    // V0.9.4: Lap 3 / Lap 4 drawn over the pair — same grid, or the answer is not used
+    // Lap 3 / Lap 4 drawn over the pair — same grid, or the answer is not used
     for (const side of requested.extraSides || []) {
       if (!Array.isArray(response.time[side]) || response.time[side].length !== n) return false;
     }

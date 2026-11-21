@@ -1,10 +1,10 @@
-// pages/analysis.js — lap analysis: one lap, or two laps compared (V0.9.0), as a set of
-// configurable windows (V0.9.1).
+// pages/analysis.js — lap analysis: one lap, or two laps compared, as a set of
+// configurable windows.
 //
 //   #/analysis?a=<lap id>&b=<lap id>
 //   #/analysis?a=<lap id>&ref=wr|team_best|my_best      resolve Lap 2 on the server
 //   #/analysis?quick=wr|team_best|my_best[&track=..]    "You vs ..." (see server /quick)
-//   #/analysis?a=..&b=..&c=..&d=..                      V0.9.4: Lap 3 / Lap 4 drawn over the pair
+//   #/analysis?a=..&b=..&c=..&d=.. Lap 3 / Lap 4 drawn over the pair
 //
 // Lap 1 (a) is usually your own lap; Lap 2 (b) can be ANY valid lap — e.g. the
 // leaderboard's number one. Both are drawn over the same stretch of track with the
@@ -17,19 +17,16 @@
 // The windows themselves live in analysis/widgets.js and are listed in
 // analysis/modules.js; this file wires data, layout, editor and toolbar together.
 
-import { api } from "../api.js";
-import { store } from "../state.js";
-import { el, formatLapTime } from "../format.js";
+import { api } from "../core/api.js";
+import { store } from "../core/state.js";
+import { el, formatLapTime } from "../core/format.js";
 import { renderSignInPrompt } from "./auth.js";
 import { renderLapPicker } from "./analysis_picker.js";
 import { openCompareDialog, referenceMessage } from "./analysis_compare.js";
-import { createEditorPanel } from "../analysis/editor.js";
 import { renderGrid } from "../analysis/grid.js";
 import { chooseMaxPoints } from "../analysis/insights.js";
 import { addWidget, createLayoutStore, requiredChannels, setTrackmapMode } from "../analysis/layout.js";
 import { moduleForType } from "../analysis/modules.js";
-import { buildTileCatalog } from "../analysis/tile_catalog.js";
-import { createTilePicker } from "../analysis/tile_picker.js";
 import { createEventsStore } from "../analysis/events.js";
 import { applyColors, basicDataNotice, createViewState, distanceAt, EXTRA_SIDES, indexForDistance, lapColor, lapName } from "../analysis/model.js";
 import { createLazy, createSelection } from "../analysis/corner_detail.js";
@@ -37,14 +34,25 @@ import { baseAdapter, covers, isUsable, planRefinement, REFINE } from "../analys
 import { notice } from "../analysis/widgets.js";
 import { T } from "../analysis/strings.js";
 
-import { t } from "../i18n.js";
-import { loadTrackNames, trackLabel } from "../tracks.js";
+import { t } from "../core/i18n.js";
+import { loadTrackNames, trackLabel } from "../core/tracks.js";
+import { navigate, routeQuery, setTitle } from "../core/router.js";
+import { link } from "../core/link.js";
+import { copyLinkButton } from "../core/copy_link.js";
 const GRID_STEP_M = 2;
 const QUICK_MODES = ["wr", "team_best", "my_best"];
 
-export function parseAnalysisQuery(hash = window.location.hash) {
-  const query = (hash.replace(/^#\/?/, "").split("?")[1]) || "";
-  const params = new URLSearchParams(query);
+// The page's parameters: core/routes.js turns /analysis/123/vs/456 or
+// /analysis/fuji-speedway/porsche-963/vs/class-best into a=, b=, quick=, track= …; a string is an
+// old "#/analysis?a=…" address (tests, old links).
+function queryOf(input) {
+  if (input === undefined) return routeQuery();
+  if (typeof input === "string") return new URLSearchParams((input.replace(/^#\/?/, "").split("?")[1]) || "");
+  return input;
+}
+
+export function parseAnalysisQuery(input) {
+  const params = queryOf(input);
   const id = (key) => {
     const value = Number(params.get(key));
     return Number.isInteger(value) && value > 0 ? value : null;
@@ -54,9 +62,8 @@ export function parseAnalysisQuery(hash = window.location.hash) {
 
 // The V0.9.1 addition to the URL, parsed separately so parseAnalysisQuery keeps its shape.
 // Every value is checked against a whitelist or a length limit: the URL is never trusted.
-export function parseAnalysisExtras(hash = window.location.hash) {
-  const query = (hash.replace(/^#\/?/, "").split("?")[1]) || "";
-  const params = new URLSearchParams(query);
+export function parseAnalysisExtras(input) {
+  const params = queryOf(input);
   const pick = (key) => (QUICK_MODES.includes(params.get(key)) ? params.get(key) : null);
   const text = (key) => {
     const value = params.get(key);
@@ -68,42 +75,37 @@ export function parseAnalysisExtras(hash = window.location.hash) {
     return Number.isInteger(value) && value > 0 ? value : null;
   };
   return {
-    // V0.9.4: up to two more laps (ids), drawn over Lap 1 / Lap 2
+    // Up to two more laps (ids), drawn over Lap 1 / Lap 2
     laps: [lapId("c"), lapId("d")].filter((id, i, all) => id && all.indexOf(id) === i),
     quick: pick("quick"),
     ref: pick("ref"),
     track: text("track"),
     model: text("model"),
-    // V1.0.1: "class" compares with the fastest lap of the whole class (dashboard "Your Best")
+    // "class" compares with the fastest lap of the whole class (dashboard "Your Best")
     scope: params.get("scope") === "class" ? "class" : null,
     note: note && Object.prototype.hasOwnProperty.call(T.note, note) ? note : null,
   };
 }
 
-function hashFor(a, b, extra = {}) {
-  const params = new URLSearchParams();
-  if (a) params.set("a", String(a));
-  if (b) params.set("b", String(b));
-  for (const [key, value] of Object.entries(extra)) if (value) params.set(key, value);
-  return `#/analysis?${params.toString()}`;
+// the readable address of a choice of laps (core/link.js)
+export function analysisLink(a, b, extra = {}) {
+  return link.analysis({ a, b, ...extra });
 }
 
 function go(a, b, extra) {
-  window.location.hash = hashFor(a, b, extra);
+  navigate(analysisLink(a, b, extra));
 }
 
 // For automatic redirects (quick / ref): replace the history entry, so "back" does not
-// land on the redirecting URL again and bounce forward.
+// land on the redirecting address again and bounce forward.
 function redirect(a, b, extra) {
-  const target = hashFor(a, b, extra);
-  if (typeof window.location.replace === "function") window.location.replace(target);
-  else window.location.hash = target;
+  navigate(analysisLink(a, b, extra), { replace: true });
 }
 
 // ----------------------------------------------------------------------------
 
 export async function renderAnalysis(container) {
-  loadTrackNames(); // V1.0.1: readable track names (tracks.js) — not awaited, never blocks the page
+  loadTrackNames(); // Readable track names (tracks.js) — not awaited, never blocks the page
   container.classList.add("panel--wide");
   if (!store.isSignedIn()) {
     renderSignInPrompt(container, t("Sign in to analyse laps."));
@@ -112,7 +114,7 @@ export async function renderAnalysis(container) {
   container.appendChild(el("h1", {}, t("LapTime Analyzer")));
   const { a, b } = parseAnalysisQuery();
   const extras = parseAnalysisExtras();
-  // V0.9.6: the introduction only while choosing laps — with laps open, the space is theirs
+  // The introduction only while choosing laps — with laps open, the space is theirs
   if (!a || !b) container.appendChild(el("p", { class: "subtitle" }, t("Compare two laps channel by channel — against anyone's valid lap, e.g. the leaderboard's number one.")));
 
   // --- "You vs ...": the server pairs my lap with the right reference
@@ -223,8 +225,8 @@ function quickStartCard() {
   }, T.quick[mode]));
   return el("div", { class: "card quick" }, [
     el("h2", {}, T.quickTitle), el("div", { class: "inline-form" }, buttons), status, actions,
-    // V0.9.3: stints, consistency and the theoretical best live on their own page
-    el("p", { class: "subtitle", style: "margin:10px 0 0;" }, el("a", { href: "#/stints" }, t("Stint Analyzer: sessions, stints, consistency & theoretical best →"))),
+    // Stints, consistency and the theoretical best live on their own page
+    el("p", { class: "subtitle", style: "margin:10px 0 0;" }, el("a", { href: "/stints" }, t("Stint Analyzer: sessions, stints, consistency & theoretical best →"))),
   ]);
 }
 
@@ -277,16 +279,16 @@ function renderResult(container, baseData, catalog, ids, env) {
   let detail = null; // { start, end, step } of the refined stretch in use
   const hasB = !!baseData.laps.b;
   const extraIds = ids.extra || [];
-  // V0.9.4: the extra laps stay when Lap 1 / Lap 2 change (c=, d= in the URL)
+  // The extra laps stay when Lap 1 / Lap 2 change (c=, d= in the URL)
   const keep = (list = extraIds) => Object.fromEntries(list.slice(0, 2).map((id, i) => [EXTRA_SIDES[i], String(id)]));
   const state = createViewState(baseData);
   const selection = createSelection();
   const history = createLazy(() => api.analysisCornerHistory(ids.a));
   const lapSectors = createLazy(() => api.analysisLapSectors(ids.a));
-  // V0.9.7: the data-quality report of each lap, loaded when a tile asks for it
+  // The data-quality report of each lap, loaded when a tile asks for it
   const health = { a: createLazy(() => api.analysisLapHealth(ids.a)), b: ids.b ? createLazy(() => api.analysisLapHealth(ids.b)) : null };
   const trackSurface = createLazy(() => api.analysisTrackSurface({ lapA: ids.a, lapB: ids.b || undefined, extra: ids.extra || [] }));
-  // V0.9.3: track-limits findings + lock-ups/wheelspin of both laps, loaded once (small)
+  // Track-limits findings + lock-ups/wheelspin of both laps, loaded once (small)
   const events = createEventsStore(() => api.analysisEvents({ lapA: ids.a, lapB: ids.b || undefined }));
   container._analysis = { state, layoutStore, events }; // read by tests/js/*.test.mjs
 
@@ -345,13 +347,13 @@ function renderResult(container, baseData, catalog, ids, env) {
       onPick: (id) => {
         if (slot === "a") go(id, ids.b, keep());
         else if (slot === "b") go(ids.a, id, keep());
-        else go(ids.a, ids.b, keep([...extraIds, id]));   // V0.9.4: one more lap over the pair
+        else go(ids.a, ids.b, keep([...extraIds, id]));   // One more lap over the pair
       },
     });
     pickerSlot.scrollIntoView && pickerSlot.scrollIntoView({ behavior: "smooth", block: "nearest" });
   };
   const customizeButton = el("button", { type: "button", class: "btn btn--ghost btn--sm analysis-customize", "aria-pressed": "false", onclick: () => setEditing(!editing) }, T.customize);
-  // V0.9.6: one compact row — the main action, the lap actions as a group, the view on the right
+  // One compact row — the main action, the lap actions as a group, the view on the right
   container.appendChild(el("div", { class: "analysis-toolbar" }, [
     el("button", { type: "button", class: "btn btn--sm analysis-compare-open", onclick: () => openCompareDialog({
       lapA: baseData.laps.a,
@@ -365,8 +367,10 @@ function renderResult(container, baseData, catalog, ids, env) {
       hasB && extraIds.length < 2 ? el("button", { class: "btn btn--ghost btn--sm analysis-add-lap", onclick: () => showPicker("extra") }, t("+ Lap 3/4 over it")) : null,
     ]),
     customizeButton,
+    copyLinkButton(),   // The readable address of exactly this comparison
   ]));
-  // V0.9.4: the extra laps, each with its colour, line style and a way to remove it
+  setTitle(`${trackLabel(baseData.laps.a.track_name)} · ${t("LapTime Analyzer")}`);
+  // The extra laps, each with its colour, line style and a way to remove it
   if (extraIds.length) {
     container.appendChild(el("div", { class: "analysis-extra-laps" }, (baseData.extra_sides || []).map((side, i) => {
       const lap = baseData.laps[side];
@@ -416,7 +420,18 @@ function renderResult(container, baseData, catalog, ids, env) {
   let editing = false;
   let grid = null;
   let picker = null;
-  const tiles = buildTileCatalog(catalog);
+  // The tile editor and the tile picker are only needed for "Customise view" — loaded then
+  // (and fetched in the background once the page is idle, so the first click opens at once)
+  let editorParts = null;
+  const loadEditor = () => editorParts || (editorParts = Promise.all([
+    import("../analysis/editor.js"), import("../analysis/tile_picker.js"), import("../analysis/tile_catalog.js"),
+  ]).then(([editorModule, pickerModule, catalogModule]) => ({
+    createEditorPanel: editorModule.createEditorPanel,
+    createTilePicker: pickerModule.createTilePicker,
+    tiles: catalogModule.buildTileCatalog(catalog),
+  })));
+  let editor = null;
+  loadEditor().then((parts) => { editor = parts; }).catch(() => { editorParts = null; });
   const validChannels = new Set(catalog.channels.map((c) => c.key));
 
   const windowContext = () => {
@@ -429,13 +444,13 @@ function renderResult(container, baseData, catalog, ids, env) {
       catalog,
       ensureChannels,
       events,
-      // V0.9.4: the corner the windows show, the driver's earlier laps, the session's sectors,
+      // The corner the windows show, the driver's earlier laps, the session's sectors,
       // and the racing lines of a stretch in high resolution
       selection,
       history,
       lapSectors,
       fetchLine: (opts) => api.analysisLine({ lapA: ids.a, lapB: ids.b || undefined, extra: extraIds, ...opts }),
-      // V0.9.5: the track behind the lines — loaded once per page, shared by every rebuild
+      // The track behind the lines — loaded once per page, shared by every rebuild
       trackSurface,
       health,
       fetchDistribution: (opts) => api.analysisDistribution({ lapA: ids.a, lapB: ids.b || undefined, ...opts }),
@@ -456,7 +471,7 @@ function renderResult(container, baseData, catalog, ids, env) {
     };
   };
 
-  // V0.9.5: the picker's preview is the real tile with the open laps (a chart's channel is
+  // The picker's preview is the real tile with the open laps (a chart's channel is
   // loaded first — the same request placing it would make anyway)
   async function renderPreview(widget) {
     if (widget.type === "chart" && widget.channel && !baseData.channels[widget.channel]) await ensureChannels([widget.channel]);
@@ -475,13 +490,13 @@ function renderResult(container, baseData, catalog, ids, env) {
     });
     editorSlot.innerHTML = "";
     if (editing) {
-      editorSlot.appendChild(createEditorPanel({
+      editorSlot.appendChild(editor.createEditorPanel({
         layout: layoutStore.get(), catalog, persisted: layoutStore.isPersisted(),
         onChange: applyLayout, onReset: resetLayout, onDone: () => setEditing(false),
       }).element);
       if (!picker) {
-        picker = createTilePicker({
-          tiles, validChannels, renderPreview,
+        picker = editor.createTilePicker({
+          tiles: editor.tiles, validChannels, renderPreview,
           getLayout: () => layoutStore.get(),
           getGrid: () => grid,
           onAdd: (spec) => applyLayout(addWidget(layoutStore.get(), spec, validChannels)),
@@ -526,6 +541,19 @@ function renderResult(container, baseData, catalog, ids, env) {
   }
 
   function setEditing(on) {
+    if (on && !editor) {
+      customizeButton.disabled = true;
+      loadEditor().then((parts) => {
+        editor = parts;
+        customizeButton.disabled = false;
+        setEditing(true);
+      }).catch((err) => {
+        editorParts = null;
+        customizeButton.disabled = false;
+        statusSlot.appendChild(notice(err.message));
+      });
+      return;
+    }
     editing = on;
     rebuild();
   }
@@ -537,7 +565,7 @@ function renderResult(container, baseData, catalog, ids, env) {
     t("Hover a chart to read exact values · click to pin the position (click again to release) · mouse wheel zooms · drag pans · double-click resets · ← → step along the lap. Touch: drag sideways to scrub, tap to place the cursor, hold to pin, pinch to zoom, double-tap resets.")));
   loadThenRebuild();
 
-  // --- zoom refinement (V0.9.1): finer data for the stretch the user zoomed into
+  // --- zoom refinement: finer data for the stretch the user zoomed into
   // Finer (or the overview's) data of the same laps. Nothing is rebuilt: state.replaceData()
   // announces "data", the charts take the new values in place (same canvas, same listeners, a
   // drag in progress continues), the values table reads them, and the windows about the whole

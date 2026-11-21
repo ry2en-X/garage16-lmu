@@ -1,12 +1,13 @@
 // pages/account.js — signed-out: registration/restore form (auth.js).
 // signed-in: driver summary, Discord account link code, sign out.
 
-import { api } from "../api.js";
-import { store } from "../state.js";
-import { el } from "../format.js";
+import { api } from "../core/api.js";
+import { store } from "../core/state.js";
+import { el } from "../core/format.js";
 import { renderAuth } from "./auth.js";
 
-import { locale, t } from "../i18n.js";
+import { locale, t } from "../core/i18n.js";
+import { link } from "../core/link.js";
 export async function renderAccount(container) {
   if (!store.isSignedIn()) {
     renderAuth(container);
@@ -18,7 +19,7 @@ export async function renderAccount(container) {
   container.appendChild(el("h1", {}, t("Account")));
   container.appendChild(el("p", { class: "subtitle" }, t("Manage your driver profile and Discord link.")));
 
-  // V0.9.6 — what you need often first (who you are, sign-in, Discord), the rarely needed parts
+  // What you need often first (who you are, sign-in, Discord), the rarely needed parts
   // folded at the bottom (desktop-client credentials, browser sessions, data export / deletion).
   // Every card and every action is unchanged; only the order and the folding are new.
   const signOutBtn = el("button", { class: "btn btn--ghost" }, t("Sign out"));
@@ -26,12 +27,12 @@ export async function renderAccount(container) {
     el("div", { class: "card-row" }, [el("span", {}, t("Display name")), el("strong", {}, session.displayName)]),
     session.driverId ? el("div", { class: "card-row" }, [el("span", {}, t("Driver ID")), el("strong", {}, String(session.driverId))]) : null,
     el("div", { class: "account-profile__actions" }, [
-      session.driverId ? el("a", { class: "btn btn--ghost", href: `#/driver/${session.driverId}` }, t("My public profile")) : null,
+      session.driverId ? el("a", { class: "btn btn--ghost", href: link.driver(session.driverId, session.displayName) }, t("My public profile")) : null,
       signOutBtn,
     ]),
   ]);
   container.appendChild(profileCard);
-  // V1.0.1: an unconfirmed email blocks connecting the desktop client — say so at the top
+  // An unconfirmed email blocks connecting the desktop client — say so at the top
   const verifyBanner = el("div");
   container.appendChild(verifyBanner);
   const main = el("div");          // name, e-mail & password, Discord
@@ -41,11 +42,11 @@ export async function renderAccount(container) {
   container.appendChild(advanced);
   container.appendChild(dataFold);
 
-  // --- discord link (V0.8.7: status, one-time link code, unlink) ---
+  // --- discord link ---
   const discordCard = el("div", { class: "card" });
   await renderDiscordCard(discordCard);
 
-  // --- connected PCs (V1.0.1): one token per PC, the desktop client signs in with email+password ---
+  // --- connected PCs: one token per PC, the desktop client signs in with email+password ---
   const devicesCard = el("div", { class: "card", id: "devicesCard" });
   devicesCard.appendChild(el("h2", {}, t("Connected PCs")));
   devicesCard.appendChild(el("p", { class: "subtitle" },
@@ -170,7 +171,7 @@ export async function renderAccount(container) {
   securityCard.appendChild(securityOut);
   advanced.appendChild(securityCard);
 
-  // --- sessions (V0.7.2): this browser's own sign-in, separate from the
+  // --- sessions: this browser's own sign-in, separate from the
   // desktop client credentials above ---
   const sessionsCard = el("div", { class: "card" });
   sessionsCard.appendChild(el("h2", {}, t("Sessions")));
@@ -232,7 +233,7 @@ export async function renderAccount(container) {
       /* proceed to sign out locally regardless */
     }
     store.signOut();
-    window.location.hash = "#/leaderboard";
+    navigate("/leaderboard");
   });
 
   sessionsCard.appendChild(sessionsBox);
@@ -241,7 +242,7 @@ export async function renderAccount(container) {
   advanced.appendChild(sessionsCard);
   await loadSessions();
 
-  // --- driver name (V0.8.9) ---
+  // --- driver name ---
   // The name on leaderboards, profiles, teams and in Discord. It used to be
   // whatever was typed when registering and could never be changed.
   const nameCard = el("div", { class: "card" });
@@ -278,7 +279,7 @@ export async function renderAccount(container) {
   nameCard.appendChild(nameOut);
   main.appendChild(nameCard);
 
-  // --- email & password (V0.6.9; verification status added V0.8-NAS §2) ---
+  // --- email & password ---
   const pwCard = el("div", { class: "card" });
   pwCard.appendChild(el("h2", {}, t("Email & Password")));
   pwCard.appendChild(
@@ -395,10 +396,10 @@ export async function renderAccount(container) {
       const data = await api.exportMyData();
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
-      const link = el("a", { href: url, download: `garage16-export-${data.driver_id}.json` });
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      const download = el("a", { href: url, download: `garage16-export-${data.driver_id}.json` });
+      document.body.appendChild(download);
+      download.click();
+      download.remove();
       URL.revokeObjectURL(url);
       exportOut.appendChild(el("div", { class: "notice notice--success" }, t("Export downloaded.")));
     } catch (err) {
@@ -423,7 +424,7 @@ export async function renderAccount(container) {
     try {
       await api.deleteMyAccount();
       store.signOut();
-      window.location.hash = "#/leaderboard";
+      navigate("/leaderboard");
     } catch (err) {
       deleteOut.appendChild(el("div", { class: "notice notice--error" }, err.message));
       deleteBtn.disabled = false;
@@ -445,7 +446,7 @@ export async function renderAccount(container) {
       /* proceed to sign out locally regardless */
     }
     store.signOut();
-    window.location.hash = "#/leaderboard";
+    navigate("/leaderboard");
   });
 }
 

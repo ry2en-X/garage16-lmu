@@ -15,7 +15,7 @@ Object.assign(globalThis, { window: dom.window, document: dom.window.document, l
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
 globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0);
-dom.window.LMU_GARAGE_API_BASE_URL = "";
+dom.window.GARAGE16_API_BASE_URL = "";
 localStorage.setItem("garage16_language", "en");
 
 const escaped = [];
@@ -33,16 +33,16 @@ globalThis.fetch = async (url, init = {}) => {
   const u = new URL(url, "http://localhost");
   calls.push({ path: u.pathname, method: init.method || "GET", body: init.body, credentials: init.credentials });
   const json = (body, status = 200) => ({ ok: status < 400, status, statusText: String(status), json: async () => body, text: async () => JSON.stringify(body) });
-  if (u.pathname === "/health") return json(health);
-  if (u.pathname === "/accounts/app-session/activate") {
+  if (u.pathname === "/api/v1/health") return json(health);
+  if (u.pathname === "/api/v1/accounts/app-session/activate") {
     return activateStatus === 200 ? json({ driver_id: 9, display_name: "Michael" }) : json({ detail: "Session expired" }, activateStatus);
   }
-  if (u.pathname === "/leaderboard/recent") return json([]);
+  if (u.pathname === "/api/v1/public/activity") return json([]);
   return json({ detail: "not mocked" }, 404);
 };
 
-const { startDesktopAppBridge, bridgeApi, inDesktopApp } = await import("../../web/js/app_bridge.js");
-const { store } = await import("../../web/js/state.js");
+const { startDesktopAppBridge, bridgeApi, inDesktopApp } = await import("../../web/js/core/app_bridge.js");
+const { store } = await import("../../web/js/core/state.js");
 
 // ================================================================ the bridge alone
 function fakeWindow() {
@@ -84,7 +84,7 @@ function fakeWindow() {
   await sleep(10);
   assert.equal(asked, 1);
   assert.equal(signedIn, 1);
-  const activate = calls.filter((c) => c.path === "/accounts/app-session/activate").at(-1);
+  const activate = calls.filter((c) => c.path === "/api/v1/accounts/app-session/activate").at(-1);
   assert.equal(activate.method, "POST");
   assert.equal(JSON.parse(activate.body).session_token, "T".repeat(43));
   assert.equal(activate.credentials, "include", "the cookie lands in the window's own cookie jar");
@@ -145,7 +145,7 @@ function fakeWindow() {
 
 // ================================================================ the download page (real router)
 store.signOut();
-await import("../../web/js/router.js");
+await import("../../web/js/main.js");
 await sleep(150);
 const app = document.getElementById("app");
 const cards = [...app.querySelectorAll(".download-card")];
@@ -174,7 +174,7 @@ assert.equal(app.querySelector('[data-download="analysis"]').getAttribute("href"
 // the server is down -> an error notice, both buttons disabled, no crash
 health = null;
 const realFetch = globalThis.fetch;
-globalThis.fetch = async (url, init) => (new URL(url, "http://localhost").pathname === "/health" ? Promise.reject(new Error("offline")) : realFetch(url, init));
+globalThis.fetch = async (url, init) => (new URL(url, "http://localhost").pathname === "/api/v1/health" ? Promise.reject(new Error("offline")) : realFetch(url, init));
 window.location.hash = "#/leaderboard";
 await sleep(60);
 window.location.hash = "#/download";
@@ -186,11 +186,11 @@ globalThis.fetch = realFetch;
 // ================================================================ the real router inside the app window
 health = { status: "ok" };
 store.signOut();
-const before = calls.filter((c) => c.path === "/accounts/app-session/activate").length;
+const before = calls.filter((c) => c.path === "/api/v1/accounts/app-session/activate").length;
 window.pywebview = { api: { app_session: async () => ({ session_token: "V".repeat(43), driver_id: 9, display_name: "Michael" }) } };
 window.dispatchEvent(new window.Event("pywebviewready"));
 await sleep(150);
-assert.equal(calls.filter((c) => c.path === "/accounts/app-session/activate").length, before + 1);
+assert.equal(calls.filter((c) => c.path === "/api/v1/accounts/app-session/activate").length, before + 1);
 assert.ok(text(document.getElementById("statusText")).includes("Michael"), "the menu shows the driver signed in");
 assert.ok(text(app).includes("You are looking at this page in the Garage16 analysis app."), "the page re-rendered inside the app");
 

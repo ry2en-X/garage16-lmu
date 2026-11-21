@@ -1,4 +1,4 @@
-// analysis/touch.js — touch gestures for charts and the track map (V0.9.1).
+// analysis/touch.js — touch gestures for charts and the track map.
 //
 //   tap             place the shared cursor there (on lifting the finger, so a scroll that
 //                   starts on a chart does not move the cursor first)

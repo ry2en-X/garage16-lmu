@@ -25,7 +25,7 @@ from client.telemetry.channels import EXTENDED_COLUMNS
 G = 9.80665
 
 
-RAMP_M = 150.0      # V0.9.9: metres over which the speed changes (about 2.5 m/s², 0.25 G)
+RAMP_M = 150.0      # Metres over which the speed changes (about 2.5 m/s², 0.25 G)
 
 
 def make_lap(
@@ -48,9 +48,9 @@ def make_lap(
     arc = np.pi * radius
     total = 2 * straight + 2 * arc
     # speed as a function of position along the path
-    # V0.9.9: the speed changes over RAMP_M metres instead of jumping from 75 to 38 m/s between two
+    # The speed changes over RAMP_M metres instead of jumping from 75 to 38 m/s between two
     # samples — a jump like that is an impossible deceleration, which the lap check now notices
-    # (server/lap_decision.py, implausible_acceleration). The ramp ends exactly at the corner entry
+    # (server/laps/lap_decision.py, implausible_acceleration). The ramp ends exactly at the corner entry
     # and starts exactly at its exit, so the corners themselves are unchanged.
     ramp = min(RAMP_M, 0.45 * straight)
 

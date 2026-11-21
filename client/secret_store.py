@@ -1,4 +1,4 @@
-"""secret_store.py — the auth token and client secret are kept encrypted on Windows (V1.0.1).
+"""secret_store.py — the auth token and client secret are kept encrypted on Windows.
 
 Until 1.0.0, ~/.lmu_garage/client_config.json held both in plain text; on Windows the "owner only"
 chmod in client/config.py does nothing. Now they are encrypted with Windows' own Data Protection

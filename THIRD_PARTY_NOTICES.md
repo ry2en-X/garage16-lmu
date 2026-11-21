@@ -60,11 +60,11 @@ Used only for **facts**: the names, order and sizes of the fields LMU 1.3+ place
 reserved bytes of its telemetry structs (driver aids, wheel extras), which the projects state
 they took from LMU's own `Support\SharedMemoryInterface\SharedMemoryInterface.hpp`. That
 header is Studio 397's and is not redistributed here. The two projects were compared with each
-other, and the resulting offsets are pinned by `tests/test_lmu_structs.py`; they still have to
+other, and the resulting offsets are pinned by `tests/client/test_lmu_structs.py`; they still have to
 be confirmed against a real session (`docs/LMU_VERIFICATION_PROTOCOL.md`, items (h)-(k)).
 
 The Pitwall project's notes were also the source of the finding that LMU reports brake disc
-temperatures in Kelvin although its header comment says Celsius (`server/telemetry_channels.py`
+temperatures in Kelvin although its header comment says Celsius (`server/analysis/telemetry_channels.py`
 detects either).
 
 ## Bundled in the "Client + analysis app" edition only (V0.9.2)
@@ -97,11 +97,11 @@ Facts, all from pyLMUSharedMemory (MIT, see above; the project states they come 
 
 | Fact | Used in | Cross-check |
 |---|---|---|
-| names/types/order of the 13 bytes LMU took from `ScoringInfoV01`'s reserve (session time, time of day, fixed setup, grip level, cloud coverage, track-limits steps per penalty/point) | `client/lmu/structs.py` | sizes add up to the former 200-byte reserve (`tests/test_v093_client.py`) |
-| `mVehicleModel` = "brand & model name" (TelemInfoV01, 30 bytes) | `server/car_identity.py` | field already pinned at offset 796 by `tests/test_lmu_structs.py` |
-| `mSurfaceType`: 0 dry, 1 wet, 2 grass, 3 dirt, 4 gravel, 5 kerb, 6 special | `server/track_limits.py` | rFactor 2 internals header (same enum) |
-| `mCountLapFlag`: 0 neither lap nor time, 1 lap but not time, 2 lap and time | `client/telemetry/parser.py`, `server/track_limits.py` | rFactor 2 internals header; real Garage16 session (CHANGELOG V0.6.1: normal laps show 2) |
-| `mTrackLimitsSteps` = track-limits points × steps per point | `server/track_limits.py` | — (reported as unreliable and ignored if values are out of range) |
+| names/types/order of the 13 bytes LMU took from `ScoringInfoV01`'s reserve (session time, time of day, fixed setup, grip level, cloud coverage, track-limits steps per penalty/point) | `client/lmu/structs.py` | sizes add up to the former 200-byte reserve (`tests/client/test_session_fields.py`) |
+| `mVehicleModel` = "brand & model name" (TelemInfoV01, 30 bytes) | `server/catalog/car_identity.py` | field already pinned at offset 796 by `tests/client/test_lmu_structs.py` |
+| `mSurfaceType`: 0 dry, 1 wet, 2 grass, 3 dirt, 4 gravel, 5 kerb, 6 special | `server/laps/track_limits.py` | rFactor 2 internals header (same enum) |
+| `mCountLapFlag`: 0 neither lap nor time, 1 lap but not time, 2 lap and time | `client/telemetry/parser.py`, `server/laps/track_limits.py` | rFactor 2 internals header; real Garage16 session (CHANGELOG V0.6.1: normal laps show 2) |
+| `mTrackLimitsSteps` = track-limits points × steps per point | `server/laps/track_limits.py` | — (reported as unreliable and ignored if values are out of range) |
 
 No new runtime dependency was added to the server, the clients or the web app.
 
@@ -114,10 +114,10 @@ Garage16's own LMU recordings confirm it (docs/LMU_VERIFICATION_PROTOCOL.md, (r)
 
 | Fact | Source | Used in | How it is used |
 |---|---|---|---|
-| LMU detects track limits by the average track width ("two wheels inside the white lines or four wheels on the kerbs"), scores an offence 2–5 s after rejoining by the time gained, and outside races invalidates a lap when an offence earns warning points | Le Mans Ultimate guide, "Understanding track limits" (Studio 397, public documentation) | `server/track_limits.py` (tiers, attribution window), `client/telemetry/lap_verdict.py` | heuristics only send a lap to review; 6 s late window after the line |
-| warning points = `mTrackLimitsSteps / mTrackLimitsStepsPerPoint`; points per penalty = steps per penalty / steps per point | TinyPedal `tinypedal/adapter/lmu_reader.py` (GPL-3.0, revision 4e2de40, read only) | `server/track_limits.py` `points_of` | points shown in the findings, no decision depends on it |
-| `mLastLapTime <= 0` marks an invalid last lap | same TinyPedal file (read only) | `server/track_limits.py` (`game_last_lap_time_withdrawn`) | review only, never invalidates by default |
-| LMU cuts `mVehicleModel` (char[30]) after 29 characters; three cut names and their full names: Aston Martin Vantage AMR LMGT3, Chevrolet Corvette Z06 LMGT3.R, Lamborghini Huracan LMGT3 Evo2 | same TinyPedal file, `LMU_CAR_MODEL_CORRECTION` (read only) — car names are facts, not code; only the three name pairs are used | `server/car_identity.py` `MODEL_NAME_FIXES` | cut names repaired; any other name of the cut length is marked "…" |
+| LMU detects track limits by the average track width ("two wheels inside the white lines or four wheels on the kerbs"), scores an offence 2–5 s after rejoining by the time gained, and outside races invalidates a lap when an offence earns warning points | Le Mans Ultimate guide, "Understanding track limits" (Studio 397, public documentation) | `server/laps/track_limits.py` (tiers, attribution window), `client/telemetry/lap_verdict.py` | heuristics only send a lap to review; 6 s late window after the line |
+| warning points = `mTrackLimitsSteps / mTrackLimitsStepsPerPoint`; points per penalty = steps per penalty / steps per point | TinyPedal `tinypedal/adapter/lmu_reader.py` (GPL-3.0, revision 4e2de40, read only) | `server/laps/track_limits.py` `points_of` | points shown in the findings, no decision depends on it |
+| `mLastLapTime <= 0` marks an invalid last lap | same TinyPedal file (read only) | `server/laps/track_limits.py` (`game_last_lap_time_withdrawn`) | review only, never invalidates by default |
+| LMU cuts `mVehicleModel` (char[30]) after 29 characters; three cut names and their full names: Aston Martin Vantage AMR LMGT3, Chevrolet Corvette Z06 LMGT3.R, Lamborghini Huracan LMGT3 Evo2 | same TinyPedal file, `LMU_CAR_MODEL_CORRECTION` (read only) — car names are facts, not code; only the three name pairs are used | `server/catalog/car_identity.py` `MODEL_NAME_FIXES` | cut names repaired; any other name of the cut length is marked "…" |
 
 TinyPedal was not added as a dependency and none of its code was used; GPL-3.0 code would only
 be considered after a compatibility check, which was not needed here.
@@ -132,7 +132,7 @@ new parts are Garage16's own code:
 |---|---|---|
 | Theil–Sen slope (median of all pairwise slopes) for lap-time trend, tyre degradation and forecast | H. Theil (1950) and P. K. Sen (1968) — a textbook statistical method, implemented from its definition | `web/js/stints/stats.js` `theilSen` |
 | Median, median absolute deviation, Pearson correlation, least squares with two inputs (normal equations) | textbook statistics, implemented from the definitions | `web/js/stints/stats.js` |
-| Lateral offset of one driven line from another (nearest point within a window, sign from the corner direction) | own geometry | `server/telemetry_analysis.py` `line_offset`, `inside_sign` |
+| Lateral offset of one driven line from another (nearest point within a window, sign from the corner direction) | own geometry | `server/analysis/telemetry_analysis.py` `line_offset`, `inside_sign` |
 | Zoomable track map with pinch zoom, SVG charts of the Stint Analyzer | own code (no d3, no chart library) | `web/js/analysis/linemap.js`, `web/js/stints/chart.js` |
 | Shared-memory fields `mNumPitstops`, `mPlace`, `mFlag`, `mInPits`, `mTimeGapCarAhead/Behind`, `mFront/RearTireCompoundIndex/Name`, `mFuelCapacity`, `mDentSeverity`, `mOverheating`, `mDetached`, `mSessionTimeRemaining`, `mMaxLaps` | already in Garage16's structure definitions since V0.9.3 (field layout from LMU's `SharedMemoryInterface` header, cross-checked with pyLMUSharedMemory, MIT — see above); their meaning in practice is still to be confirmed (docs/LMU_VERIFICATION_PROTOCOL.md (w)) | `client/telemetry/channels.py`, `client/telemetry/parser.py` |
 

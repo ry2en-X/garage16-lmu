@@ -10,7 +10,7 @@
 # whatever happens to be newest on the day of the build. Checked to have wheels for Python 3.12
 # (the Docker image) on x86_64 and aarch64.
 #
-# Updating: install newer versions, run `python -m scripts.release_check` (everything green, nothing
+# Updating: install newer versions, run `python -m scripts.release.release_check` (everything green, nothing
 # skipped), then regenerate this list from that environment and bump the comment's version.
 aiohappyeyeballs==2.7.1
 aiohappyeyeballs==2.7.1

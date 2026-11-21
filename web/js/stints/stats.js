@@ -1,4 +1,4 @@
-// stints/stats.js — the Stint Analyzer's statistics (V0.9.4). Pure functions, no DOM: tested in
+// stints/stats.js — the Stint Analyzer's statistics. Pure functions, no DOM: tested in
 // Node (tests/js/v094_stints.test.mjs).
 //
 // Principles (the same as everywhere in Garage16):
@@ -104,7 +104,7 @@ export function theilSen(xs, ys) {
   const slope = median(slopes);
   const intercept = median(pts.map(([x, y]) => y - slope * x));
   const residuals = pts.map(([x, y]) => y - (intercept + slope * x));
-  // V0.9.7: Sen's 95 % confidence interval of the slope (distribution-free: the ranks of the
+  // Sen's 95 % confidence interval of the slope (distribution-free: the ranks of the
   // pairwise slopes around the median, C = 1.96 * sqrt(n(n-1)(2n+5)/18); Sen 1968, ties ignored)
   slopes.sort((p, q) => p - q);
   const n = pts.length;
@@ -207,7 +207,7 @@ export function paceSummary(laps, clean, { window = 5 } = {}) {
     thirds: thirds(times),
     best_window: bestWindow(times, Math.min(window, times.length)),
     trend: times.length >= MIN_DEGRADATION_LAPS ? theilSen(times.map((_, i) => i), times) : null,
-    // V0.9.7: consistency WITHOUT the trend. A driver whose laps get 0.05 s slower every lap
+    // Consistency WITHOUT the trend. A driver whose laps get 0.05 s slower every lap
     // (tyres) has a large stdev although every lap is exactly on the line — the spread of the
     // residuals around the Theil–Sen trend (robust: MAD × 1.4826 ≈ one sigma) is the
     // lap-to-lap consistency itself.

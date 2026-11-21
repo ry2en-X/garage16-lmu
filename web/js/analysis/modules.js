@@ -1,4 +1,4 @@
-// analysis/modules.js — the registry of analysis windows (V0.9.1). One definition per
+// analysis/modules.js — the registry of analysis windows. One definition per
 // window type; analysis.js and the layout editor read this instead of knowing the
 // types themselves, so a new window is one entry here plus its renderer.
 //
@@ -6,7 +6,7 @@
 //   [] = none), defaultSize, defaultPosition (index in the Garage16 standard layout,
 //   or null when the window is not part of it), renderer, mobileSupport.
 
-import { t } from "../i18n.js";
+import { t } from "../core/i18n.js";
 import { defaultLayout, tileSpec } from "./layout.js";
 import { renderChart, renderCorners, renderCursorTable, renderDelta, renderPhysics, renderSummary, renderTrackmap } from "./widgets.js";
 import { renderCoaching } from "./coaching.js";
@@ -45,7 +45,7 @@ export const MODULES = [
   { id: "health", title: t("Data quality"), description: t("How trustworthy each lap's recording is: channels, samples, gaps, distance axis, speed vs distance, resolution — next to the lap's validity."), type: "health", supportedChannels: [], renderer: renderHealth, mobileSupport: true },
 ].map((m) => ({
   ...m, defaultSize: sizeOf(m.type, "large"), defaultPosition: positionOf(m.type),
-  // V0.9.5: sizes on the grid (cells) — the smallest readable, the ready-made ones, the default
+  // Sizes on the grid (cells) — the smallest readable, the ready-made ones, the default
   min: tileSpec(m.type).min, presets: tileSpec(m.type).presets, defaultCells: tileSpec(m.type).def,
 }));
 

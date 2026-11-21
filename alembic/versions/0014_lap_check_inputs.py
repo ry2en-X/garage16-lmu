@@ -4,12 +4,12 @@ Revision ID: 0014
 Revises: 0013
 Create Date: 2026-10-11
 
-The track-limits verdict (server/track_limits.py) depends on things that are NOT in the
+The track-limits verdict (server/laps/track_limits.py) depends on things that are NOT in the
 lap's telemetry file: what the client concluded and why, its game summary, the samples
 recorded after the finish line, LMU's step/point ratios of the session and the late window
 after the line. Until now they were only used at upload and then lost, so a lap rejected
 by a heuristic of an older client stayed rejected for good. laps.check_inputs keeps them,
-so scripts/revalidate_laps.py can judge every stored lap again — with the CURRENT rules —
+so scripts/ops/revalidate_laps.py can judge every stored lap again — with the CURRENT rules —
 without a new upload.
 
 Existing laps: what can still be recovered is copied in (no lap's validity changes here):
@@ -59,7 +59,7 @@ def _sectors_ok(sectors) -> Optional[bool]:
 
 
 def inputs_for(client_valid, validation, lap_stats, sector_times) -> dict:
-    """KEEP IN SYNC with server/lap_check.py legacy_inputs (enforced by a test)."""
+    """KEEP IN SYNC with server/laps/lap_check.py legacy_inputs (enforced by a test)."""
     state = None
     verdict = _json(validation)
     if isinstance(verdict, dict):

@@ -1,11 +1,11 @@
 """
 channels.py — the extended telemetry channels the client records per sample
-(V0.9.0), and the one function that reads them out of a TelemInfoV01.
+, and the one function that reads them out of a TelemInfoV01.
 
 Why a registry instead of 160 hand-written dataclass fields: the order of the
 values and the order of the column names MUST agree, and a registry makes that
 true by construction (both are built from the same lists below). A test
-(tests/test_channels.py) additionally fills a struct with a distinct value in
+(tests/analysis/test_channels.py) additionally fills a struct with a distinct value in
 every field and checks that each column ends up holding the right one.
 
 What is recorded, and in which unit — raw, exactly as LMU's shared memory
@@ -30,7 +30,7 @@ keeps the stored file a faithful copy of the game's data:
 Coordinate system (rFactor 2 / LMU "local" space): +x = to the driver's LEFT,
 +y = up, +z = REARWARD. Forward speed is therefore -local_vel.z, and a right
 turn produces a NEGATIVE local_accel.x. The server turns this into
-"lateral G, positive = right turn" — see server/telemetry_channels.py.
+"lateral G, positive = right turn" — see server/analysis/telemetry_channels.py.
 
 All values are stored as float32 in the parquet file (plenty for every one of
 these channels, and half the size of float64); the pre-V0.9.0 core columns keep
@@ -160,8 +160,8 @@ _WHEEL_SPECS: Tuple[Tuple[str, Callable], ...] = (
 
 WHEEL_KEYS: Tuple[str, ...] = tuple(key for key, _ in _WHEEL_SPECS)
 
-# V0.9.3: four values per sample from the player's VehicleScoringInfoV01 (not the
-# telemetry struct) — what the track-limits check (server/track_limits.py) needs to
+# Four values per sample from the player's VehicleScoringInfoV01 (not the
+# telemetry struct) — what the track-limits check (server/laps/track_limits.py) needs to
 # decide on its own instead of trusting one flag at the end of the lap:
 #   path_lateral    lateral position relative to LMU's approximate centre path (m)
 #   track_edge      distance of the track edge from that path on the car's side (m)
@@ -175,7 +175,7 @@ SCORING_CHANNELS: Tuple[Tuple[str, str], ...] = (
     ("num_penalties", "num_penalties"),
 )
 
-# V0.9.4: what the Stint Analyzer needs per sample, appended after everything above (so no
+# What the Stint Analyzer needs per sample, appended after everything above (so no
 # earlier column moves). "s" = the player's VehicleScoringInfoV01, "t" = TelemInfoV01.
 #   in_pits          1 while in the pit lane (pit-lane time, standing time, in-/out-laps)
 #   place            race position (position changes, overtakes)
@@ -197,8 +197,8 @@ _SCORING_GETTERS = tuple(attrgetter(path) for _, path in SCORING_CHANNELS)
 _STINT_GETTERS = tuple((source, attrgetter(path)) for _, source, path in STINT_CHANNELS)
 
 # Final column order: scalars, orientation (9), then wheel-major
-# (all keys of FL, then all keys of FR, ...), then the scoring values (V0.9.3), then the
-# stint values (V0.9.4).
+# (all keys of FL, then all keys of FR, ...), then the scoring values, then the
+# stint values.
 EXTENDED_COLUMNS: Tuple[str, ...] = (
     tuple(name for name, _ in SCALAR_CHANNELS)
     + ORIENTATION_CHANNELS

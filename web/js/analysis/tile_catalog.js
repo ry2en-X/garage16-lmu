@@ -1,5 +1,5 @@
 // analysis/tile_catalog.js — every tile the user can put on the grid, sorted the way the
-// picker shows them (V0.9.5):
+// picker shows them:
 //
 //   1. Wofür?   (purpose)  — e.g. "Forces acting on the car"
 //   2. Art?     (kind)     — e.g. "Chart along the lap"
@@ -10,7 +10,7 @@
 // channels that measure a force but live in another group; anything unknown lands in
 // "Other channels", so a channel added on the server shows up without a code change here.
 
-import { t } from "../i18n.js";
+import { t } from "../core/i18n.js";
 import { canAdd, fitsSize, SINGLE_TYPES, tileSpec } from "./layout.js";
 import { moduleForType } from "./modules.js";
 

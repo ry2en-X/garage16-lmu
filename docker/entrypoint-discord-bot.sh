@@ -28,7 +28,7 @@ for secret_name in POSTGRES_PASSWORD DISCORD_BOT_TOKEN; do
     resolve_secret "$secret_name"
 done
 
-if [ -z "${LMU_GARAGE_DB_URL:-}" ]; then
+if [ -z "${GARAGE16_DB_URL:-}" ]; then
     : "${POSTGRES_HOST:=db}"
     : "${POSTGRES_PORT:=5432}"
     : "${POSTGRES_DB:=garage16}"
@@ -37,7 +37,7 @@ if [ -z "${LMU_GARAGE_DB_URL:-}" ]; then
         echo "[entrypoint] ERROR: POSTGRES_PASSWORD (or POSTGRES_PASSWORD_FILE) is not set." >&2
         exit 1
     fi
-    export LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+    export GARAGE16_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
 fi
 
 if [ -z "${DISCORD_BOT_TOKEN:-}" ]; then

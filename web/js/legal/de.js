@@ -4,13 +4,13 @@
 // Cloudflare Tunnel, Webspace bei ALL-INKL.COM, Downloads über GitHub, optional Discord,
 // E-Mail-Versand über Gmail. Wer Garage16 anders betreibt, muss diese Texte anpassen.
 // Name, Anschrift und E-Mail des Betreibers stehen NICHT hier, sondern in der .env des Servers
-// (LMU_GARAGE_OPERATOR_*) und kommen über GET /legal — das Repository ist öffentlich.
+// (GARAGE16_OPERATOR_*) und kommen über GET /legal — das Repository ist öffentlich.
 //
 // Aufbau: Abschnitte { h, blocks }. Ein Block ist ein Absatz (String), { ul: [...] },
 // { table: { head, rows } } oder { operator: true } (Betreiberangaben, von der Seite eingesetzt).
 // Platzhalter: {min_age}, {date}. Fachausdrücke dürfen hier auf Deutsch stehen: diese Datei
 // läuft nicht durch t() — die Sprache wird als Ganzes gewählt (pages/legal.js).
-// Bei inhaltlichen Änderungen: TERMS_VERSION in server/routers/legal.py und {date} anpassen.
+// Bei inhaltlichen Änderungen: TERMS_VERSION in server/api/v1/legal.py und {date} anpassen.
 
 export const DATE = "26. Oktober 2026";
 
@@ -18,7 +18,7 @@ export const LABELS = {
   title: "Rechtliches",
   intro: "Garage16 ist ein privates, nicht-kommerzielles Hobbyprojekt. Hier steht, wer dahintersteht, was mit deinen Daten passiert und welche Regeln gelten.",
   tabs: { imprint: "Impressum", privacy: "Datenschutz", terms: "Nutzungsbedingungen", licenses: "Lizenzen" },
-  operatorMissing: "Die Betreiberangaben sind auf diesem Server noch nicht eingetragen (LMU_GARAGE_OPERATOR_NAME / _ADDRESS / _EMAIL in der .env).",
+  operatorMissing: "Die Betreiberangaben sind auf diesem Server noch nicht eingetragen (GARAGE16_OPERATOR_NAME / _ADDRESS / _EMAIL in der .env).",
   operatorError: "Die Betreiberangaben konnten gerade nicht geladen werden. Bitte später erneut versuchen.",
   email: "E-Mail",
   asOf: "Stand",

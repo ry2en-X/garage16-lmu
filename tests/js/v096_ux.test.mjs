@@ -20,9 +20,10 @@ assert.ok(html.includes("<title>Garage16 — Le Mans Ultimate telemetry &amp; le
 const shell = new JSDOM(html);
 const groups = [...shell.window.document.querySelectorAll("#navLinks .nav-group")].map((g) => [...g.querySelectorAll("a")].map((a) => a.dataset.route));
 assert.deepEqual(groups, [["dashboard", "teams"], ["analysis", "stints"], ["leaderboard", "circuits"], ["account", "download", "setup", "legal"]], "the menu in groups (V1.0: + setup guide, legal)");
-const router = readFileSync(new URL("../../web/js/router.js", import.meta.url), "utf-8");
-assert.ok(!/^import .*\.\/pages\//m.test(router), "no page module is imported up front");
-assert.ok(router.includes('import(path)'), "pages are loaded on demand");
+const router = readFileSync(new URL("../../web/js/core/router.js", import.meta.url), "utf-8");
+const routes = readFileSync(new URL("../../web/js/core/routes.js", import.meta.url), "utf-8");
+assert.ok(!/^import .*\.\/pages\//m.test(router) && !/^import .*pages\//m.test(routes), "no page module is imported up front");
+assert.ok(routes.includes('import(path)'), "pages are loaded on demand (V1.0.2: the route table, core/routes.js)");
 
 // ---------------------------------------------------------------- a DOM with a canned backend
 const dom = new JSDOM(`<!doctype html><body><main id="app"></main></body>`, { url: "http://localhost/#/dashboard", pretendToBeVisual: true });
@@ -32,7 +33,7 @@ globalThis.localStorage = dom.window.localStorage;
 globalThis.sessionStorage = dom.window.sessionStorage;
 globalThis.Event = dom.window.Event;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
-dom.window.LMU_GARAGE_API_BASE_URL = "";
+dom.window.GARAGE16_API_BASE_URL = "";
 dom.window.HTMLCanvasElement.prototype.getContext = () => null;
 
 const lap = (id, track, time, extra = {}) => ({ id, track_name: track, car_name: "499P Custom Team 2025 #397", car_model: "499P (2025)", lap_number: id, lap_time: time, is_valid: true, uploaded_at: "2026-10-10T10:00:00", data_level: "full", ...extra });
@@ -51,35 +52,35 @@ globalThis.fetch = async (url) => {
   const p = new URL(url, "http://x").pathname;
   calls.push(p);
   const json = (body, status = 200) => ({ ok: status < 400, status, headers: { get: () => null }, json: async () => body, text: async () => JSON.stringify(body) });
-  if (p === "/telemetry/laps") return json(LAPS);
-  if (p === "/drivers/1/public") return json({ driver_id: 1, display_name: "Me", personal_records: [{ track_name: "Le Mans", car_name: "x", car_class: "Hypercar", car_model: "499P (2025)", lap_time: 209.9, set_at: "2026-10-10T10:00:00" }], recent_activity: ACTIVITY, teams: [] });
-  if (p === "/teams/mine") return json([{ id: 3, name: "Red Team" }, { id: 4, name: "Blue Team" }]);
-  if (p.startsWith("/teams/") && p.endsWith("/records")) {
+  if (p === "/api/v1/laps") return json(LAPS);
+  if (p === "/api/v1/public/drivers/1") return json({ driver_id: 1, display_name: "Me", personal_records: [{ track_name: "Le Mans", car_name: "x", car_class: "Hypercar", car_model: "499P (2025)", lap_time: 209.9, set_at: "2026-10-10T10:00:00" }], recent_activity: ACTIVITY, teams: [] });
+  if (p === "/api/v1/teams/mine") return json([{ id: 3, name: "Red Team" }, { id: 4, name: "Blue Team" }]);
+  if (p.startsWith("/api/v1/teams/") && p.endsWith("/records")) {
     order.push(`start ${p}`);
-    if (p === "/teams/3/records" && !paused) { paused = true; await new Promise((r) => { release = r; }); }
+    if (p === "/api/v1/teams/3/records" && !paused) { paused = true; await new Promise((r) => { release = r; }); }
     order.push(`end ${p}`);
     return json([{ track_name: "Le Mans", car_model: "499P (2025)", you_hold_it: true, gap: null, driver_name: "Me" }]);
   }
-  if (p === "/teams/3") return json({ id: 3, name: "Red Team", my_role: "owner", member_count: 2, active_driver_count: 2, total_laps: 4, pbs_this_week: 1, team_best_count: 1, description: "" });
-  if (p === "/teams/3/members") return json([{ driver_id: 1, display_name: "Me", role: "owner", status: "active", lap_count: 4, pb_count: 1, last_activity: "2026-10-10T10:00:00" }]);
-  if (p === "/teams/3/stats") return json({ laps: 4, pbs: 1, active_drivers: 2, records: 1 });
-  if (p === "/teams/3/activity") return json(ACTIVITY);
-  if (p === "/teams/3/invitations") return json([]);
-  if (p === "/leaderboard/catalog/venues") return json([]);
-  if (p === "/accounts/discord") return json({ linked: false });
-  if (p === "/accounts/sessions") return json([]);
-  if (p === "/accounts/devices") return json([]);
-  if (p === "/accounts/me") return json({ driver_id: 1, display_name: "Me", email: null });
+  if (p === "/api/v1/teams/3") return json({ id: 3, name: "Red Team", my_role: "owner", member_count: 2, active_driver_count: 2, total_laps: 4, pbs_this_week: 1, team_best_count: 1, description: "" });
+  if (p === "/api/v1/teams/3/members") return json([{ driver_id: 1, display_name: "Me", role: "owner", status: "active", lap_count: 4, pb_count: 1, last_activity: "2026-10-10T10:00:00" }]);
+  if (p === "/api/v1/teams/3/stats") return json({ laps: 4, pbs: 1, active_drivers: 2, records: 1 });
+  if (p === "/api/v1/teams/3/activity") return json(ACTIVITY);
+  if (p === "/api/v1/teams/3/invitations") return json([]);
+  if (p === "/api/v1/public/catalog/venues") return json([]);
+  if (p === "/api/v1/accounts/discord") return json({ linked: false });
+  if (p === "/api/v1/accounts/sessions") return json([]);
+  if (p === "/api/v1/accounts/devices") return json([]);
+  if (p === "/api/v1/accounts/me") return json({ driver_id: 1, display_name: "Me", email: null });
   return json({ detail: `unexpected ${p}` }, 404);
 };
 const settle = (ms = 40) => new Promise((r) => setTimeout(r, ms));
-const { store } = await import("../../web/js/state.js");
+const { store } = await import("../../web/js/core/state.js");
 store.setSession({ driverId: 1, displayName: "Me", viaCookie: true });
 const app = document.getElementById("app");
 const text = (n) => n.textContent.replace(/\s+/g, " ");
 
 // ---------------------------------------------------------------- record feed: one row per lap
-const { groupActivity } = await import("../../web/js/activity.js");
+const { groupActivity } = await import("../../web/js/core/activity.js");
 const grouped = groupActivity(ACTIVITY);
 assert.equal(grouped.length, 2, "three records of lap 6 are ONE entry");
 assert.deepEqual(grouped[0].types, ["WR", "TEAM_BEST", "PR"], "most important first");
@@ -89,18 +90,18 @@ assert.deepEqual(groupActivity([{ ...ACTIVITY[0], lap_id: undefined }, { ...ACTI
 const { renderDashboard } = await import("../../web/js/pages/dashboard.js");
 const done = renderDashboard(app);
 await settle();
-assert.ok(order.includes("start /teams/4/records") && !order.includes("end /teams/3/records"), "team records load in parallel, not one after the other");
+assert.ok(order.includes("start /api/v1/teams/4/records") && !order.includes("end /api/v1/teams/3/records"), "team records load in parallel, not one after the other");
 release();
 await done;
 await settle();
 const actions = [...app.querySelectorAll(".quick-action")];
 assert.equal(actions.length, 3);
-assert.equal(actions[0].getAttribute("href"), "#/analysis?a=9", "'Analyse last lap' opens the newest lap");
-assert.ok(actions[1].getAttribute("href").startsWith("#/analysis?quick=wr&track=Le%20Mans"));
+assert.equal(actions[0].getAttribute("href"), "/analysis/9", "'Analyse last lap' opens the newest lap");
+assert.equal(actions[1].getAttribute("href"), "/analysis/le-mans/vs/garage16-best");
 assert.equal(app.querySelectorAll(".activity__row").length, 2, "the feed has one row per lap");
 assert.equal(app.querySelectorAll(".activity__row")[0].querySelectorAll(".tag").length, 3, "with every record as a badge");
 assert.ok(text(app.querySelector(".activity")).includes("499P (2025)") && !text(app.querySelector(".activity")).includes("#397"), "the car model, not the livery");
-assert.equal(app.querySelector(".activity__row a").getAttribute("href"), "#/analysis?a=6", "the time opens the lap");
+assert.equal(app.querySelector(".activity__row a").getAttribute("href"), "/analysis/6", "the time opens the lap");
 // lap filter: in the browser, no request
 const before = calls.length;
 assert.equal(app.querySelectorAll(".timing-table:not(.best-table) tbody tr").length, 4);

@@ -1,4 +1,4 @@
-"""PyInstaller entry point for the friend-facing Garage16 client (V0.8.6).
+"""PyInstaller entry point for the friend-facing Garage16 client.
 
 A tiny shim rather than pointing PyInstaller at client/main.py directly:
 `client/main.py` uses package-relative imports (`from client.config import

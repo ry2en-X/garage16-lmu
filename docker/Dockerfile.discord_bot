@@ -3,10 +3,10 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY discord_bot/requirements.txt ./discord_bot/requirements.txt
-# The bot reads the same DB as the server (server/models.py) — it needs
+# The bot reads the same DB as the server (server/core/models.py) — it needs
 # the same SQLAlchemy + driver stack, not just discord.py.
 COPY server/requirements.txt ./server/requirements.txt
-# V0.9.7: the tested versions (constraints.txt)
+# The tested versions (constraints.txt)
 COPY constraints.txt ./constraints.txt
 RUN pip install --no-cache-dir -r discord_bot/requirements.txt -r server/requirements.txt -c constraints.txt
 
@@ -27,7 +27,7 @@ COPY docker/entrypoint-discord-bot.sh ./docker/entrypoint-discord-bot.sh
 # .py file spuriously "executable", just fixes the actual problem
 # (unreadable files / non-traversable directories) regardless of what
 # the source archive's permissions looked like.
-# V0.8.8: strip Windows line endings (see Dockerfile.server for why).
+# Strip Windows line endings (see Dockerfile.server for why).
 RUN sed -i 's/\r$//' ./docker/entrypoint-discord-bot.sh
 RUN chmod -R a+rX ./server ./discord_bot ./docker/entrypoint-discord-bot.sh
 RUN chmod +x ./docker/entrypoint-discord-bot.sh

@@ -1,5 +1,5 @@
-// pages/circuits.js — circuit library (V0.9.0): every track as a card, built entirely
-// from uploads (plus the seeded venue list, see server/catalog.py) — nobody enters a
+// pages/circuits.js — circuit library: every track as a card, built entirely
+// from uploads (plus the seeded venue list, see server/catalog/catalog.py) — nobody enters a
 // track by hand. A card shows the layouts LMU has sent, lap/driver counts, the
 // classes driven there and the fastest valid lap; the outline is drawn from that
 // fastest lap's own position data, so a new track gets a map by itself.
@@ -7,13 +7,14 @@
 // Outlines need a signed-in driver (they read a telemetry file); without one the
 // cards still show everything else.
 
-import { api } from "../api.js";
-import { store } from "../state.js";
-import { el, formatLapTime } from "../format.js";
+import { api } from "../core/api.js";
+import { store } from "../core/state.js";
+import { el, formatLapTime } from "../core/format.js";
 import { cssVar, fitCanvas } from "../analysis/charts.js";
 import { fitView, formatMetres } from "../analysis/model.js";
 
-import { t, tp } from "../i18n.js";
+import { t, tp } from "../core/i18n.js";
+import { link } from "../core/link.js";
 const OUTLINE_HEIGHT = 170;
 
 export function drawOutline(canvas, outline) {
@@ -72,7 +73,7 @@ function layoutBlock(layout, observer) {
   const meta = el("div", { class: "circuit__meta" });
   const hasLaps = layout.lap_count > 0;
 
-  // V0.9.1: "My Best" on this layout (loaded together with the outline, i.e. only when
+  // "My Best" on this layout (loaded together with the outline, i.e. only when
   // the card is seen, and only for a signed-in driver — it is their own data).
   const mine = el("div", { class: "circuit__mine subtitle", style: "margin:4px 0 0;" });
   async function loadMine() {
@@ -128,8 +129,8 @@ function layoutBlock(layout, observer) {
       ]));
       if (signedIn) {
         children.push(mine);
-        // V0.9.1: the server pairs my best valid lap here with the fastest lap for my car.
-        children.push(el("a", { class: "btn btn--ghost circuit__action", href: `#/analysis?quick=wr&track=${encodeURIComponent(layout.track_name)}` }, t("Compare my lap with it")));
+        // The server pairs my best valid lap here with the fastest lap for my car.
+        children.push(el("a", { class: "btn btn--ghost circuit__action", href: link.analysis({ quick: "wr", track: layout.track_name }) }, t("Compare my lap with it")));
       }
     }
     if (!signedIn) children.push(el("div", { class: "subtitle", style: "margin:8px 0 0;" }, t("Sign in to see the outline and compare laps.")));
@@ -182,7 +183,7 @@ export async function renderCircuits(container) {
       list.appendChild(el("div", { class: "empty-state" }, q ? t("No track matches \"{0}\".", [q]) : t("No tracks yet.")));
       return;
     }
-    // Tracks with laps as cards (busiest first); V0.9.6: the not-yet-driven ones as one compact
+    // Tracks with laps as cards (busiest first); The not-yet-driven ones as one compact
     // list underneath instead of a dozen empty cards.
     const driven = venues.filter((v) => v.layouts.length).sort((x, y) => y.lap_count - x.lap_count || x.venue.localeCompare(y.venue));
     const empty = venues.filter((v) => !v.layouts.length).sort((x, y) => x.venue.localeCompare(y.venue));

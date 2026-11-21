@@ -1,5 +1,5 @@
 """client/server_check.py — ONE health request per check, three answers
-(V0.8.6): is the server reachable, is this client too old for it, and has
+: is the server reachable, is this client too old for it, and has
 it moved. client/main.py's upload loop calls this at startup and then
 periodically (so a migration or a minimum-version bump that happens while
 a friend's client is already running is picked up without a restart).
@@ -24,7 +24,7 @@ logger = logging.getLogger("lmu_garage.server_check")
 
 def _version_tuple(v: str) -> tuple:
     try:
-        return tuple(int(p) for p in v.split(".")[:4])  # x.y.z[.w] (V0.9.3.1)
+        return tuple(int(p) for p in v.split(".")[:4])  # x.y.z[.w]
     except (ValueError, AttributeError):
         return (0,)
 
@@ -34,7 +34,7 @@ class ServerCheckResult:
     config: ClientConfig
     reachable: bool
     update_required: bool = False
-    update_available: bool = False   # V1.0.1: optional update, the client keeps working
+    update_available: bool = False   # Optional update, the client keeps working
     # Text for the persistent GUI banner: "" = nothing to show (clears
     # any previous banner), otherwise the message.
     notice: str = ""
@@ -71,7 +71,7 @@ def run_server_check(
             notice_parts.append(migration.message)
 
     # --- update required: prefer the server's own verdict (single source
-    # of truth, server/versioning.py); fall back to a local comparison
+    # of truth, server/core/versioning.py); fall back to a local comparison
     # against min_client_version for servers that predate ?client_version. ---
     if "update_required" in body:
         update_required = bool(body["update_required"])
@@ -79,14 +79,14 @@ def run_server_check(
         min_v = body.get("min_client_version")
         update_required = bool(min_v) and _version_tuple(client_version) < _version_tuple(min_v)
 
-    # V0.9.2: the download of THIS client's edition (Client / Client + analysis app)
+    # The download of THIS client's edition (Client / Client + analysis app)
     download_url = download_url_for_this_edition(body, "client_download_url", "client_app_download_url")
     if update_required:
         msg = format_update_required_message(body.get("min_client_version"), download_url)
         log_lines.append(msg)
         notice_parts.insert(0, msg)
 
-    # V1.0.1: an optional update — the server names the newest client (latest_client_version)
+    # An optional update — the server names the newest client (latest_client_version)
     if "update_available" in body:
         update_available = bool(body["update_available"])
     else:

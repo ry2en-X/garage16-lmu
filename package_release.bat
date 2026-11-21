@@ -73,9 +73,9 @@ REM Catch a real Fernet key or admin token accidentally left in a tracked
 REM file (e.g. pasted into a stray notes.txt) - .env.example only ever
 REM contains placeholders, so a real-looking secret anywhere is worth
 REM stopping for.
-findstr /s /r /c:"LMU_GARAGE_SECRET_KEY=.\{20,\}" "%STAGING_DIR%\*.py" "%STAGING_DIR%\*.md" "%STAGING_DIR%\*.txt" >nul 2>&1
+findstr /s /r /c:"GARAGE16_SECRET_KEY=.\{20,\}" "%STAGING_DIR%\*.py" "%STAGING_DIR%\*.md" "%STAGING_DIR%\*.txt" >nul 2>&1
 if not errorlevel 1 (
-    echo   FOUND: a real-looking LMU_GARAGE_SECRET_KEY value in a tracked file.
+    echo   FOUND: a real-looking GARAGE16_SECRET_KEY value in a tracked file.
     set "FOUND_SECRET=1"
 )
 

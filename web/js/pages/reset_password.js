@@ -1,11 +1,11 @@
 // pages/reset_password.js — the landing page for the link in a
 // password-reset email (#/reset-password?token=...). See
-// server/routers/accounts.py's confirm_password_reset.
+// server/api/v1/accounts.py's confirm_password_reset.
 
-import { api, ApiError } from "../api.js";
-import { el } from "../format.js";
+import { api, ApiError } from "../core/api.js";
+import { el } from "../core/format.js";
 
-import { t } from "../i18n.js";
+import { t } from "../core/i18n.js";
 export async function renderResetPassword(container, token) {
   container.appendChild(el("h1", {}, t("Reset your password")));
 
@@ -54,8 +54,8 @@ export async function renderResetPassword(container, token) {
           t("Password updated. You can sign in with it now.")
         )
       );
-      const link = el("a", { href: "#/account", class: "btn", style: "margin-top:12px;display:inline-block;" }, t("Go to sign in"));
-      out.appendChild(link);
+      const toAccount = el("a", { href: "/account", class: "btn", style: "margin-top:12px;display:inline-block;" }, t("Go to sign in"));
+      out.appendChild(toAccount);
     } catch (err) {
       out.appendChild(
         el("div", { class: "notice notice--error" }, err instanceof ApiError ? err.message : t("Something went wrong."))

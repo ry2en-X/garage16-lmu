@@ -1,11 +1,11 @@
 # LMU Shared-Memory-Verifikationsprotokoll
 
 Diese Punkte können nicht ohne echtes LMU auf Windows verifiziert werden.
-Für jeden: eine konkrete Session fahren, `scripts/dump_shared_memory.py`
-mitlaufen lassen, und `LMU_GARAGE_DEBUG=1` setzen, wenn der echte Client
+Für jeden: eine konkrete Session fahren, `scripts/dev/dump_shared_memory.py`
+mitlaufen lassen, und `GARAGE16_DEBUG=1` setzen, wenn der echte Client
 (`client/main.py`) läuft, um die Debug-Logzeilen aus `parser.py` zu sehen.
 
-Werkzeug: `python -m scripts.dump_shared_memory --out session.csv`
+Werkzeug: `python -m scripts.dev.dump_shared_memory --out session.csv`
 schreibt jeden Frame als CSV-Zeile und druckt Anomalien (Lap-Sprünge)
 sofort auf die Konsole.
 
@@ -23,7 +23,7 @@ parallel mit einer Stoppuhr/In-Game-Anzeige vergleichen.
 sollte der tatsächlichen Rundenzeit entsprechen (±50ms).
 
 **Diagnose:**
-- Mit `LMU_GARAGE_DEBUG=1`: Suche nach `EMIT:` Zeilen. Das Feld `diff=`
+- Mit `GARAGE16_DEBUG=1`: Suche nach `EMIT:` Zeilen. Das Feld `diff=`
   zeigt die Differenz zwischen `scoring.last_lap_time` und der aus der
   Telemetrie-Pufferdauer berechneten Zeit. Sollte nahe 0 sein.
 - Falls `diff` konstant um eine Rundenzeit versetzt ist (z.B. Runde N zeigt
@@ -80,7 +80,7 @@ muss angepasst werden (aktuell: nur `== 0` wird abgelehnt).
 **Frage:** Wirft `mmap.mmap(-1, size, tagname, ACCESS_READ)` zuverlässig
 einen `OSError`, wenn die Shared-Memory-Region noch nicht existiert?
 
-**Session:** `python -m scripts.dump_shared_memory` OHNE laufendes LMU
+**Session:** `python -m scripts.dev.dump_shared_memory` OHNE laufendes LMU
 starten.
 
 **Erwartung:** Konsole zeigt `LMU not running / no active session —
@@ -139,7 +139,7 @@ pausiert/im Menü ist?
 **Session:** Während einer laufenden Session pausieren (ESC-Menü) oder
 zum Hauptmenü zurückkehren, 2 Minuten warten, dann fortsetzen.
 
-**Erwartung:** Mit `LMU_GARAGE_DEBUG=1`: `STALE:`-Zeilen im Log während
+**Erwartung:** Mit `GARAGE16_DEBUG=1`: `STALE:`-Zeilen im Log während
 der Pause.
 
 **Diagnose:** Falls `STALE`-Zeilen erscheinen UND der Buffer trotzdem
@@ -165,8 +165,8 @@ einblenden (Kanalauswahl).
 / `ABS intervening` schlagen beim Beschleunigen bzw. harten Bremsen aus.
 
 **Diagnose:** Alle Fahrhilfen-Kanäle bleiben dauerhaft 0 → das Feld-Layout stimmt für
-deine LMU-Version nicht (`tests/test_lmu_structs.py` zeigt, welche Offsets erwartet
-werden) oder LMU liefert sie nicht; mit `scripts/dump_shared_memory.py` die rohen
+deine LMU-Version nicht (`tests/client/test_lmu_structs.py` zeigt, welche Offsets erwartet
+werden) oder LMU liefert sie nicht; mit `scripts/dev/dump_shared_memory.py` die rohen
 Bytes ab Offset 745 der Telemetrie-Struktur ansehen. Nicht raten — erst das Ergebnis
 hier eintragen.
 
@@ -242,7 +242,7 @@ Start/Ziel keinen Sprung oder Aussetzer in den Linien. Notiere die Dateigröße 
 dem Server (`du -sh /data/telemetry`).
 
 **Diagnose:** `sample_count` deutlich kleiner, vor allem bei der ersten Runde nach einer
-anderen → Abtastlücke; Debug-Log (`LMU_GARAGE_DEBUG=1`) mitschneiden. Dateien viel größer
+anderen → Abtastlücke; Debug-Log (`GARAGE16_DEBUG=1`) mitschneiden. Dateien viel größer
 als erwartet → die Zahl hier eintragen, dann entscheiden, ob die Zusatzkanäle seltener
 (z. B. jedes zweite Sample) aufgezeichnet werden sollen.
 
@@ -310,7 +310,7 @@ Signal; notieren.
 (Evo, Le-Mans-Ausführung, neues Baujahr mit anderer Aerodynamik)?
 
 **Session:** Eine Session mit vollem KI-Feld laden, dann im Projektordner auf dem PC:
-`py -m scripts.car_identity_probe --csv autos.csv`
+`py -m scripts.dev.car_identity_probe --csv autos.csv`
 
 **Erwartung:** Jede Zeile hat einen Modellnamen; alle Lackierungen/Nummern eines Modells
 ergeben dieselbe „Garage16 identity“; Varianten mit anderer Technik ergeben eine andere.
@@ -318,7 +318,7 @@ ergeben dieselbe „Garage16 identity“; Varianten mit anderer Technik ergeben 
 
 **Diagnose:** Modellname leer → der Server nutzt den Dateinamen (Modell + Saison) und lernt,
 sobald ein Client mit Modellnamen hochlädt. Zwei technisch verschiedene Varianten mit gleichem
-Modellnamen → dafür ist `SPEC_RULES` in `server/car_identity.py` da (nur mit diesem Beleg).
+Modellnamen → dafür ist `SPEC_RULES` in `server/catalog/car_identity.py` da (nur mit diesem Beleg).
 
 ---
 
@@ -354,10 +354,10 @@ limits“, LMU-Wiki „Rules“, das quelloffene Werkzeug TinyPedal) haben ergeb
   „letzte Runde ungültig“ und korrigiert drei auf 29 Zeichen gekürzte Modellnamen.
 Das ist **plausibel, aber nicht offiziell dokumentiert**. V0.9.3.1 behandelt deshalb alles, was
 nicht LMUs eigenes Flag ist, als Messung (nur Prüfung). Die folgenden Punkte entscheiden, welche
-Messung später Runden streichen darf (`LMU_GARAGE_TRACK_LIMITS_INVALIDATING`).
+Messung später Runden streichen darf (`GARAGE16_TRACK_LIMITS_INVALIDATING`).
 
 Werkzeug für (r)–(u), auf dem PC im Projektordner, während du fährst:
-`py -m scripts.track_limits_probe --csv tracklimits.csv` — schreibt jedes Frame und gibt jede
+`py -m scripts.dev.track_limits_probe --csv tracklimits.csv` — schreibt jedes Frame und gibt jede
 Änderung eines LMU-Signals mit „x s nach der Ziellinie“ aus. Notiere parallel, was du getan hast.
 
 ## (r) V0.9.3.1 — Schritte, Punkte und Rundenungültigkeit
@@ -394,11 +394,11 @@ für diese LMU-Version nicht.
 **Frage:** Welche Modellnamen kürzt LMU (30-Byte-Feld), und unterscheiden sich Varianten (z. B.
 Peugeot 9X8 2023/2024, Evo-Versionen, GTE/LMGT3) im Namen?
 
-**Session:** Session mit vollem KI-Feld aller Klassen: `py -m scripts.car_identity_probe --csv autos.csv`.
+**Session:** Session mit vollem KI-Feld aller Klassen: `py -m scripts.dev.car_identity_probe --csv autos.csv`.
 
 **Erwartung:** Spalte `name_cut` ist nur bei langen Namen `True`; der Abschnitt „Please check“
 listet, was von Hand zu klären ist. Mit dieser CSV wird `MODEL_NAME_FIXES` (Kürzungen) bzw.
-`SPEC_RULES` (Varianten gleichen Namens) in `server/car_identity.py` ergänzt — nur mit Beleg.
+`SPEC_RULES` (Varianten gleichen Namens) in `server/catalog/car_identity.py` ergänzt — nur mit Beleg.
 
 ## (u) V0.9.3.1 — Untergrund: Kerbs, Astroturf, Auslaufzonen, Nässe, Rad in der Luft
 
@@ -433,7 +433,7 @@ dokumentiert. Bis zur Bestätigung gilt: Stints werden in erster Linie an **geme
 Boxengasse + Stillstand, gemessenem Nachtanken (Tankinhalt steigt) und gemessenem
 Reifenwechsel (Profil steigt) geteilt; der Boxenstopp-Zähler ist nur ein zusätzlicher Grund.
 
-Werkzeug: `py -m scripts.track_limits_probe --csv stint.csv` (zeigt jetzt auch
+Werkzeug: `py -m scripts.dev.track_limits_probe --csv stint.csv` (zeigt jetzt auch
 `num_pitstops`, `place`, `flag`, `compound_front/rear` als „Nummer:Name“, die Zeitabstände,
 Tankinhalt und -größe, den größten Schaden und die Restzeit der Session).
 

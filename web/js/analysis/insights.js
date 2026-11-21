@@ -1,5 +1,5 @@
 // analysis/insights.js — what the delta curve and the sector times say, in numbers
-// a driver can act on (V0.9.1). Pure functions over the /compare response.
+// a driver can act on. Pure functions over the /compare response.
 //
 // Convention (same as the server): delta(d) = time(A, d) − time(B, d); POSITIVE means
 // lap A is BEHIND lap B at that point. So A GAINS time where the curve falls and
@@ -35,7 +35,7 @@ export function factWindowMetres(lapLength) {
  */
 export function deltaFacts(data) {
   if (!data || !data.delta || !data.grid || data.grid.count < 2) return null;
-  // The server measures them on a fixed 0.5 m grid (V0.9.1 review): the same numbers on every
+  // The server measures them on a fixed 0.5 m grid: the same numbers on every
   // screen. Computed here from the chart's grid only for older / zoomed responses.
   const exact = data.delta_facts;
   if (exact && finite(exact.net)) {

@@ -1,5 +1,5 @@
 // analysis/grid.js — lays the analysis tiles out on a 12-column grid of fixed-height rows and,
-// in edit mode, lets the user arrange them (V0.9.5; the V0.9.1 version was an ordered list).
+// in edit mode, lets the user arrange them.
 //
 // Every tile sits on whole cells (layout.js: x, y, w, h) — pure CSS grid placement, so tiles
 // can never overlap or overflow sideways. On a narrow screen (≤ 700 px) the tiles are stacked
@@ -15,7 +15,7 @@
 //     put there (onDraw) — the picker then offers only tiles that fit that box.
 // A normal drag on a chart still pans the chart: a tile can never be moved by accident.
 
-import { el } from "../format.js";
+import { el } from "../core/format.js";
 import { moduleForType } from "./modules.js";
 import {
   COLS, GAP_PX, isFree, layoutRows, overlaps, placeWidget, removeWidget, resizeWidget, ROW_PX, setChannel, setWidgetColors, shiftWidget, tileSpec,

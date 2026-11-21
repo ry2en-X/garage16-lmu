@@ -1,7 +1,7 @@
 """Lap files as a 0.9.4 client writes them, for tests that only need "an ordinary clean lap"
-(V0.9.9).
+.
 
-Since V0.9.9 a lap is only VALID when it can actually be checked (server/lap_decision.py): the
+Since V0.9.9 a lap is only VALID when it can actually be checked (server/laps/lap_decision.py): the
 track-limits signals of its client version are present, frames come at a realistic rate, and
 speed and lap distance agree. Older tests built 50-row files with ten columns — such a file is
 now (correctly) REVIEW. `clean_lap_df` builds the smallest file that a real client could have

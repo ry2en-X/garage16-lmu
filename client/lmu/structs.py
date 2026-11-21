@@ -40,7 +40,7 @@ Provenance and confidence, field by field:
     confirmed. LOWER confidence on that specific region only.
 
 If LMU updates its shared memory layout, or if the ABI test in
-tests/test_lmu_structs.py starts failing against a real running game,
+tests/client/test_lmu_structs.py starts failing against a real running game,
 these struct definitions — not the game — are what's wrong. Re-derive from
 the same references (see README) before assuming anything else.
 """
@@ -187,7 +187,7 @@ class TelemWheelV01(ctypes.Structure):
         ("toe", ctypes.c_double),
         ("tire_carcass_temperature", ctypes.c_double),
         ("tire_inner_layer_temperature", ctypes.c_double * 3),
-        # V0.9.0: named from the reserve block (24 -> 4 + 1 + 1 + 18 bytes, so
+        # Named from the reserve block (24 -> 4 + 1 + 1 + 18 bytes, so
         # the struct stays 260 bytes). LMU "spends" reserve bytes for new
         # fields instead of growing the struct — see the V1.3 note on
         # TelemInfoV01 below. Verified field-for-field against two
@@ -282,9 +282,9 @@ class TelemInfoV01(ctypes.Structure):
         ("electric_boost_water_temperature", ctypes.c_double),
         ("electric_boost_motor_state", ctypes.c_uint8),
         # --- LMU v1.3+: electronics / driver aids, carved out of the former
-        # 103-byte reserve block (V0.9.0). The struct size is unchanged
+        # 103-byte reserve block. The struct size is unchanged
         # (1888 bytes) and `wheel` stays last at offset 848 — both asserted
-        # in tests/test_lmu_structs.py. The C names are mLapInvalidated,
+        # in tests/client/test_lmu_structs.py. The C names are mLapInvalidated,
         # mABSActive, mTCActive, mSpeedLimiterActive, mWiperState, mTC,
         # mTCMax, mTCSlip, mTCSlipMax, mTCCut, mTCCutMax, mABS, mABSMax,
         # mMotorMap(Max), mMigration(Max), m{Front,Rear}AntiSway(Max),
@@ -371,9 +371,9 @@ class ScoringInfoV01(ctypes.Structure):
         ("server_name", ctypes.c_char * 32),
         ("start_et", ctypes.c_float),
         ("avg_path_wetness", ctypes.c_double),
-        # V0.9.3: named from the former 200-byte reserve (13 + 187 = 200 bytes, so the
+        # Named from the former 200-byte reserve (13 + 187 = 200 bytes, so the
         # struct size and everything after it are unchanged — asserted in
-        # tests/test_lmu_structs.py). Names, types and order as in s-victor's
+        # tests/client/test_lmu_structs.py). Names, types and order as in s-victor's
         # pyLMUSharedMemory lmu_data.py (MIT; field layout only, no code taken), which
         # follows LMU's own SharedMemoryInterface header. Same lower-confidence region as
         # the weather block above: these values are recorded as context only and never

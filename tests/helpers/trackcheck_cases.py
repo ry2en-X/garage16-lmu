@@ -1,8 +1,8 @@
 """
-The labelled track-limit reference set (V0.9.9): every case with the decision Garage16 must make
+The labelled track-limit reference set: every case with the decision Garage16 must make
 and WHY — the reason comes from the geometry, LMU's documented behaviour or the physics of the
-manipulation, never from the implementation. tests/test_v099_trackcheck_reference.py checks every
-case; scripts/trackcheck_eval.py adds a larger generated grid and computes the error rates.
+manipulation, never from the implementation. tests/laps/test_trackcheck_reference.py checks every
+case; scripts/ops/trackcheck_eval.py adds a larger generated grid and computes the error rates.
 
 `expected` is what the CURRENT rules decide where that is a known limit (marked "LIMIT:"): such a
 case stays in the set, counts as a false negative in the measurement, and is listed in

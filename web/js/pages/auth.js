@@ -1,23 +1,24 @@
 // pages/auth.js — three ways in: email+password sign-in (V0.7.2 —
-// establishes an HttpOnly cookie session, see server/sessions.py, for a
+// establishes an HttpOnly cookie session, see server/accounts/sessions.py, for a
 // driver who's set a password via the Account page at least once),
 // registering a fresh driver identity (mints a desktop-client auth_token
-// + client_secret — see server/security.py — not a web session), or
+// + client_secret — see server/core/security.py — not a web session), or
 // restoring a session by pasting back in a previously-saved auth_token
 // (legacy path, still bearer-token-based, for drivers without a password
 // set yet).
 
-import { api, ApiError } from "../api.js";
-import { store } from "../state.js";
-import { el } from "../format.js";
+import { api, ApiError } from "../core/api.js";
+import { store } from "../core/state.js";
+import { el } from "../core/format.js";
 
-import { t } from "../i18n.js";
+import { t } from "../core/i18n.js";
+import { navigate } from "../core/router.js";
 export function renderSignInPrompt(container, message = t("Sign in to see this.")) {
   const notice = el("div", { class: "notice" }, message);
-  const link = el("a", { href: "#/account", class: "btn", style: "margin-top:12px;display:inline-block;" }, t("Go to Account"));
+  const toAccount = el("a", { href: "/account", class: "btn", style: "margin-top:12px;display:inline-block;" }, t("Go to Account"));
   container.appendChild(el("h1", {}, t("Sign in required")));
   container.appendChild(notice);
-  container.appendChild(link);
+  container.appendChild(toAccount);
 }
 
 function renderLoginCard() {
@@ -45,9 +46,9 @@ function renderLoginCard() {
       const res = await api.login(email, password);
       store.setSession({ driverId: res.driver_id, displayName: res.display_name, viaCookie: true });
       out.appendChild(el("div", { class: "notice notice--success" }, t("Signed in.")));
-      // V1.0.1: an unconfirmed email goes to the account page (where the link can be sent again);
+      // An unconfirmed email goes to the account page (where the link can be sent again);
       // the terms dialog (terms_gate.js) opens by itself when the terms must be accepted
-      window.location.hash = res.email_verified === false ? "#/account" : "#/dashboard";
+      navigate(res.email_verified === false ? "/account" : "/dashboard");
     } catch (err) {
       out.appendChild(el("div", { class: "notice notice--error" }, err instanceof ApiError ? err.message : t("Sign-in failed.")));
     } finally {
@@ -96,7 +97,7 @@ export function renderAuth(container) {
 
   container.appendChild(renderLoginCard());
 
-  // --- sign up (V1.0): one form — name, email, password, minimum age, terms ---
+  // --- sign up: one form — name, email, password, minimum age, terms ---
   container.appendChild(renderSignupCard());
 
   // --- restore session ---
@@ -182,8 +183,8 @@ function renderSignupCard() {
   const ageText = el("span", {}, t("I am at least {0} years old.", [16]));
   const ageBox = el("label", { class: "check-row", for: "signupAge" }, [el("input", { id: "signupAge", type: "checkbox" }), ageText]);
   const termsBox = checkbox("signupTerms", withLinks(t("I accept the {0} and have read the {1}."), [
-    el("a", { href: "#/legal?tab=terms", target: "_blank", rel: "noopener" }, t("terms of use")),
-    el("a", { href: "#/legal?tab=privacy", target: "_blank", rel: "noopener" }, t("privacy policy")),
+    el("a", { href: "/terms", target: "_blank", rel: "noopener" }, t("terms of use")),
+    el("a", { href: "/datenschutz", target: "_blank", rel: "noopener" }, t("privacy policy")),
   ]));
 
   const button = el("button", { class: "btn" }, t("Create account"));
@@ -214,7 +215,7 @@ function renderSignupCard() {
         displayName, email, password, acceptTerms: true, confirmMinAge: true,
         registrationSecret: secretField.hidden ? undefined : value(secretField).trim() || undefined,
       });
-      // V1.0.1: not signed in yet — the email has to be confirmed first (the same answer comes for
+      // Not signed in yet — the email has to be confirmed first (the same answer comes for
       // an address that already has an account; that mailbox gets a note instead of a link)
       card.innerHTML = "";
       card.appendChild(el("h2", {}, t("Almost done — check your email")));
@@ -222,7 +223,7 @@ function renderSignupCard() {
         t("We sent a confirmation link to {0}. Open it (check the spam folder too), then sign in above with your email and password.", [email])));
       card.appendChild(el("p", { class: "subtitle" },
         t("The desktop client connects once your email is confirmed. Meanwhile you can already download it:")));
-      card.appendChild(el("a", { class: "btn btn--ghost", href: "#/setup?welcome=1" }, t("Setup guide")));
+      card.appendChild(el("a", { class: "btn btn--ghost", href: "/setup?welcome=1" }, t("Setup guide")));
     } catch (err) {
       problem(err.message);
     } finally {

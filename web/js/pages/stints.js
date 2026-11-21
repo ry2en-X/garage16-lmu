@@ -1,4 +1,4 @@
-// pages/stints.js — the Stint Analyzer (V0.9.4): a dashboard of its own, separate from the
+// pages/stints.js — the Stint Analyzer: a dashboard of its own, separate from the
 // LapTime Analyzer (#/analysis). One driving session at a time: pace and consistency, stints,
 // tyres and degradation, fuel and energy, vehicle state, traffic, pit stops, a forecast, the
 // strategy calculator, and comparisons (stints, team mates).
@@ -7,19 +7,23 @@
 //   #/stints?lap=ID               the session this lap belongs to
 //   #/sessions                    the V0.9.3 address — opens the same page
 //
-// Data: server/routers/stints.py (from the database only — fast). The statistics run here
+// Data: server/api/v1/stints.py (from the database only — fast). The statistics run here
 // (web/js/stints/stats.js) so every filter applies at once. Every estimate is labelled as one;
 // a figure that needs more data than there is says so instead of guessing.
 
-import { api } from "../api.js";
-import { store } from "../state.js";
-import { el, formatDate, formatLapTime } from "../format.js";
+import { api } from "../core/api.js";
+import { store } from "../core/state.js";
+import { el, formatDate, formatLapTime } from "../core/format.js";
 import { renderSignInPrompt } from "./auth.js";
 import { sessionCard } from "./sessions.js";
-import { t, tp } from "../i18n.js";
-import { loadTrackNames, trackLabel } from "../tracks.js";
+import { t, tp } from "../core/i18n.js";
+import { loadTrackNames, trackLabel } from "../core/tracks.js";
 import * as S from "../stints/stats.js";
-import { chart as svgChart, legend } from "../stints/chart.js";
+// The charts are loaded with the first session opened (the session list needs none)
+let svgChart = null;
+let legend = null;
+import { link } from "../core/link.js";
+import { navigate, routeQuery } from "../core/router.js";
 
 // The SVG charts scale with the page; on a phone they are drawn for the narrow width, so the
 // labels keep a readable size instead of being shrunk to a third.
@@ -80,9 +84,10 @@ function table(head, rows, cls = "") {
 
 // ------------------------------------------------------------------ query
 
-export function parseStintQuery(hash = window.location.hash) {
-  const [, query = ""] = hash.split("?");
-  const p = new URLSearchParams(query);
+// the page's parameters (core/routes.js turns /stints/lap/123 and /stints/<track>/<day> into ?lap=)
+export function parseStintQuery(input) {
+  const p = input === undefined ? routeQuery()
+    : typeof input === "string" ? new URLSearchParams(input.split("?")[1] || "") : input;   // a string: an old #/ address
   const num = (k) => (/^\d+$/.test(p.get(k) || "") ? Number(p.get(k)) : null);
   return { lap: num("lap"), driver: num("driver"), compareLap: num("compare") };
 }
@@ -90,7 +95,7 @@ export function parseStintQuery(hash = window.location.hash) {
 // ------------------------------------------------------------------ page
 
 export async function renderStints(container) {
-  loadTrackNames(); // V1.0.1: readable track names (tracks.js) — not awaited, never blocks the page
+  loadTrackNames(); // Readable track names (tracks.js) — not awaited, never blocks the page
   container.classList.add("panel--wide");
   container.appendChild(el("h1", {}, t("Stint Analyzer")));
   container.appendChild(el("p", { class: "subtitle" }, t("Whole sessions: pace over the stint, tyres, fuel and energy, pit stops, traffic, forecasts and strategy. For a single lap use the LapTime Analyzer.")));
@@ -119,7 +124,7 @@ async function renderSessionList(container, driverId) {
     const select = el("select", { class: "input", "aria-label": t("Driver") }, data.drivers.map((d) => el("option", {
       value: d.id, ...(d.id === data.driver_id ? { selected: "selected" } : {}),
     }, d.own ? t("{0} (you)", [d.name]) : d.name)));
-    select.addEventListener("change", () => { window.location.hash = `#/stints?driver=${select.value}`; });
+    select.addEventListener("change", () => { navigate(link.stints({ driver: select.value })); });
     container.appendChild(el("div", { class: "stint-toolbar" }, [el("label", {}, [t("Driver"), " ", select])]));
   }
   if (!data.own) container.appendChild(note(t("A team mate's sessions show their valid laps only.")));
@@ -127,9 +132,17 @@ async function renderSessionList(container, driverId) {
     container.appendChild(el("div", { class: "empty-state" }, t("No laps uploaded yet — drive a few laps with the Garage16 client.")));
     return;
   }
+  // A session's address is its track and day (/stints/fuji-speedway/2026-11-14), with -2,
+  // -3 … for a second or third session on the same track that day (counted from the morning)
+  const sessionLink = (session) => {
+    const day = String(session.started || "").slice(0, 10);
+    if (!session.track_name || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return link.stints({ lap: session.key_lap_id });
+    const sameDay = data.sessions.filter((x) => x.track_name === session.track_name && String(x.started || "").slice(0, 10) === day).reverse();
+    return link.stints({ track: session.track_name, date: day, n: sameDay.indexOf(session) + 1, driver: data.own ? null : data.driver_id });
+  };
   for (const session of data.sessions) {
     const c = sessionCard(session);
-    const open = el("a", { class: "btn", href: `#/stints?lap=${session.key_lap_id}` }, t("Open in the Stint Analyzer"));
+    const open = el("a", { class: "btn", href: sessionLink(session) }, t("Open in the Stint Analyzer"));
     c.insertBefore(el("div", { class: "stint-open" }, open), c.children[1] || null);
     container.appendChild(c);
   }
@@ -147,14 +160,17 @@ async function renderSession(container, lapId, compareLap) {
   container.appendChild(status);
   let data;
   try {
-    data = await api.stintSession(lapId);
+    const [session, charts] = await Promise.all([api.stintSession(lapId), import("../stints/chart.js")]);
+    data = session;
+    svgChart = charts.chart;
+    legend = charts.legend;
   } catch (err) {
     status.className = "notice notice--error";
     status.textContent = err.message;
     return;
   }
   status.remove();
-  const back = el("a", { class: "btn btn--ghost", href: data.driver.own ? "#/stints" : `#/stints?driver=${data.driver.id}` }, t("← All sessions"));
+  const back = el("a", { class: "btn btn--ghost", href: data.driver.own ? "/stints" : link.stints({ driver: data.driver.id }) }, t("← All sessions"));
   container.appendChild(el("div", { class: "stint-head" }, [
     back,
     el("div", {}, [
@@ -233,7 +249,7 @@ function filterBar(box, data, state, rerender) {
 
 function stintColor(n) { return COLORS[(n - 1) % COLORS.length]; }
 
-// V0.9.7: " (0.021 … 0.068)" — the 95 % range of a slope
+// " (0.021 … 0.068)" — the 95 % range of a slope
 function ciText(ci, digits = 3) {
   return ci && fin(ci[0]) && fin(ci[1]) ? ` (${ci[0].toFixed(digits)} … ${ci[1].toFixed(digits)})` : "";
 }
@@ -254,7 +270,7 @@ function paceSection({ data, state, clean }) {
   const med = p ? p.median : null;
   const capped = p ? Math.min(Math.max(...laps.filter((l) => clean.has(l.id)).map((l) => l.lap_time)) + 1.5, (med || 0) * 1.08) : null;
   const svgChart = chart([
-    { kind: "dots", points, onClick: (meta) => { if (meta) window.location.hash = `#/analysis?a=${meta.id}`; } },
+    { kind: "dots", points, onClick: (meta) => { if (meta) navigate(link.analysis({ a: meta.id })); } },
     { kind: "line", color: "#ECEDEE", width: 1.5, points: cleanIdx.map((i, k) => [i + 1, avgClean[k]]), label: t("Rolling average") },
   ], {
     yFormat: (v) => formatLapTime(v), xLabel: t("lap in session"), yLabel: t("lap time"),
@@ -638,7 +654,7 @@ function lapsSection({ data, clean }) {
   const labels = FLAG_LABELS();
   return card(t("All laps"), [table([t("Lap"), t("Stint"), t("Time"), "S1", "S2", "S3", t("Tyre age"), t("Fuel used"), t("Fuel left"), t("Tread left"), t("Tyre temp."), t("Position"), t("Notes")],
     data.laps.map((l) => ({ cls: clean.has(l.id) ? null : "stint-row--filtered", cells: [
-      el("a", { href: `#/analysis?a=${l.id}`, title: t("Open in the LapTime Analyzer") }, String(l.lap_number)),
+      el("a", { href: link.analysis({ a: l.id }), title: t("Open in the LapTime Analyzer") }, String(l.lap_number)),
       String(l.stint || dash), lapTime(l.lap_time),
       ...(l.sector_times || [null, null, null]).map((v) => f(v, 3)),
       String(l.tyre_age || dash), f(l.fuel_used_l, 2), f(l.fuel_end_l, 1), f(l.wear_left_avg, 1), f(l.tyre_temp_avg, 0),

@@ -13,7 +13,7 @@ const dom = new JSDOM(html, { url: "https://garage16.example/#/account", pretend
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, localStorage: dom.window.localStorage, sessionStorage: dom.window.sessionStorage });
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
-dom.window.LMU_GARAGE_API_BASE_URL = "";
+dom.window.GARAGE16_API_BASE_URL = "";
 dom.window.confirm = () => true;
 localStorage.setItem("garage16_language", lang);
 localStorage.setItem("lmu_garage_session", JSON.stringify({ driverId: 4, displayName: "Old Hand", viaCookie: true }));
@@ -30,26 +30,26 @@ globalThis.fetch = async (url, init = {}) => {
   const method = init.method || "GET";
   calls.push(`${method} ${u.pathname}`);
   const json = (body, status = 200) => ({ ok: status < 400, status, statusText: String(status), json: async () => body, text: async () => JSON.stringify(body) });
-  if (u.pathname === "/accounts/me") return json(me);
-  if (u.pathname === "/accounts/accept-terms" && method === "POST") {
+  if (u.pathname === "/api/v1/accounts/me") return json(me);
+  if (u.pathname === "/api/v1/accounts/accept-terms" && method === "POST") {
     const body = JSON.parse(init.body);
     assert.deepEqual(body, { accept_terms: true, confirm_min_age: true });
     me = { ...me, terms_required: false, terms_version: "2026-10-24" };
     return json(me);
   }
-  if (u.pathname === "/accounts/devices") return json(devices);
-  if (u.pathname === "/accounts/devices/12" && method === "DELETE") {
+  if (u.pathname === "/api/v1/accounts/devices") return json(devices);
+  if (u.pathname === "/api/v1/accounts/devices/12" && method === "DELETE") {
     devices = devices.filter((d) => d.id !== 12);
     return json({ status: "revoked" });
   }
-  if (u.pathname === "/accounts/devices/11" && method === "DELETE") {
+  if (u.pathname === "/api/v1/accounts/devices/11" && method === "DELETE") {
     return json({ detail: { code: "MAINTENANCE", message: "A backup is running — try again in a few minutes." } }, 503);
   }
-  if (u.pathname === "/accounts/sessions") return json([]);
-  if (u.pathname === "/accounts/discord") return json({ linked: false });
-  if (u.pathname === "/legal") return json({ operator: null, min_age: 18, terms_version: "2026-10-24", registration: "open" });
-  if (u.pathname === "/health") return json({ status: "ok" });
-  if (u.pathname === "/leaderboard/recent") return json([]);
+  if (u.pathname === "/api/v1/accounts/sessions") return json([]);
+  if (u.pathname === "/api/v1/accounts/discord") return json({ linked: false });
+  if (u.pathname === "/api/v1/public/legal") return json({ operator: null, min_age: 18, terms_version: "2026-10-24", registration: "open" });
+  if (u.pathname === "/api/v1/health") return json({ status: "ok" });
+  if (u.pathname === "/api/v1/public/activity") return json([]);
   return json({ detail: "unexpected " + u.pathname }, 404);
 };
 
@@ -57,28 +57,28 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const text = (node) => node.textContent.replace(/\s+/g, " ").trim();
 const app = () => document.getElementById("app");
 
-await import("../../web/js/router.js");
+await import("../../web/js/main.js");
 await sleep(250);
 
 // ---------------------------------------------------------------- page title
-assert.equal(document.title, `${de ? "Konto" : "Account"} · Garage16`);
+assert.equal(document.title, `${de ? "Konto" : "Account"} – Garage16`);
 
 // ---------------------------------------------------------------- terms dialog
 const dialog = document.querySelector("[data-terms-dialog]");
 assert.ok(dialog, "the terms dialog opens for an account that has not accepted the current terms");
 assert.ok(text(dialog).includes(de ? "mindestens 18 Jahre" : "at least 18 years"), "the server's minimum age");
 const links = [...dialog.querySelectorAll("a")].map((a) => a.getAttribute("href"));
-assert.deepEqual(links, ["#/legal?tab=terms", "#/legal?tab=privacy"]);
+assert.deepEqual(links, ["/terms", "/datenschutz"]);
 const accept = [...dialog.querySelectorAll("button")][0];
 accept.click();
 await sleep(30);
 assert.ok(text(dialog).includes(de ? "beide Haken" : "both boxes"), "both boxes are required");
-assert.ok(!calls.includes("POST /accounts/accept-terms"));
+assert.ok(!calls.includes("POST /api/v1/accounts/accept-terms"));
 dialog.querySelector("#termsAge").checked = true;
 dialog.querySelector("#termsAccept").checked = true;
 accept.click();
 await sleep(60);
-assert.ok(calls.includes("POST /accounts/accept-terms"));
+assert.ok(calls.includes("POST /api/v1/accounts/accept-terms"));
 assert.equal(document.querySelector("[data-terms-dialog]"), null, "closed after accepting");
 
 // ---------------------------------------------------------------- confirm-your-email banner
@@ -91,7 +91,7 @@ assert.ok(card, "the Connected PCs card");
 assert.ok(text(card).includes("SIM-RIG") && text(card).includes("Laptop"));
 card.querySelector('[data-device="12"]').click();
 await sleep(60);
-assert.ok(calls.includes("DELETE /accounts/devices/12"));
+assert.ok(calls.includes("DELETE /api/v1/accounts/devices/12"));
 assert.ok(!text(document.getElementById("devicesCard")).includes("Laptop"), "the list reloads without the disconnected PC");
 // an error answer {code, message} is shown as its message, not "[object Object]"
 document.getElementById("devicesCard").querySelector('[data-device="11"]').click();
@@ -103,7 +103,7 @@ assert.ok(!cardText.includes("[object"), cardText);
 // ---------------------------------------------------------------- titles of other pages
 window.location.hash = "#/leaderboard";
 await sleep(120);
-assert.equal(document.title, "Leaderboard · Garage16");
+assert.equal(document.title, "Leaderboard – Garage16");
 window.location.hash = "#/";
 await sleep(120);
 assert.equal(document.title, "Garage16 — Le Mans Ultimate telemetry & leaderboards");

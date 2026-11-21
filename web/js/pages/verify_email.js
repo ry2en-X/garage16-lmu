@@ -1,11 +1,11 @@
 // pages/verify_email.js — the landing page for the link in a
 // verification email (#/verify-email?token=...). See
-// server/routers/accounts.py's confirm_email_verification (V0.8-NAS §2).
+// server/api/v1/accounts.py's confirm_email_verification.
 
-import { api, ApiError } from "../api.js";
-import { el } from "../format.js";
+import { api, ApiError } from "../core/api.js";
+import { el } from "../core/format.js";
 
-import { t } from "../i18n.js";
+import { t } from "../core/i18n.js";
 export async function renderVerifyEmail(container, token) {
   container.appendChild(el("h1", {}, t("Verify your email")));
 
@@ -21,7 +21,7 @@ export async function renderVerifyEmail(container, token) {
     await api.confirmEmailVerification(token);
     card.appendChild(el("div", { class: "notice notice--success" }, t("Email verified. Thanks!")));
     card.appendChild(
-      el("a", { href: "#/account", class: "btn", style: "margin-top:12px;display:inline-block;" }, t("Go to Account"))
+      el("a", { href: "/account", class: "btn", style: "margin-top:12px;display:inline-block;" }, t("Go to Account"))
     );
   } catch (err) {
     card.appendChild(

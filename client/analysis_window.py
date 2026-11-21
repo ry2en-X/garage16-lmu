@@ -1,4 +1,4 @@
-"""client/analysis_window.py — the analysis in its own window (V0.9.2, "Client + analysis app").
+"""client/analysis_window.py — the analysis in its own window.
 
 What it is: the web analysis of the driver's own Garage16 server, shown in a desktop
 window (pywebview on Microsoft Edge WebView2) instead of a browser tab. It is the SAME
@@ -71,10 +71,14 @@ class AppBridge:
         if not self._page_is_ours():
             logger.warning("app_session refused: the window is not showing %s", self._config.api_url)
             return {"error": "Refused: this page is not your Garage16 server."}
-        url = f"{self._config.api_url.rstrip('/')}/accounts/app-session"
+        from client.api_paths import fall_back, url_for
+
+        path = "/api/v1/accounts/app-session"
+        auth = {"Authorization": f"Bearer {self._config.auth_token}"}
         try:
-            resp = self._post(url, headers={"Authorization": f"Bearer {self._config.auth_token}"},
-                              timeout=REQUEST_TIMEOUT_SECONDS)
+            resp = self._post(url_for(self._config.api_url, path), headers=auth, timeout=REQUEST_TIMEOUT_SECONDS)
+            if fall_back(self._config.api_url, path, resp):   # A server before 1.0.2
+                resp = self._post(url_for(self._config.api_url, path), headers=auth, timeout=REQUEST_TIMEOUT_SECONDS)
         except requests.RequestException as exc:
             logger.warning("app_session: server not reachable: %s", exc)
             return {"error": "The Garage16 server could not be reached."}
@@ -109,9 +113,9 @@ def storage_dir():
 def run(config: ClientConfig, lap_id: Optional[int] = None, view: str = "laptime") -> int:
     """Shows the window and returns when it is closed. Falls back to the browser when the
     window cannot be shown; returns 0 either way (the driver gets to the analysis).
-    view: "laptime" or "stints" (V0.9.4 — which dashboard the window opens on)."""
+    view: "laptime" or "stints"."""
     url = analysis_url(config.api_url, lap_id, view)
-    # V0.9.4: on Windows the window takes Garage16.exe's icon (the angular "16"); the app id
+    # On Windows the window takes Garage16.exe's icon (the angular "16"); the app id
     # puts it under the same taskbar button as the client
     from client.icon import set_windows_app_id
 

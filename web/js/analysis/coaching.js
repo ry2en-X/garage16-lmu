@@ -1,7 +1,7 @@
-// analysis/coaching.js — "Where to find time" (V0.9.3): plain, checkable driving hints.
+// analysis/coaching.js — "Where to find time": plain, checkable driving hints.
 //
 // Every hint is a direct comparison of numbers the corner analysis already measured on the
-// raw samples (server/telemetry_analysis.py corner_analysis): braking point, minimum speed,
+// raw samples (server/analysis/telemetry_analysis.py corner_analysis): braking point, minimum speed,
 // full-throttle point and exit speed of Lap 1 against Lap 2, plus the lock-ups measured from
 // wheel slip. No model, no guessing, no AI: each sentence names the two values it is built
 // from, so a driver can check it on the charts. Lap 2 is the reference (usually the faster lap).
@@ -10,24 +10,24 @@
 //   braking point 5 m · minimum speed 2 km/h · full throttle 10 m · exit speed 3 km/h ·
 //   a corner must cost at least 0.03 s to be listed.
 //
-// V0.9.4: hints are grouped by the PHASE of the corner they belong to (braking / turn-in / apex /
-// exit / straight — server/telemetry_analysis.py corner_phases, whose time differences add up
+// Hints are grouped by the PHASE of the corner they belong to (braking / turn-in / apex /
+// exit / straight — server/analysis/telemetry_analysis.py corner_phases, whose time differences add up
 // exactly to the corner's delta), each phase with its own measured time difference. "Brake
 // later" is only said when Lap 2 — braking later — is NOT slower at the apex and on the exit:
 // otherwise the later braking point is not what made Lap 2 faster. With the driver's earlier
 // laps loaded (GET /corner-history), a line says how often they did better in this corner.
 
-import { el } from "../format.js";
+import { el } from "../core/format.js";
 import { formatDelta, formatMetres, LAP_COLORS, WHEEL_LABEL } from "./model.js";
 import { historyFor, historySentences, PHASE_LABELS } from "./corner_detail.js";
 
-import { t } from "../i18n.js";
+import { t } from "../core/i18n.js";
 
 export const COACH = { minLoss: 0.03, brakeM: 5, minSpeedKmh: 2, throttleM: 10, exitKmh: 3, maxCorners: 5, maxStrengths: 3 };
 
 const num = (v) => v !== null && v !== undefined && Number.isFinite(v);
 
-// V0.9.7: how precisely a point is placed on each lap (server: the distance between the two
+// How precisely a point is placed on each lap (server: the distance between the two
 // recorded samples around it, `res`). A difference of two points can be off by both — so a
 // difference only becomes a hint when it is larger than the threshold AND than that sum.
 export function pointUncertainty(a, b, key) {
@@ -75,7 +75,7 @@ export const HINT_PHASE = {
   min_speed: "apex", throttle_earlier: "exit", throttle_missing: "exit", exit_speed: "exit",
 };
 
-// Pure (V0.9.4): the corner's phases with their time difference and the hints that belong to
+// Pure: the corner's phases with their time difference and the hints that belong to
 // each — phases in the order driven; a phase without a hint is listed when it costs time.
 export function hintsByPhase(corner, hints) {
   const phases = corner.phases && corner.phases.length ? corner.phases : null;

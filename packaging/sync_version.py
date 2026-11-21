@@ -1,5 +1,5 @@
 """packaging/sync_version.py — single source of truth for the installer's
-version (V0.8.6).
+version.
 
 The desktop client's version lives in exactly one place:
 `CLIENT_VERSION` in client/uploader/uploader.py (it's also what the
@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 UPLOADER = ROOT / "client" / "uploader" / "uploader.py"
 VERSION_ISS = ROOT / "packaging" / "version.iss"
 
-# x.y.z, or x.y.z.w for a correction release (V0.9.3.1)
+# x.y.z, or x.y.z.w for a correction release
 _VERSION_RE = re.compile(r'^CLIENT_VERSION\s*=\s*"(\d+\.\d+\.\d+(?:\.\d+)?)"\s*$', re.MULTILINE)
 
 

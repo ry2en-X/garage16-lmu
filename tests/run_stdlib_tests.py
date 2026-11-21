@@ -2,7 +2,7 @@
 Fallback test runner for environments without pytest installed. Runs every
 test_*() function in the test modules that need only packages already
 confirmed available without the full server venv (stdlib, pandas, numpy,
-requests) — not tests/test_upload_streaming.py or any future test needing
+requests) — not tests/laps/test_upload_streaming.py or any future test needing
 fastapi/sqlalchemy/pydantic, which pytest picks up once those are
 installed but this runner deliberately does not import (it would crash on
 import before running anything else).
@@ -19,13 +19,8 @@ from __future__ import annotations
 import sys
 import traceback
 
-from tests import (
-    test_lmu_structs,
-    test_parser,
-    test_recorder,
-    test_uploader_retry,
-    test_validation,
-)
+from tests.client import test_lmu_structs, test_parser, test_recorder, test_uploader_retry
+from tests.laps import test_validation
 
 _MODULES = (test_lmu_structs, test_parser, test_validation, test_uploader_retry, test_recorder)
 
@@ -48,7 +43,7 @@ def main() -> int:
     print()
     print(f"{total - failed}/{total} passed")
     print(
-        "(tests/test_upload_streaming.py needs fastapi and is not included here — "
+        "(tests/laps/test_upload_streaming.py needs fastapi and is not included here — "
         "run with `pytest` once the server's dependencies are installed)"
     )
     return 1 if failed else 0

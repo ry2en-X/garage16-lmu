@@ -6,9 +6,9 @@ Create Date: 2026-10-20
 
 * laps.telemetry_bytes, laps.upload_request_id, laps.integrity_mac (all nullable): the size of the
   received file, the request id of the upload that stored it, and the server's MAC over the lap's
-  identity and file hash (server/integrity.py). Existing laps keep NULL until
-  `scripts/integrity_check.py --backfill` has verified their file — no file is read here.
-* audit_events: chained integrity / validation / admin events (server/audit.py), plus a trigger
+  identity and file hash (server/laps/integrity.py). Existing laps keep NULL until
+  `scripts/ops/integrity_check.py --backfill` has verified their file — no file is read here.
+* audit_events: chained integrity / validation / admin events (server/ops/audit.py), plus a trigger
   that refuses changes to stored rows (only clearing driver_id, for a deleted driver, is allowed).
 
 Additive. Downgrade drops the table, the trigger and the three columns (their values are lost; the

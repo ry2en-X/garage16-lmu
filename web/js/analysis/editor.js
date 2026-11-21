@@ -1,10 +1,10 @@
 // analysis/editor.js — the bar shown in edit mode ("Ansicht anpassen"): a quick way to add a
 // tile from a list (keyboard-friendly; the picker on the side is the main way), the three main
-// colours, "close gaps", restore the Garage16 standard layout (V0.9.1, grid version V0.9.5).
+// colours, "close gaps", restore the Garage16 standard layout.
 // It only edits the layout object (via onChange) — nothing here touches laps, accounts or
 // telemetry; resetting removes the stored UI preference and nothing else.
 
-import { el } from "../format.js";
+import { el } from "../core/format.js";
 import { addWidget, compactLayout, MAX_WIDGETS, setColors, SINGLE_TYPES } from "./layout.js";
 import { DEFAULT_COLORS } from "./model.js";
 import { moduleForType } from "./modules.js";

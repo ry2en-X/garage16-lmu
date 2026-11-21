@@ -7,7 +7,7 @@ track and car, and a web app shows leaderboards, teams, the **LapTime Analyzer**
 every channel, racing lines on the track) and the **Stint Analyzer** (pace, tyres, fuel, strategy).
 A Discord bot announces records.
 
-**Current version: server 1.0.1 / desktop client 1.0.1.** What changed: [`CHANGELOG.md`](CHANGELOG.md).
+**Current version: server 1.0.2 / desktop client 1.0.2.** What changed: [`CHANGELOG.md`](CHANGELOG.md).
 
 Deutsch: Anleitungen für Fahrer und Betreiber stehen auf Deutsch in [`docs/`](docs/README.md) —
 [Fahrer-Leitfaden](docs/FRIENDS_GUIDE.md) · [Admin-Leitfaden](docs/ADMIN_GUIDE.md).
@@ -27,28 +27,30 @@ Deutsch: Anleitungen für Fahrer und Betreiber stehen auf Deutsch in [`docs/`](d
 
 | Dir | What it is | Run with |
 |---|---|---|
-| `server/` | FastAPI backend: uploads, checks, records, analysis, accounts | `uvicorn server.main:app --reload` (dev) or `docker compose up` (prod) |
+| `server/` | FastAPI backend in areas (`core/`, `laps/`, `analysis/`, `accounts/`, `catalog/`, `ops/`), the API in `api/v1/` | `uvicorn server.main:app --reload` (dev) or `docker compose up` (prod) |
 | `client/` | Windows recorder/uploader (Tkinter, optional analysis window) | `python -m client.main` |
-| `web/` | Static web app (no build step) | served by Caddy; dev: `python3 -m http.server 5173` in `web/` |
+| `web/` | Static web app (no build step; `js/core/` shared, `js/pages/` pages, `functions/` the Cloudflare Pages function) | Cloudflare Pages or Caddy; dev: `python -m scripts.dev.serve_web` |
 | `discord_bot/` | Record announcements + slash commands | `python -m discord_bot.bot` |
 | `alembic/` | Database migrations (run automatically at container start) | see `alembic/README.md` |
 | `docker/` | Dockerfiles, entrypoints, Caddy configuration | see `docs/DEPLOYMENT.md` |
 | `packaging/` | Windows installer (PyInstaller + Inno Setup) | see `docs/CLIENT_BUILD.md` |
-| `scripts/` | Backup/restore, consistency and integrity checks, LMU diagnostics, release gate | see each script's header |
-| `tests/` | ~1500 tests (pytest + jsdom), run by the release gate | `python -m scripts.release_check` |
+| `scripts/` | `ops/` backup, restore, checks · `dev/` benchmarks, probes · `release/` gate, website build | see each script's header |
+| `tests/` | ~1750 tests by topic (pytest + jsdom), run by the release gate | quick: `python -m pytest -m "not slow"`; all: `python -m scripts.release.release_check` |
 
 ## Develop
 
 ```
-bash scripts/setup_test_env.sh          # .venv with the exact versions of constraints.txt + jsdom
+bash scripts/dev/setup_test_env.sh          # .venv with the exact versions of constraints.txt + jsdom
 . .venv/bin/activate
 uvicorn server.main:app --reload        # creates lmu_garage_server.db on first run (development)
+python -m scripts.dev.serve_web         # the website on http://localhost:5173 (API proxied to :8000)
 python -m client.main                   # connect window: http://localhost:8000, email + password
-python -m scripts.release_check         # the whole suite, strict: a skipped test counts as a failure
+python -m pytest -m "not slow"          # the quick run (about 1.5 minutes)
+python -m scripts.release.release_check         # the whole suite, strict: a skipped test counts as a failure
 ```
 
-In development (`LMU_GARAGE_ENV=development`) emails are only logged; the confirmation link is in
-the server log. Use `LMU_GARAGE_REQUIRE_EMAIL_VERIFICATION=0` to connect the client without it.
+In development (`GARAGE16_ENV=development`) emails are only logged; the confirmation link is in
+the server log. Use `GARAGE16_REQUIRE_EMAIL_VERIFICATION=0` to connect the client without it.
 Details on tests, PostgreSQL runs and the gate: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#running-tests)
 and [`docs/QUALITY.md`](docs/QUALITY.md).
 
@@ -56,16 +58,16 @@ and [`docs/QUALITY.md`](docs/QUALITY.md).
 
 - `docker compose --profile tunnel up -d --build` — start/update (migrations run by themselves).
 - `/health/ready` must say `ready`; `docker compose logs -f server` for everything else.
-- Backups: `scripts/backup.sh` (database + telemetry from one moment, with a manifest);
-  restore: `scripts/restore.sh` (staged, validated, switched — or rolled back). Test a restore,
+- Backups: `scripts/ops/backup.sh` (database + the new telemetry files from one moment, with a manifest);
+  restore: `scripts/ops/restore.sh` (staged, validated, switched — or rolled back). Test a restore,
   not only the backup. Details: [`docs/ROLLBACK.md`](docs/ROLLBACK.md), [`docs/RUNBOOKS.md`](docs/RUNBOOKS.md).
-- Moving the server: the new instance needs the SAME `LMU_GARAGE_SECRET_KEY` (otherwise the
-  stored client secrets cannot be decrypted); clients follow `LMU_GARAGE_MIGRATED_TO` by
+- Moving the server: the new instance needs the SAME `GARAGE16_SECRET_KEY` (otherwise the
+  stored client secrets cannot be decrypted); clients follow `GARAGE16_MIGRATED_TO` by
   themselves ([`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md#moving-the-server-later-nas--vpsdomain)).
 - Orphaned telemetry files (dry run first, the database URL must be passed into the container):
 
   ```
-  docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.telemetry_cleanup'
+  docker compose exec -T server sh -c 'GARAGE16_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.ops.telemetry_cleanup'
   ```
 
 ## Documentation

@@ -10,7 +10,7 @@ globalThis.document = dom.window.document;
 globalThis.localStorage = dom.window.localStorage;
 globalThis.sessionStorage = dom.window.sessionStorage;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
-dom.window.LMU_GARAGE_API_BASE_URL = "";
+dom.window.GARAGE16_API_BASE_URL = "";
 
 const CLASSES = ["Hypercar", "LMP2 WEC", "LMP2 ELMS", "LMP3", "GTE", "GT3"];
 const VENUES = [
@@ -27,16 +27,16 @@ globalThis.fetch = async (url) => {
   calls.push(url);
   const u = new URL(url, "http://x");
   const json = (body, status = 200) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) });
-  if (u.pathname === "/leaderboard/catalog/venues") {
+  if (u.pathname === "/api/v1/public/catalog/venues") {
     const q = (u.searchParams.get("q") || "").toLowerCase();
     return json(VENUES.filter((v) => !q || v.venue.toLowerCase().includes(q) || v.layouts.some((l) => l.track_name.toLowerCase().includes(q))));
   }
-  if (u.pathname === "/leaderboard/catalog/class-options") {
+  if (u.pathname === "/api/v1/public/catalog/class-options") {
     const track = u.searchParams.get("track_name");
     return json(CLASSES.map((name) => ({ name, lap_count: track === "Fuji Speedway - Classic" && name === "Hypercar" ? 5 : 0 })));
   }
-  if (u.pathname === "/leaderboard/catalog/cars") return json(track_cars(u.searchParams.get("track_name")));
-  if (u.pathname.startsWith("/leaderboard/class/")) {
+  if (u.pathname === "/api/v1/public/catalog/cars") return json(track_cars(u.searchParams.get("track_name")));
+  if (u.pathname.startsWith("/api/v1/public/leaderboards/class/")) {
     return json([{ driver_id: 1, driver_name: "Jordan Example", lap_time: 90.5, sector_times: [30, 30, 30.5], is_valid: true, uploaded_at: "2026-09-28T10:00:00" }]);
   }
   return json({ detail: "unexpected " + url }, 404);
@@ -57,8 +57,8 @@ assert.ok(labels($("venueSelect")).some((l) => l.startsWith("Circuit de la Sarth
 // V0.9.6: the busiest track and its busiest class are chosen and shown straight away
 assert.equal($("venueSelect").value, "Fuji Speedway", "the track with the most laps is preselected");
 assert.equal($("classSelect").value, "Hypercar");
-assert.ok(calls.some((c) => c.startsWith("/leaderboard/class/Fuji%20Speedway%20-%20Classic/Hypercar")), "…and its table loaded without a click");
-assert.ok(window.location.hash.includes("track=Fuji+Speedway+-+Classic") && window.location.hash.includes("class=Hypercar"), "the choice is in the address");
+assert.ok(calls.some((c) => c.startsWith("/api/v1/public/leaderboards/class/Fuji%20Speedway%20-%20Classic/Hypercar")), "…and its table loaded without a click");
+assert.equal(window.location.pathname, "/leaderboard/fuji-speedway-classic/hypercar", "the choice is in the address (V1.0.2: a readable path)");
 
 // 2. typing "fuji" narrows to the WHOLE track, selects it, and shows its variants
 $("trackSearch").value = "fuji";
@@ -82,7 +82,7 @@ calls.length = 0;
 $("classSelect").value = "Hypercar";
 $("classSelect").dispatchEvent(new dom.window.Event("change"));   // V0.9.6: no "Search" button — a change reloads
 await settle();
-assert.ok(calls.some((c) => c.startsWith("/leaderboard/class/Fuji%20Speedway%20-%20Classic/Hypercar")), calls.join("\n"));
+assert.ok(calls.some((c) => c.startsWith("/api/v1/public/leaderboards/class/Fuji%20Speedway%20-%20Classic/Hypercar")), calls.join("\n"));
 assert.ok(root.textContent.includes("Jordan Example"));
 
 // 5. a known track with no laps is selectable: friendly hint + every class still listed

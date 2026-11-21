@@ -1,7 +1,7 @@
-// pages/sessions.js — "My sessions" (V0.9.3): stints, consistency and the theoretical best.
+// pages/sessions.js — "My sessions": stints, consistency and the theoretical best.
 //
 // Everything here comes from the database only (per-lap figures stored at upload, see
-// server/lap_insights.py) — no lap file is opened, so the page is fast even with hundreds of
+// server/analysis/lap_insights.py) — no lap file is opened, so the page is fast even with hundreds of
 // laps:
 //   GET /telemetry/analysis/sessions          consecutive laps grouped into sessions
 //   GET /telemetry/analysis/theoretical-best  best time over every 50 m stretch, summed
@@ -12,12 +12,13 @@
 // slower per lap, e.g. tyres or fuel), and the theoretical best is the sum of really driven
 // stretches of your valid laps.
 
-import { api } from "../api.js";
-import { store } from "../state.js";
-import { el, formatDate, formatLapTime } from "../format.js";
+import { api } from "../core/api.js";
+import { store } from "../core/state.js";
+import { el, formatDate, formatLapTime } from "../core/format.js";
 import { renderSignInPrompt } from "./auth.js";
-import { t, tp } from "../i18n.js";
-import { loadTrackNames, trackLabel } from "../tracks.js";
+import { t, tp } from "../core/i18n.js";
+import { loadTrackNames, trackLabel } from "../core/tracks.js";
+import { link } from "../core/link.js";
 
 const fmtSigned = (v, digits = 3) => (v === null || v === undefined ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : "±"}${Math.abs(v).toFixed(digits)}`);
 const dateOf = (unix) => (unix ? formatDate(new Date(unix * 1000).toISOString()) : "—");
@@ -49,7 +50,7 @@ function lapChart(session) {
     if (b.best) classes.push("sess__bar--best");
     if (b.outlier) classes.push("sess__bar--outlier");
     return el("a", {
-      class: classes.join(" "), role: "listitem", href: `#/analysis?a=${b.id}`,
+      class: classes.join(" "), role: "listitem", href: link.analysis({ a: b.id }),
       title: `${t("Lap {0}", [b.lap_number])}: ${formatLapTime(b.lap_time)}${b.is_valid ? "" : ` (${t("invalid")})`}`,
       style: `height:${Math.round(8 + 72 * b.height)}px;`,
     });
@@ -60,7 +61,7 @@ const CONDITION_TEXT = () => ({
   dry: t("dry"), mixed: t("partly wet"), wet: t("wet"), unknown: t("conditions unknown"), all: t("all conditions mixed"),
 });
 
-// V0.9.3.1: which laps the figure is made of — never mixes track conditions silently
+// Which laps the figure is made of — never mixes track conditions silently
 export function conditionsNote(c) {
   if (!c) return null;
   const names = CONDITION_TEXT();
@@ -82,7 +83,7 @@ export function conditionsNote(c) {
 function idealBlock(trackName, carModel) {
   const slot = el("div", { class: "sess__ideal" });
   if (!carModel) {
-    // V0.9.3.1: the theoretical best needs ONE car model — these laps have none
+    // The theoretical best needs ONE car model — these laps have none
     return el("div", { class: "subtitle" }, t("No theoretical best: these laps have no car model (recorded by a very old client)."));
   }
   const button = el("button", { type: "button", class: "btn btn--ghost sess__ideal-btn" }, t("Theoretical best (calculated)"));
@@ -115,7 +116,7 @@ function idealBlock(trackName, carModel) {
             el("strong", {}, t("Best stretches come from: ")),
             ...contributors.flatMap(([lapId, count], i) => [
               i ? " · " : "",
-              el("a", { href: `#/analysis?a=${r.reference_lap_id}&b=${lapId}` }, t("lap #{0}", [lapId])),
+              el("a", { href: link.analysis({ a: r.reference_lap_id, b: lapId }) }, t("lap #{0}", [lapId])),
               ` (${tp("{0} stretch", "{0} stretches", count)})`,
             ]),
           ]));
@@ -166,7 +167,7 @@ export function sessionCard(session) {
 }
 
 export async function renderSessions(container) {
-  loadTrackNames(); // V1.0.1: readable track names (tracks.js) — not awaited, never blocks the page
+  loadTrackNames(); // Readable track names (tracks.js) — not awaited, never blocks the page
   container.appendChild(el("h1", {}, t("My sessions")));
   container.appendChild(el("p", { class: "subtitle" }, t("Your stints with consistency, lap-time trend, fuel and tyre use — and your theoretical best lap.")));
   if (!store.isSignedIn()) {

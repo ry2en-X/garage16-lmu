@@ -1,16 +1,17 @@
-// pages/admin.js — Admin UI (V0.7.2 §15). Separate credential domain
+// pages/admin.js — Admin UI. Separate credential domain
 // from driver auth: gated by the shared operator admin token (see
-// admin_store.js and server/routers/admin.py), never a driver session.
+// admin_store.js and server/api/v1/admin.py), never a driver session.
 // Deliberately small — "kein riesiges CMS": three tabs (Reports, Drivers,
 // System), each a thin view over existing/newly-added admin endpoints.
 
-import { api, ApiError } from "../api.js";
-import { adminStore } from "../admin_store.js";
-import { el, formatLapTime, formatDate } from "../format.js";
+import { api, ApiError } from "../core/api.js";
+import { adminStore } from "../core/admin_store.js";
+import { el, formatLapTime, formatDate } from "../core/format.js";
 
-import { t, tp } from "../i18n.js";
-import { allFindings, findingText, ruleTitle, tierText } from "../findings.js";
+import { t, tp } from "../core/i18n.js";
+import { allFindings, findingText, ruleTitle, tierText } from "../core/findings.js";
 import { renderRulesTab } from "./admin_rules.js";
+import { link } from "../core/link.js";
 export async function renderAdmin(container) {
   let token = adminStore.getToken();
 
@@ -40,16 +41,16 @@ export async function renderAdmin(container) {
   const signOutBtn = el("button", { class: "btn btn--ghost", style: "float:right;" }, t("Forget admin token"));
   signOutBtn.addEventListener("click", () => {
     adminStore.clear();
-    window.location.hash = "#/admin";
+    navigate("/admin");
     window.location.reload();
   });
   container.appendChild(signOutBtn);
 
-  // V0.9.3: "Review" (laps the track-limits check left to a human) and "Cars" (what the
+  // "Review" (laps the track-limits check left to a human) and "Cars" (what the
   // server learned about car models)
-  // V0.9.4: "Race rules" — rule sets for the Stint Analyzer's strategy calculator
-  // V0.9.7: "Operations" — upload outcomes, failures with their request id, consistency
-  // V0.9.9: "Integrity" — quarantined laps, the audit log
+  // "Race rules" — rule sets for the Stint Analyzer's strategy calculator
+  // "Operations" — upload outcomes, failures with their request id, consistency
+  // "Integrity" — quarantined laps, the audit log
   const tabs = ["Reports", "Review", "Integrity", "Drivers", "Cars", "Rules", "Operations", "System"];
   const tabLabels = { Reports: t("Reports"), Review: t("Track-limits review"), Integrity: t("Integrity"), Drivers: t("Drivers"), Cars: t("Car models"), Rules: t("Race rules"), Operations: t("Operations"), System: t("System") };
   let active = "Reports";
@@ -80,7 +81,7 @@ function renderTokenGate(container) {
   const card = el("div", { class: "card" });
   card.appendChild(el("h2", {}, t("Enter admin token")));
   card.appendChild(
-    el("p", { class: "subtitle" }, t("The shared operator token (LMU_GARAGE_ADMIN_TOKEN) — kept only for this browser tab, not saved permanently."))
+    el("p", { class: "subtitle" }, t("The shared operator token (GARAGE16_ADMIN_TOKEN) — kept only for this browser tab, not saved permanently."))
   );
   const field = el("div", { class: "field" }, [
     el("label", { for: "adminToken" }, t("Admin token")),
@@ -92,7 +93,7 @@ function renderTokenGate(container) {
     const value = field.querySelector("input").value.trim();
     if (!value) return;
     adminStore.setToken(value);
-    window.location.hash = "#/admin";
+    navigate("/admin");
     window.location.reload();
   });
   card.appendChild(field);
@@ -222,7 +223,7 @@ async function renderDriversTab(token) {
       card.appendChild(
         el("div", { class: "card-row" }, [
           el("div", {}, [
-            el("a", { href: `#/driver/${d.driver_id}` }, [el("strong", {}, d.display_name)]),
+            el("a", { href: link.driver(d.driver_id, d.display_name) }, [el("strong", {}, d.display_name)]),
             el("div", { class: "subtitle", style: "margin:2px 0 0;" }, `${tp("{0} lap", "{0} laps", d.total_laps)}${d.email ? ` — ${d.email}` : ""}${d.locked_reason ? ` — ${t("locked: {0}", [d.locked_reason])}` : ""}`),
           ]),
           el("span", { class: `tag ${d.is_locked ? "tag--invalid" : "tag--valid"}` }, d.is_locked ? t("locked") : t("active")),
@@ -294,7 +295,7 @@ async function renderOperationsTab(token) {
     el("label", {}, [ridInput, " ", ridButton]),
   ]), found, uploads, consistencyCard);
 
-  // V0.9.8: drill-down — everything recorded for one request id
+  // Drill-down — everything recorded for one request id
   async function findRequest() {
     const rid = ridInput.value.trim();
     found.innerHTML = "";
@@ -308,7 +309,7 @@ async function renderOperationsTab(token) {
           el("thead", {}, el("tr", {}, [t("When"), t("Outcome"), t("Status"), t("Reason"), t("Lap"), t("Driver"), t("Client"), t("Duration")].map((h) => el("th", {}, h)))),
           el("tbody", {}, rows.map((r) => el("tr", {}, [
             el("td", {}, r.at ? formatDate(r.at) : "—"), el("td", {}, r.outcome), el("td", {}, String(r.status_code)), el("td", {}, r.reason || "—"),
-            el("td", {}, r.lap_id ? el("a", { href: `#/analysis?a=${r.lap_id}` }, String(r.lap_id)) : "—"), el("td", {}, String(r.driver_id ?? "—")),
+            el("td", {}, r.lap_id ? el("a", { href: link.analysis({ a: r.lap_id }) }, String(r.lap_id)) : "—"), el("td", {}, String(r.driver_id ?? "—")),
             el("td", {}, r.client_version || "—"), el("td", {}, r.duration_ms != null ? `${Math.round(r.duration_ms)} ms` : "—"),
           ]))),
         ]) : el("div", { class: "notice" }, t("No upload with this request id in the last 30 days.")),
@@ -340,7 +341,7 @@ async function renderOperationsTab(token) {
         row(t("Duration (median / 95 % / max)"), u.duration_ms.p50 === null ? "—" : `${Math.round(u.duration_ms.p50)} / ${Math.round(u.duration_ms.p95)} / ${Math.round(u.duration_ms.max)} ms`),
         row(t("Server / analysis / figures version"), `${data.server_version} / ${data.analysis_cache_version} / ${data.insights_version}`),
       );
-      // V0.9.8: uploads per hour (red = failed), the shape of a problem at a glance
+      // Uploads per hour (red = failed), the shape of a problem at a glance
       if (u.timeline && u.timeline.length > 1) {
         const peak = Math.max(...u.timeline.map((x) => x.uploads), 1);
         uploads.appendChild(el("h3", {}, t("Per hour")));
@@ -392,7 +393,7 @@ async function renderOperationsTab(token) {
       }
       const deepBtn = el("button", { class: "btn btn--ghost btn--sm" }, t("Read every file (slower)"));
       deepBtn.addEventListener("click", () => loadConsistency(true));
-      consistencyCard.append(deepBtn, el("div", { class: "subtitle" }, t("Read-only. Repairs (removing unreferenced files, recomputing old figures) run with scripts/consistency_check.py — see the admin guide.")));
+      consistencyCard.append(deepBtn, el("div", { class: "subtitle" }, t("Read-only. Repairs (removing unreferenced files, recomputing old figures) run with scripts/ops/consistency_check.py — see the admin guide.")));
     } catch (err) {
       consistencyCard.lastChild.remove();
       consistencyCard.appendChild(el("div", { class: "notice notice--error" }, err.message));
@@ -414,7 +415,7 @@ function findingLine(f) {
   return `${findingText(f)}${where} — ${tier ? `${tier}, ` : ""}${f.source}`;
 }
 
-// V0.9.3.1: which rule may invalidate, which only asks for a review (loaded on opening)
+// Which rule may invalidate, which only asks for a review (loaded on opening)
 function rulesBlock(token) {
   const body = el("div", {}, el("div", { class: "notice" }, t("Loading …")));
   const details = el("details", { class: "card", "data-rules": "" }, [el("summary", {}, t("Track-limits rules on this server")), body]);
@@ -435,7 +436,7 @@ function rulesBlock(token) {
       ]));
       body.appendChild(el("div", { class: "subtitle" }, data.invalidating_heuristics.length
         ? t("Measurements allowed to invalidate on this server: {0}", [data.invalidating_heuristics.join(", ")])
-        : t("No measurement invalidates on its own (LMU_GARAGE_TRACK_LIMITS_INVALIDATING is empty).")));
+        : t("No measurement invalidates on its own (GARAGE16_TRACK_LIMITS_INVALIDATING is empty).")));
     } catch (err) {
       body.innerHTML = "";
       body.appendChild(el("div", { class: "notice notice--error" }, err.message));
@@ -487,12 +488,12 @@ async function renderReviewTab(token) {
           el("span", { class: "tag" }, formatDate(lap.uploaded_at)),
         ]),
         el("ul", { class: "review__findings" }, findings.map((f) => el("li", { "data-code": f.code }, findingLine(f)))),
-        // V1.0.1: held because a new driver beat the Garage16 Best of others (server/fair_play.py)
+        // Held because a new driver beat the Garage16 Best of others (server/laps/fair_play.py)
         lap.validation && lap.validation.fair_play ? el("div", { class: "notice", "data-fair-play": "1" },
           t("New driver ({0} official laps before): this lap beats the Garage16 Best of {1}. Check it in the analysis before it counts.",
             [lap.validation.fair_play.official_laps_before, formatLapTime(lap.validation.fair_play.garage16_best_before)])) : null,
         el("div", { class: "inline-form", style: "margin-top:8px;" }, [
-          el("a", { class: "btn btn--ghost", href: `#/analysis?a=${lap.id}` }, t("Analyse")),
+          el("a", { class: "btn btn--ghost", href: link.analysis({ a: lap.id }) }, t("Analyse")),
           el("button", { class: "btn", onclick: () => decide("invalidate") }, t("Invalidate lap")),
           el("button", { class: "btn btn--ghost", onclick: () => decide("clear") }, t("Lap counts")),
         ]),
@@ -519,7 +520,7 @@ const INTEGRITY_REASON = () => ({
 
 export async function renderIntegrityTab(token) {
   const wrap = el("div");
-  wrap.appendChild(el("p", { class: "subtitle", style: "margin-top:16px;" }, t("Laps whose stored file no longer matches what was uploaded are set aside: they leave leaderboards and records. Restore the file (backup), check it again, then release the lap. A full check of every file: scripts/integrity_check.py.")));
+  wrap.appendChild(el("p", { class: "subtitle", style: "margin-top:16px;" }, t("Laps whose stored file no longer matches what was uploaded are set aside: they leave leaderboards and records. Restore the file (backup), check it again, then release the lap. A full check of every file: scripts/ops/integrity_check.py.")));
   const quarantine = el("div", { class: "card" });
   const auditCard = el("div", { class: "card" });
   wrap.append(quarantine, auditCard);
@@ -534,7 +535,7 @@ export async function renderIntegrityTab(token) {
       return;
     }
     quarantine.appendChild(el("h2", {}, t("Set aside ({0})", [data.quarantined.length])));
-    quarantine.appendChild(el("p", { class: "subtitle" }, t("{0} laps stored, {1} of them not signed yet (stored before V0.9.9 — run scripts/integrity_check.py --apply --backfill once).", [data.laps, data.unsigned])));
+    quarantine.appendChild(el("p", { class: "subtitle" }, t("{0} laps stored, {1} of them not signed yet (stored before V0.9.9 — run scripts/ops/integrity_check.py --apply --backfill once).", [data.laps, data.unsigned])));
     if (!data.quarantined.length) quarantine.appendChild(el("div", { class: "empty-state" }, t("Nothing set aside.")));
     data.quarantined.forEach((q) => {
       const out = el("div");
@@ -610,7 +611,7 @@ async function renderCarsTab(token) {
   wrap.appendChild(el("div", { class: "card" }, Object.entries(data.laps_by_source || {}).map(([source, count]) => el("div", { class: "card-row" }, [
     el("span", {}, sourceText[source] || source), el("span", {}, tp("{0} lap", "{0} laps", count)),
   ]))));
-  // V0.9.3.1: identities real data must decide on — nothing is changed automatically
+  // Identities real data must decide on — nothing is changed automatically
   const suspectText = {
     cut_name: t("LMU cut the model name (30-byte limit); the full name is not known yet"),
     several_models: t("laps from LMU files of different models — two variants with the same name?"),
@@ -623,7 +624,7 @@ async function renderCarsTab(token) {
         el("strong", {}, item.identity), ` — ${item.reasons.map((r) => suspectText[r] || r).join("; ")} `,
         el("span", { class: "subtitle" }, `(${tp("{0} lap", "{0} laps", item.laps)}; ${item.veh_models.join(", ") || "—"}; ${item.classes.join(", ") || "—"})`),
       ]))),
-      el("div", { class: "subtitle" }, t("Check with the car list of a full grid (py -m scripts.car_identity_probe on the PC) before relying on these groups.")),
+      el("div", { class: "subtitle" }, t("Check with the car list of a full grid (py -m scripts.dev.car_identity_probe on the PC) before relying on these groups.")),
     ]));
   }
   if (!data.aliases.length) {

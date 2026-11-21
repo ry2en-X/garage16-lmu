@@ -1,4 +1,4 @@
-// analysis/linemap.js — the racing-line comparison (V0.9.4, "Linienvergleich"): the driven lines
+// analysis/linemap.js — the racing-line comparison: the driven lines
 // of Lap 1 and Lap 2 (and Lap 3 / 4) drawn equally on a track map that can be zoomed down to
 // a single corner, with what each lap did there.
 //
@@ -15,19 +15,19 @@
 //     (GET /telemetry/analysis/line, 0.5 m) — mirror decision and corner directions still come
 //     from the whole laps, so the detail lies exactly on the overview
 //   * at the cursor: "Lap 2 1.4 m further inside" — Lap 2's lateral distance from Lap 1's line,
-//     inside = towards the inside of the nearest corner (server/telemetry_analysis.py)
+//     inside = towards the inside of the nearest corner (server/analysis/telemetry_analysis.py)
 //
 // The lines' positions come from LMU's world coordinates (accurate to centimetres in the game).
-// V0.9.5: behind them the TRACK — asphalt between both edges, the kerbs red/white — rebuilt on
+// Behind them the TRACK — asphalt between both edges, the kerbs red/white — rebuilt on
 // the server from LMU's path_lateral / track_edge / surface type of several laps
-// (server/track_surface.py; approximate, an edge no lap ever drove along is dashed = estimated),
+// (server/laps/track_surface.py; approximate, an edge no lap ever drove along is dashed = estimated),
 // and a faint band of the car's width around EVERY lap.
 
-import { el } from "../format.js";
+import { el } from "../core/format.js";
 import { cssVar, onResize } from "./charts.js";
 import { clamp, distanceAt, formatMetres, indexForDistance, lapColor, lapName, LAP_DASH } from "./model.js";
 
-import { t } from "../i18n.js";
+import { t } from "../core/i18n.js";
 
 export const CAR_WIDTH_M = 2.0;
 export const DETAIL_SPAN_M = 600;
@@ -41,7 +41,7 @@ const SIDES = ["a", "b", "c", "d"];
 
 const v = (a, i) => (a && a[i] !== null && a[i] !== undefined ? a[i] : null);
 
-// V0.9.9.3: why the server sent no surface (server/track_surface.py REASON_*)
+// Why the server sent no surface (server/laps/track_surface.py REASON_*)
 function surfaceMissing(reason) {
   if (reason === "no_surface_data") return t("No track surface: these laps were recorded without LMU's track data (client older than 0.9).");
   if (reason === "sign_undecided") return t("No track surface: the laps do not tell reliably which side of the track is which yet — drive a few more laps on different lines.");
@@ -156,7 +156,7 @@ export function cornerStretch(c) {
  *   selection  shared corner selection { get(), set(n), subscribe(fn) }
  */
 export function createLineMap(state, opts = {}) {
-  const boxHeight = Number.isFinite(opts.height) ? opts.height : HEIGHT; // V0.9.5: fills its tile
+  const boxHeight = Number.isFinite(opts.height) ? opts.height : HEIGHT; // Fills its tile
   const data = state.data;
   const map = data.map || {};
   const sides = SIDES.filter((s) => map[`x_${s}`]);
@@ -179,7 +179,7 @@ export function createLineMap(state, opts = {}) {
   const markersBox = el("input", { type: "checkbox", checked: "checked" });
   const bandBox = el("input", { type: "checkbox", checked: "checked" });
   const trackBox = el("input", { type: "checkbox", checked: "checked" });
-  let surface = null;   // V0.9.5: surfaceGeometry() of the server's track surface, once loaded
+  let surface = null;   // SurfaceGeometry() of the server's track surface, once loaded
   const trackLabel = el("label", { class: "linemap__opt", title: t("Asphalt, edges and kerbs, rebuilt from LMU's track data of several laps (approximate)") }, [trackBox, ` ${t("Track")}`]);
   const btn = (label, title, fn) => {
     const b = el("button", { type: "button", class: "btn btn--ghost linemap__btn", title }, label);
@@ -455,7 +455,7 @@ export function createLineMap(state, opts = {}) {
     const d = detail && detail.response;
     const lineFor = (s) => (d && d[`x_${s}`] ? [d[`x_${s}`], d[`y_${s}`]] : null);
 
-    // V0.9.5: the track from above — grass, asphalt, edges, kerbs
+    // The track from above — grass, asphalt, edges, kerbs
     if (surface && trackBox.checked) drawSurface(ctx);
     // a faint band of the car's width around EVERY lap (only where it is wider than ~3 px)
     if (bandBox.checked && cam.scale * CAR_WIDTH_M >= 3) {
@@ -720,7 +720,7 @@ export function createLineMap(state, opts = {}) {
     opts.trackSurface.get().then((res) => {
       if (!alive || !res) return;
       if (!res.surface) {
-        // V0.9.9.3: say why instead of a checkbox that silently does nothing
+        // Say why instead of a checkbox that silently does nothing
         trackLabel.title = surfaceMissing(res.reason);
         trackLabel.classList.add("linemap__opt--off");
         return;

@@ -8,7 +8,7 @@ Befehle, die im Server-Container mit der echten Datenbank laufen müssen, brauch
 (`docker compose exec` erbt sie nicht). Im Folgenden steht dafür `RUN_IN_SERVER`:
 
 ```
-RUN_IN_SERVER() { sudo docker compose exec -T server sh -c "LMU_GARAGE_DB_URL=\"postgresql+psycopg://\${POSTGRES_USER}:\${POSTGRES_PASSWORD}@\${POSTGRES_HOST}:\${POSTGRES_PORT}/\${POSTGRES_DB}\" $*"; }
+RUN_IN_SERVER() { sudo docker compose exec -T server sh -c "GARAGE16_DB_URL=\"postgresql+psycopg://\${POSTGRES_USER}:\${POSTGRES_PASSWORD}@\${POSTGRES_HOST}:\${POSTGRES_PORT}/\${POSTGRES_DB}\" $*"; }
 ```
 
 ## Erst prüfen: läuft alles?
@@ -31,21 +31,21 @@ nutzbar (503 sonst) · `warnings` darin: `MAINTENANCE` (Backup läuft), `DISK_LO
 2. Steht eine Request-ID im Client-Log des Fahrers oder in der Liste: oben ins Suchfeld → alle
    Versuche dieser Anfrage. Im Server-Log: `sudo docker compose logs server | grep <request-id>`.
 3. Typische Gründe:
-   * `426 UPDATE_REQUIRED` — Client zu alt (`LMU_GARAGE_MIN_CLIENT_VERSION`). Fahrer aktualisiert; die
+   * `426 UPDATE_REQUIRED` — Client zu alt (`GARAGE16_MIN_CLIENT_VERSION`). Fahrer aktualisiert; die
      Runden bleiben im Client und gehen danach hoch.
    * `503 MAINTENANCE` — ein Backup läuft; der Client wiederholt von selbst. Dauerhaft? → Punkt 7.
    * `401 Signature verification failed` — Client-Geheimnis passt nicht (nach Schlüsselwechsel ohne
      Punkt 8, oder Konto zurückgesetzt) → Fahrer: Client einmal mit `--reconfigure` starten und neu anmelden (holt ein neues Geheimnis).
-   * `413` — Datei zu groß (`LMU_GARAGE_MAX_UPLOAD_BYTES`).
+   * `413` — Datei zu groß (`GARAGE16_MAX_UPLOAD_BYTES`).
    * `500` — Serverfehler: die Request-ID im Log zeigt den Stacktrace.
 
 **Sicher:** nichts löschen; der Client hält jede nicht angenommene Runde.
 
 ## 2. Eine Runde lässt sich nicht analysieren / zeigt Unsinn
 
-1. LapTime Analyzer → Kachel „Datenqualität“ (oder `GET /telemetry/analysis/laps/<id>/health`):
+1. Rundenanalyse → Kachel „Datenqualität“ (oder `GET /api/v1/laps/<id>/health`):
    Lücken, Frames pro Sekunde, Zeit springt zurück (Neustart in der Datei), Tempo vs. Distanz.
-2. Datei selbst prüfen: `RUN_IN_SERVER python -m scripts.consistency_check --deep` (unlesbar,
+2. Datei selbst prüfen: `RUN_IN_SERVER python -m scripts.ops.consistency_check --deep` (unlesbar,
    Prüfsumme verändert).
 3. Ist die Aufzeichnung schuld („unzuverlässig“), liegt es nicht an der Analyse — die Runde neu
    fahren. Sonst: Request-ID / Lap-ID und Screenshot an den Entwickler.
@@ -64,7 +64,7 @@ Volumes). Startet die Datenbank nicht mehr: letztes Backup → `docs/ROLLBACK.md
 
 ## 4. Festplatte voll / fast voll
 
-**Erkennen:** `/health/ready` → Warnung `DISK_LOW` (unter `LMU_GARAGE_DISK_WARN_FREE_MB`, Standard
+**Erkennen:** `/health/ready` → Warnung `DISK_LOW` (unter `GARAGE16_DISK_WARN_FREE_MB`, Standard
 2048 MB); Uploads scheitern mit 500.
 
 ```
@@ -73,8 +73,8 @@ sudo docker system df
 sudo docker compose exec server du -sh /data/telemetry
 ```
 **Sicher, in dieser Reihenfolge:** alte Backups auf eine andere Platte verschieben (Aufbewahrung:
-`BACKUP_RETENTION_DAYS`) · Rückfallpunkte alter Restores freigeben (`./scripts/restore.sh --cleanup <stamp>`)
-· verwaiste Telemetrie: `RUN_IN_SERVER python -m scripts.consistency_check --delete-orphans` (zeigt
+`BACKUP_RETENTION_DAYS`) · Rückfallpunkte alter Restores freigeben (`./scripts/ops/restore.sh --cleanup <stamp>`)
+· verwaiste Telemetrie: `RUN_IN_SERVER python -m scripts.ops.consistency_check --delete-orphans` (zeigt
 zuerst die Liste, fragt dann; nur Dateien älter als 1 h ohne Runde) · `sudo docker image prune`.
 
 ## 5. Migration beim Update schlägt fehl
@@ -91,8 +91,8 @@ VORHER laufen muss). War die Migration halb durch: Backup von vor dem Update →
 
 ## 6. Wiederherstellen aus einem Backup
 
-`docs/ROLLBACK.md`, Abschnitt 3 — `./scripts/restore.sh <backup-ordner>`; danach
-`./scripts/restore.sh --cleanup <stamp>`, wenn alles passt. Bei Exit-Code 3: „Restore manuell
+`docs/ROLLBACK.md`, Abschnitt 3 — `./scripts/ops/restore.sh <backup-ordner>`; danach
+`./scripts/ops/restore.sh --cleanup <stamp>`, wenn alles passt. Bei Exit-Code 3: „Restore manuell
 zurückdrehen“ dort.
 
 **Audit-Anker (V0.9.9.1).** Schritt 4 vergleicht die neueste Audit-Zeile der fertig migrierten und
@@ -123,21 +123,21 @@ sudo docker ps -a | grep garage16_backup_lock      # ein übrig gebliebener Lock
 Von selbst: der Helfer gibt die Sperre nach `GARAGE16_BACKUP_LOCK_MAX_S` (Standard 1800 s) auf, der
 Server ignoriert eine Markierung, die älter als 2 Stunden ist.
 
-## 8. Verschlüsselungsschlüssel wechseln (`LMU_GARAGE_SECRET_KEY`)
+## 8. Verschlüsselungsschlüssel wechseln (`GARAGE16_SECRET_KEY`)
 
 Ohne dass sich jemand neu anmelden muss:
 1. Neuen Schlüssel erzeugen: `python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
-2. In `.env`: `LMU_GARAGE_SECRET_KEY=<neu>,<alt>` (neu zuerst) → `sudo docker compose up -d server`
-3. `RUN_IN_SERVER python -m scripts.rotate_secret_key` (Vorschau), dann `... --apply`
-4. In `.env`: `LMU_GARAGE_SECRET_KEY=<neu>` → `sudo docker compose up -d server`
+2. In `.env`: `GARAGE16_SECRET_KEY=<neu>,<alt>` (neu zuerst) → `sudo docker compose up -d server`
+3. `RUN_IN_SERVER python -m scripts.ops.rotate_secret_key` (Vorschau), dann `... --apply`
+4. In `.env`: `GARAGE16_SECRET_KEY=<neu>` → `sudo docker compose up -d server`
 
 Meldet Schritt 3 „unreadable“: dieser Fahrer startet seinen Client einmal mit `--reconfigure` und meldet sich neu an.
 
 ## 9. Ein Fahrer beschwert sich über „Rate limit exceeded“
 
-Die Grenzen zählen pro echter Client-Adresse (`LMU_GARAGE_TRUSTED_PROXIES`, `server/client_ip.py`)
+Die Grenzen zählen pro echter Client-Adresse (`GARAGE16_TRUSTED_PROXIES`, `server/core/client_ip.py`)
 und pro Fahrer. Teilen sich viele Fahrer eine Adresse (LAN-Party), die passende Grenze in `.env`
-anheben (`LMU_GARAGE_RATELIMIT_<BUCKET>_MAX`, Liste in `docs/DEPLOYMENT.md`) und `up -d server`. Hinter dem Tunnel
+anheben (`GARAGE16_RATELIMIT_<BUCKET>_MAX`, Liste in `docs/DEPLOYMENT.md`) und `up -d server`. Hinter dem Tunnel
 zählt die Adresse, die Cloudflare gesehen hat — nicht die des Tunnels.
 
 ## 10. Daten eines Fahrers löschen (DSGVO)
@@ -153,7 +153,7 @@ verändert / Signatur passt nicht) und der Request-ID der Anfrage, die es bemerk
 sieht „zurückgestellt“ in seiner Rundenliste. Die Runde ist aus Bestenlisten und Rekorden heraus.
 
 **Ursache finden:**
-1. `RUN_IN_SERVER python -m scripts.integrity_check --lap <id>` — prüft genau diese Runde.
+1. `RUN_IN_SERVER python -m scripts.ops.integrity_check --lap <id>` — prüft genau diese Runde.
 2. Audit: Admin → Integrität → Audit-Protokoll (oder `GET /admin/audit?lap_id=<id>`): wann
    angenommen (sha256, Größe), wann zurückgestellt, von welcher Anfrage.
 3. Server-Log zur Request-ID: `sudo docker compose logs server | grep <request-id>`.
@@ -172,14 +172,19 @@ sieht „zurückgestellt“ in seiner Rundenliste. Die Runde ist aus Bestenliste
 
 ```
 B=/volumeUSB2/usbshare/garage16-backups/garage16_<zeitstempel>      # das letzte Backup VOR dem Schaden
-RUN_IN_SERVER python -c "from server.database import SessionLocal; from server.models import Lap; print(SessionLocal().get(Lap, <id>).telemetry_path)"
+RUN_IN_SERVER python -c "from server.core.database import SessionLocal; from server.core.models import Lap; print(SessionLocal().get(Lap, <id>).telemetry_path)"
 #   -> /data/telemetry/driver_5/spa/porsche_963/<sha256>.parquet   (der Teil nach /data/telemetry/ ist REL)
 REL="driver_5/spa/porsche_963/<sha256>.parquet"
+# Backups seit V1.0.2 (Ordner enthält telemetry-files.txt): die Datei liegt im gemeinsamen telemetry-store/
+grep -q " $REL\$" "$B/telemetry-files.txt" && echo "im Backup"
+sudo docker run --rm -v garage16_telemetry_data:/data -v "$B/../telemetry-store":/store:ro alpine \
+    sh -c "mkdir -p /data/$(dirname $REL) && cp /store/$REL /data/$REL && chmod 440 /data/$REL && sha256sum /data/$REL"
+# ältere Backups (Ordner enthält telemetry.tar.gz):
 sudo docker run --rm -v garage16_telemetry_data:/data -v "$B":/backup:ro alpine \
     sh -c "tar xzf /backup/telemetry.tar.gz -C /data ./$REL && chmod 440 /data/$REL && sha256sum /data/$REL"
 ```
 Die ausgegebene Prüfsumme muss dem Dateinamen entsprechen. Dann Admin → Integrität → „Freigeben,
-wenn intakt“ (oder `RUN_IN_SERVER python -m scripts.integrity_check --apply --release-verified`).
+wenn intakt“ (oder `RUN_IN_SERVER python -m scripts.ops.integrity_check --apply --release-verified`).
 Ist die Datei in keinem Backup: die Runde bleibt zurückgestellt; der Fahrer kann sie nicht neu
 hochladen (sein Client hat sie nach 14 Tagen gelöscht) — invalidieren oder so lassen.
 
@@ -187,11 +192,11 @@ hochladen (sein Client hat sie nach 14 Tagen gelöscht) — invalidieren oder so
 
 Ein Upload legt die Datei ab und schreibt erst danach in einer Transaktion die Runde; bricht der
 Prozess dazwischen ab, bleibt höchstens eine Datei ohne Runde übrig — nie eine Runde ohne Datei
-(getestet: `tests/test_v099_integrity.py`, Prozess wird mitten im Speichern beendet).
+(getestet: `tests/ops/test_integrity.py`, Prozess wird mitten im Speichern beendet).
 ```
-RUN_IN_SERVER python -m scripts.consistency_check           # "files no lap points at" / "temp files"
-RUN_IN_SERVER python -m scripts.consistency_check --delete-orphans   # nur Dateien älter als 1 h
-RUN_IN_SERVER python -m scripts.integrity_check              # jede Runde gegen ihre Datei
+RUN_IN_SERVER python -m scripts.ops.consistency_check           # "files no lap points at" / "temp files"
+RUN_IN_SERVER python -m scripts.ops.consistency_check --delete-orphans   # nur Dateien älter als 1 h
+RUN_IN_SERVER python -m scripts.ops.integrity_check              # jede Runde gegen ihre Datei
 ```
 Der Client des Fahrers hält die Runde und sendet sie erneut; sie wird dann normal gespeichert.
 Bleiben Uploads auf „Wartung“ hängen: Punkt 7.
@@ -211,7 +216,7 @@ Jede Entscheidung steht im Audit-Protokoll.
 
 ## 15. Sicherer Rückweg nach einem fehlerhaften Update
 
-1. Backup des aktuellen Zustands (`./scripts/backup.sh …`), auch wenn er fehlerhaft ist.
+1. Backup des aktuellen Zustands (`./scripts/ops/backup.sh …`), auch wenn er fehlerhaft ist.
 2. Hat das neue Release eine Migration (V0.9.9: 0017), **zuerst** im NEUEN Ordner
    `RUN_IN_SERVER alembic downgrade <vorige Revision>` (steht in der ADMIN_GUIDE beim Release).
 3. Neuen Stack stoppen (`down`, nie `down -v`), alten Ordner starten, `/health/ready` prüfen.
@@ -223,8 +228,8 @@ Jede Entscheidung steht im Audit-Protokoll.
 
 **Wechseln** (z. B. jährlich, oder wenn er jemandem bekannt wurde):
 1. Neuen erzeugen: `python3 -c "import secrets; print(secrets.token_hex(32))"`
-2. `.env`: `LMU_GARAGE_INTEGRITY_KEY=<neu>,<alt>` → `sudo docker compose up -d server`
-3. `RUN_IN_SERVER python -m scripts.integrity_check --apply --resign` (signiert jede intakte Runde neu)
+2. `.env`: `GARAGE16_INTEGRITY_KEY=<neu>,<alt>` → `sudo docker compose up -d server`
+3. `RUN_IN_SERVER python -m scripts.ops.integrity_check --apply --resign` (signiert jede intakte Runde neu)
 4. Den alten Schlüssel **erst entfernen, wenn das Audit-Protokoll keine damit signierten Zeilen mehr
    hat** (Aufbewahrung 365 Tage) — sonst meldet die Kettenprüfung diese Zeilen als „unbekannter
    Schlüssel“ (nicht von einer Fälschung zu unterscheiden). Den alten Schlüssel offline aufheben.
@@ -232,13 +237,13 @@ Jede Entscheidung steht im Audit-Protokoll.
 **Verloren:** Runden bleiben gespeichert und zählen weiter (ihre Dateien passen ja noch zu ihren
 Prüfsummen), aber die Signaturen können Hash und Rundenzeit nicht mehr bestätigen. Neuen Schlüssel
 setzen, Dateien gegen ein unabhängiges Backup prüfen, dann
-`RUN_IN_SERVER python -m scripts.integrity_check --apply --resign --accept-unknown-key`.
-Wurde `LMU_GARAGE_INTEGRITY_KEY` nie gesetzt, hängt die Signatur an `LMU_GARAGE_SECRET_KEY` —
+`RUN_IN_SERVER python -m scripts.ops.integrity_check --apply --resign --accept-unknown-key`.
+Wurde `GARAGE16_INTEGRITY_KEY` nie gesetzt, hängt die Signatur an `GARAGE16_SECRET_KEY` —
 dessen Wechsel (Punkt 8) erst mit „neu,alt“ machen, sonst gilt dasselbe.
 
 ## 17. Die Audit-Kette ist gebrochen
 
-`RUN_IN_SERVER python -m scripts.integrity_check --audit` nennt die erste Zeile, ab der die Kette
+`RUN_IN_SERVER python -m scripts.ops.integrity_check --audit` nennt die erste Zeile, ab der die Kette
 nicht mehr stimmt („link“: eine Zeile davor wurde gelöscht/eingefügt; „content“: diese Zeile wurde
 verändert; „key“: mit unbekanntem Schlüssel signiert). Den Kettenkopf aus dem Manifest eines älteren
 Backups vergleichen (`audit_head`): stimmt er mit der Zeile gleicher ID heute überein, ist alles bis
@@ -259,13 +264,13 @@ sudo docker logs quicktunnel 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.
 ```
 
 **Was hilft:**
-1. Die neue Adresse in die `.env`: `LMU_GARAGE_FRONTEND_URL` und `LMU_GARAGE_CORS_ORIGINS` (sonst
+1. Die neue Adresse in die `.env`: `GARAGE16_FRONTEND_URL` und `GARAGE16_CORS_ORIGINS` (sonst
    zeigen Bestätigungs- und Reset-Links auf die alte Adresse), dann
    `sudo docker compose --profile tunnel up -d server`.
 2. GitHub → Variables → `GARAGE16_SERVER_URL` auf die neue Adresse und einen neuen Client-Tag
    bauen (`docs/ADMIN_GUIDE.md`, Kapitel 11) — sonst backen neue Installer die alte Adresse ein.
 3. Allen Fahrern die neue Adresse schicken: im Client **Reconnect account…** → neue Adresse,
-   E-Mail, Passwort. (Ein automatischer Umzug über `LMU_GARAGE_MIGRATED_TO` geht hier nicht — die
+   E-Mail, Passwort. (Ein automatischer Umzug über `GARAGE16_MIGRATED_TO` geht hier nicht — die
    alte Adresse antwortet nicht mehr.) Ihre aufgezeichneten Runden bleiben auf dem PC und werden
    danach hochgeladen.
 4. Dauerhaft vermeiden: den Quick-Tunnel-Container nie löschen/neu erstellen; besser auf einen
@@ -289,10 +294,10 @@ sudo docker logs quicktunnel 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.
 **Erkennen:** Admin → Track-Limit-Prüfung zeigt „New driver (… official laps before): this lap beats
 the Garage16 Best of …“; der Fahrer fragt, warum seine Zeit nicht im Leaderboard steht.
 
-**Was hilft:** Runde im LapTime Analyzer gegen das bisherige Garage16 Best vergleichen
+**Was hilft:** Runde in der Rundenanalyse gegen das bisherige Garage16 Best vergleichen
 (Bremspunkte, Linie, Tempo, Datenqualität). Plausibel → **„Runde zählt“** (Bestzeiten und
 Discord-Meldung folgen sofort). Nicht plausibel → **„Runde ungültig machen“** mit Grund; bei
-Verdacht auf Manipulation zusätzlich Runbook 14. Abschalten: `LMU_GARAGE_NEW_DRIVER_REVIEW_LAPS=0`.
+Verdacht auf Manipulation zusätzlich Runbook 14. Abschalten: `GARAGE16_NEW_DRIVER_REVIEW_LAPS=0`.
 
 ## 21. Ein Konto wird gesperrt / ein PC soll getrennt werden
 

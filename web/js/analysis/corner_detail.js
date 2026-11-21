@@ -9,11 +9,11 @@
 // Plus the shared corner selection (which corner the windows show) and the corner-history
 // matching used by the coach.
 
-import { el, formatLapTime } from "../format.js";
-import { createLineMap } from "./linemap.js";
+import { el, formatLapTime } from "../core/format.js";
 import { formatDelta, formatMetres, LAP_COLORS } from "./model.js";
 
-import { t, tp } from "../i18n.js";
+import { t, tp } from "../core/i18n.js";
+import { link } from "../core/link.js";
 
 const noop = () => {};
 const num = (v) => v !== null && v !== undefined && Number.isFinite(v);
@@ -47,7 +47,7 @@ export function createLazy(loader) {
 }
 
 // The same corner on earlier laps: stored per lap as [apex, brake, min, throttle, exit]
-// (server/lap_insights.py). Matched by apex distance. -> [{lap, brake, min, throttle, exit}]
+// (server/analysis/lap_insights.py). Matched by apex distance. -> [{lap, brake, min, throttle, exit}]
 export function historyFor(corner, history) {
   if (!history || !Array.isArray(history.laps)) return [];
   const out = [];
@@ -84,15 +84,38 @@ export function historySentences(corner, rows) {
 
 // ------------------------------------------------------------------ line window
 
+// The line map (the largest analysis module) and its data (lines, track surface) are loaded
+// when the window comes into view — it sits at the bottom of the standard layout, and many visits
+// never scroll there.
 export function renderLine(widget, ctx) {
-  const map = createLineMap(ctx.mapState || ctx.state, {
-    fetchLine: ctx.fetchLine,
-    trackSurface: ctx.trackSurface,
-    selection: ctx.selection,
-    viewState: ctx.state,
-    height: Number.isFinite(widget.boxHeight) ? Math.max(widget.boxHeight - 215, 200) : undefined,
-  });
-  return { element: el("div", { class: "card" }, [el("h2", {}, t("Racing lines")), map.element]), destroy: () => map.destroy() };
+  const body = el("div", { class: "linemap-slot" }, el("div", { class: "notice" }, t("Loading …")));
+  const card = el("div", { class: "card" }, [el("h2", {}, t("Racing lines")), body]);
+  let map = null;
+  let gone = false;
+  let observer = null;
+  const start = () => {
+    if (observer) observer.disconnect();
+    observer = null;
+    import("./linemap.js").then(({ createLineMap }) => {
+      if (gone) return;
+      map = createLineMap(ctx.mapState || ctx.state, {
+        fetchLine: ctx.fetchLine,
+        trackSurface: ctx.trackSurface,
+        selection: ctx.selection,
+        viewState: ctx.state,
+        height: Number.isFinite(widget.boxHeight) ? Math.max(widget.boxHeight - 215, 200) : undefined,
+      });
+      body.innerHTML = "";
+      body.appendChild(map.element);
+    }).catch((err) => { body.innerHTML = ""; body.appendChild(el("div", { class: "notice notice--error" }, err.message)); });
+  };
+  if (typeof IntersectionObserver === "function") {
+    observer = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) start(); }, { rootMargin: "300px" });
+    observer.observe(card);
+  } else {
+    start();
+  }
+  return { element: card, destroy: () => { gone = true; if (observer) observer.disconnect(); if (map) map.destroy(); } };
 }
 
 // ------------------------------------------------------------------ corner detail
@@ -210,7 +233,7 @@ export function renderCornerDetail(widget, ctx) {
           el("tbody", {}, [
             el("tr", { class: "cdetail__now" }, [t("Lap 1 (this)"), num(c.a.brake) ? formatMetres(c.a.brake) : "—", num(c.a.min) ? `${c.a.min.toFixed(1)}` : "—", num(c.a.throttle) ? formatMetres(c.a.throttle) : "—", num(c.a.exit) ? `${c.a.exit.toFixed(1)}` : "—"].map((v) => el("td", {}, v))),
             ...matched.map((r) => el("tr", {}, [
-              el("td", {}, el("a", { href: `#/analysis?a=${r.lap.id}`, title: formatLapTime(r.lap.lap_time) }, t("lap #{0}", [r.lap.lap_number]))),
+              el("td", {}, el("a", { href: link.analysis({ a: r.lap.id }), title: formatLapTime(r.lap.lap_time) }, t("lap #{0}", [r.lap.lap_number]))),
               el("td", {}, num(r.brake) ? formatMetres(r.brake) : "—"), el("td", {}, num(r.min) ? r.min.toFixed(1) : "—"),
               el("td", {}, num(r.throttle) ? formatMetres(r.throttle) : "—"), el("td", {}, num(r.exit) ? r.exit.toFixed(1) : "—"),
             ])),
@@ -245,7 +268,7 @@ export function renderSectors(widget, ctx) {
     const best = res.session_best;
     const isBest = (i, lapId) => best && best[i] && best[i].lap_id === lapId;
     const rows = (res.laps || []).map((lap) => el("tr", { class: lap.id === res.lap_id ? "lsectors__this" : (lap.is_valid ? "" : "lsectors__invalid") }, [
-      el("td", {}, el("a", { href: `#/analysis?a=${lap.id}` }, t("lap #{0}", [lap.lap_number]))),
+      el("td", {}, el("a", { href: link.analysis({ a: lap.id }) }, t("lap #{0}", [lap.lap_number]))),
       el("td", {}, formatLapTime(lap.lap_time)),
       ...[0, 1, 2].map((i) => el("td", { class: isBest(i, lap.id) ? "lsectors__best" : "" }, Array.isArray(lap.sector_times) && lap.sector_times[i] > 0 ? lap.sector_times[i].toFixed(3) : "—")),
     ]));

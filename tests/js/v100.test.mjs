@@ -11,7 +11,7 @@ const dom = new JSDOM(html, { url: "https://garage16.example/#/legal", pretendTo
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, localStorage: dom.window.localStorage, sessionStorage: dom.window.sessionStorage });
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
-dom.window.LMU_GARAGE_API_BASE_URL = "";
+dom.window.GARAGE16_API_BASE_URL = "";
 localStorage.setItem("garage16_language", lang);
 
 let legal = { operator: null, min_age: 16, terms_version: "2026-10-24", registration: "open" };
@@ -23,13 +23,13 @@ const posted = [];
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(url, "http://x");
   const json = (body, status = 200) => ({ ok: status < 400, status, statusText: String(status), json: async () => body, text: async () => JSON.stringify(body) });
-  if (u.pathname === "/legal") return legal === null ? json({ detail: "down" }, 503) : json(legal);
-  if (u.pathname === "/health") return json(health);
-  if (u.pathname === "/accounts/signup") {
+  if (u.pathname === "/api/v1/public/legal") return legal === null ? json({ detail: "down" }, 503) : json(legal);
+  if (u.pathname === "/api/v1/health") return json(health);
+  if (u.pathname === "/api/v1/accounts/signup") {
     posted.push({ body: JSON.parse(init.body), headers: init.headers });
     return json(signupAnswer.body, signupAnswer.status);
   }
-  if (u.pathname === "/leaderboard/recent") return json([]);
+  if (u.pathname === "/api/v1/public/activity") return json([]);
   return json({ detail: "unexpected " + u.pathname }, 404);
 };
 
@@ -39,7 +39,7 @@ const app = () => document.getElementById("app");
 const go = async (hash) => { window.location.hash = hash; await sleep(120); return text(app()); };
 const de = lang === "de";
 
-await import("../../web/js/router.js");
+await import("../../web/js/main.js");
 await sleep(150);
 
 // ---------------------------------------------------------------- legal notice
@@ -99,7 +99,7 @@ const card = app().querySelector(".signup-card");
 assert.ok(card, "sign-up card on the account page when signed out");
 assert.equal(card.querySelector("#regSecret").closest(".field").hidden, true, "open registration: no secret field");
 const termsLinks = [...card.querySelectorAll(".check-row a")].map((a) => a.getAttribute("href"));
-assert.deepEqual(termsLinks, ["#/legal?tab=terms", "#/legal?tab=privacy"]);
+assert.deepEqual(termsLinks, ["/terms", "/datenschutz"]);
 assert.ok(text(card).includes(de ? "Ich akzeptiere die Nutzungsbedingungen und habe die Datenschutzerklärung gelesen." : "I accept the terms of use and have read the privacy policy."));
 assert.ok(app().querySelector("details.advanced-signin"), "the token sign-in is folded away");
 const set = (id, v) => { card.querySelector(`#${id}`).value = v; };
@@ -122,10 +122,10 @@ await sleep(200);
 assert.deepEqual(posted.at(-1).body, { display_name: "Rita", email: "rita@example.com", password: "Correct-Horse-42", accept_terms: true, confirm_min_age: true });
 assert.equal(posted.at(-1).headers["X-Registration-Secret"], undefined);
 // V1.0.1: not signed in — "check your email", with the address, and a link to the setup guide
-assert.equal(window.location.hash, "#/account", "after sign-up: stays, asks to confirm the email");
+assert.equal(window.location.pathname + window.location.search, "/account", "after sign-up: stays, asks to confirm the email");
 assert.equal(localStorage.getItem("lmu_garage_session"), null, "not signed in before the email is confirmed");
 assert.ok(text(card).includes("rita@example.com") && text(card).includes(de ? "Fast geschafft" : "Almost done"));
-assert.ok(card.querySelector('a[href="#/setup?welcome=1"]'));
+assert.ok(card.querySelector('a[href="/setup?welcome=1"]'));
 
 // ---------------------------------------------------------------- setup guide
 body = await go("#/setup?welcome=1");
@@ -140,7 +140,7 @@ assert.ok([...app().querySelectorAll("a")].some((a) => a.getAttribute("href") ==
 // ---------------------------------------------------------------- download page: next step + all downloads
 body = await go("#/download");
 const next = app().querySelector(".download-next");
-assert.ok(next && next.querySelector('a[href="#/setup"]'));
+assert.ok(next && next.querySelector('a[href="/setup"]'));
 assert.ok([...app().querySelectorAll(".download-notes a")].some((a) => a.getAttribute("href") === health.client_release_page_url));
 const standardLink = app().querySelector('[data-download="standard"]');
 standardLink.addEventListener("click", (e) => e.preventDefault());   // jsdom cannot navigate away
@@ -148,7 +148,11 @@ standardLink.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, c
 assert.ok(next.classList.contains("notice--success"), "the next step lights up after a click");
 
 // a secret-only server: the form asks for the secret and sends it
-const { store } = await import("../../web/js/state.js");
+// V1.0.2: readable addresses — an old "#/analysis?..." test address becomes /analysis/... (quick
+// links keep their query in the hash: their track names are only resolved by the router)
+const { legacyHashToPath } = await import("../../web/js/core/routes.js");
+const visit = (hash) => window.history.replaceState(null, "", /quick=/.test(hash) ? `/analysis${hash}` : legacyHashToPath(hash));
+const { store } = await import("../../web/js/core/state.js");
 store.signOut();
 legal = { ...legal, registration: "secret" };
 await go("#/account");
@@ -157,6 +161,6 @@ assert.equal(card2.querySelector("#regSecret").closest(".field").hidden, false);
 
 // landing page footer
 body = await go("#/");
-assert.deepEqual([...app().querySelectorAll(".site-footer a")].map((a) => a.getAttribute("href")), ["#/legal", "#/legal?tab=privacy", "#/legal?tab=terms"]);
+assert.deepEqual([...app().querySelectorAll(".site-footer a")].map((a) => a.getAttribute("href")), ["/impressum", "/datenschutz", "/terms"]);
 
 console.log(`V100-${lang.toUpperCase()}-OK`);

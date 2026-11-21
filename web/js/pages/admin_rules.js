@@ -1,11 +1,11 @@
-// pages/admin_rules.js — the admin's race rule sets (V0.9.4) for the Stint Analyzer's strategy
+// pages/admin_rules.js — the admin's race rule sets for the Stint Analyzer's strategy
 // calculator: race length, minimum stops, maximum stint, tyre and refuelling rules, pit lane
 // figures. Stored on the server (race_rule_sets, routers/admin.py); every driver can pick them
 // in the calculator. Only what the admin enters is used — nothing is filled in by guessing.
 
-import { api } from "../api.js";
-import { el } from "../format.js";
-import { t } from "../i18n.js";
+import { api } from "../core/api.js";
+import { el } from "../core/format.js";
+import { t } from "../core/i18n.js";
 
 const FIELDS = () => [
   ["race_laps", t("Race length (laps)"), 1],

@@ -21,7 +21,7 @@
 # Without it, Caddy sets that header based on ITS OWN incoming
 # connection — which is plain HTTP in Variant A (Caddy listens on :80,
 # Cloudflare's edge/Tunnel terminates the actual public HTTPS). The
-# server's LMU_GARAGE_REQUIRE_HTTPS check reads exactly this header and
+# server's GARAGE16_REQUIRE_HTTPS check reads exactly this header and
 # was rejecting every request with "HTTPS required" even over a real
 # https:// tunnel URL, since Caddy told it the request was HTTP. The
 # literal "https" is correct for BOTH variants: in Variant A, anything
@@ -30,11 +30,11 @@
 # HTTPS (:443, plus an automatic :80 redirect) — so a request reaching
 # these handlers is HTTPS-aware either way.
 
-# V0.9.8 — whose X-Forwarded-For Caddy believes. Only the private ranges: in variant A the request
+# Whose X-Forwarded-For Caddy believes. Only the private ranges: in variant A the request
 # arrives from cloudflared on the Docker network (it carries Cloudflare's X-Forwarded-For, which ends
 # with the visitor's real address), in variant B straight from the internet — then Caddy discards
 # whatever X-Forwarded-For the visitor sent and writes the real peer address itself. Either way the
-# app (server/client_ip.py, LMU_GARAGE_TRUSTED_PROXIES=private) reads the chain from the right and
+# app (server/core/client_ip.py, GARAGE16_TRUSTED_PROXIES=private) reads the chain from the right and
 # stops at the first address that is not one of ours: a made-up header can no longer change the
 # address the rate limits count.
 {
@@ -43,64 +43,99 @@
     }
 }
 
+# The security headers of the web pages (the API sets its own, server/main.py). The pages
+# load nothing from other hosts and have no inline scripts, so the policy can be strict: no foreign
+# scripts, no embedding in other sites (clickjacking of the sign-in and password forms), no MIME
+# sniffing. Inline style attributes stay allowed (index.html, charts). A snippet, imported by
+# every block that serves pages or their files (the same headers: scripts/release/build_web.py _headers).
+(page_headers) {
+    # defer: applied last, so a page that the app filled in (server/api/v1/pages.py) gets each header
+    # once, not the app's copy and this one
+    header {
+        defer
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+    }
+}
+
 {$CADDY_SITE_ADDRESS:80} {
-    # API routes go to the FastAPI server. Adjust the path prefixes here
-    # if the frontend and API don't share the same domain in your setup
-    # (e.g. if the web/ frontend is deployed separately to Cloudflare
-    # Pages instead of being served from here — see web/config.js).
-    #
-    # ONE named matcher for every API prefix, on purpose (V0.8.8):
-    #   - `handle /teams /teams/* {` (two paths after `handle`) is NOT valid
-    #     Caddyfile syntax — Caddy refuses to start ("wrong argument count
-    #     or unexpected line ending"), which took the whole stack's web/API
-    #     access down in V0.6.8 and was then only hand-fixed on the NAS, never
-    #     here. A named matcher (`@api path a b c`) takes any number of paths.
-    #   - Every prefix the server exposes MUST be listed. /drivers and
-    #     /invitations were missing for a while (V0.7.2 onward): Caddy then
-    #     answered those requests with the web frontend's index.html instead
-    #     of JSON, silently breaking driver profiles, the invite-by-name
-    #     lookup and team invitations behind the reverse proxy — while every
-    #     TestClient-based test stayed green, because tests never go through
-    #     Caddy. tests/test_reverse_proxy.py now checks this file against the
-    #     app's real OpenAPI paths and the frontend's calls, and (when a
-    #     Caddy binary is available) runs the real proxy in front of the real
-    #     app. Add a new router prefix -> add it here.
-    @api path /accounts/* /telemetry/* /leaderboard/* /teams /teams/* /drivers/* /invitations/* /admin/* /health /legal
+    # The API lives under /api/v1 (server/api/v1/); the health checks stay at /health.
+    @api path /api/* /health /health/*
     handle @api {
         reverse_proxy server:8000 {
             header_up X-Forwarded-Proto https
         }
     }
 
-    # Everything else: the static web frontend. Skip this whole `handle`
-    # block (and the volume mount serving it) entirely if the frontend is
-    # deployed separately (Cloudflare Pages) instead of from here — the
-    # API routes above are all this proxy needs to serve in that case.
-    #
-    # V0.9.1: `Cache-Control: no-cache` means "keep a copy, but ask before using it".
-    # file_server already sends an ETag, so an unchanged file costs a tiny 304; what
-    # this prevents is a browser running a MIX of old and new JavaScript modules
-    # after an update (modules are fetched one by one and, without a header, are
-    # reused on a guess from Last-Modified).
-    handle {
-        root * /srv/web
-        header Cache-Control "no-cache"
-        # V1.0.1: the security headers of the web pages (the API sets its own, server/main.py).
-        # The pages load nothing from other hosts and have no inline scripts, so the policy can be
-        # strict: no foreign scripts, no embedding in other sites (clickjacking of the sign-in and
-        # password forms), no MIME sniffing. Inline style attributes stay allowed (index.html, charts).
-        header {
-            Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
-            X-Content-Type-Options "nosniff"
-            X-Frame-Options "DENY"
-            Referrer-Policy "strict-origin-when-cross-origin"
-            Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+    # The API paths of V1.0.1 and older, for desktop clients 1.0.x (server/api/legacy.py translates
+    # them). Precise, because /leaderboard/<track>/<class> and /teams are page addresses now:
+    # tests/api/test_api_paths.py keeps these matchers equal to server/api/legacy.py.
+    @legacy_api {
+        path /accounts/* /telemetry/* /drivers/* /invitations/* /admin/* /teams/* /leaderboard/class/* /leaderboard/car/* /leaderboard/catalog/* /leaderboard/recent
+    }
+    @legacy_teams {
+        path /teams
+        not method GET HEAD
+    }
+    @legacy_legal {
+        path /legal
+        not header Accept *text/html*
+    }
+    handle @legacy_teams {
+        reverse_proxy server:8000 {
+            header_up X-Forwarded-Proto https
         }
-        try_files {path} /index.html
+    }
+    handle @legacy_legal {
+        reverse_proxy server:8000 {
+            header_up X-Forwarded-Proto https
+        }
+    }
+    handle @legacy_api {
+        reverse_proxy server:8000 {
+            header_up X-Forwarded-Proto https
+        }
+    }
+
+    # The files of a release under /v/<version>/... (index.html names them so). The address
+    # changes with every release, so a browser may keep them for a year without asking again —
+    # instead of 30+ "still the same?" requests per page view.
+    handle_path /v/* {
+        import page_headers
+        uri strip_prefix /{http.request.uri.path.0}
+        root * /srv/web
+        header Cache-Control "public, max-age=31536000, immutable"
         file_server
     }
 
-    # Upload body size — see server/config.py's max_upload_bytes (default
+    # Everything else: a file of the web folder (icons, robots.txt) — or a page. Skip this whole
+    # block (and the web volume) when the website is served by Cloudflare Pages instead
+    # (docs/DEPLOYMENT.md): the API blocks above are all this proxy needs then.
+    handle {
+        import page_headers
+        root * /srv/web
+        @file file
+        handle @file {
+            # `no-cache` = keep a copy, but ask before using it (a cheap 304)
+            header Cache-Control "no-cache"
+            file_server
+        }
+        # A page address (/leaderboard/fuji-speedway/hypercar, /driver/moritz-lachnit, …):
+        # index.html with the page's own title and link preview, 404 for an unknown address —
+        # filled in by the server (server/api/v1/pages.py), the browser's router draws the page.
+        handle {
+            rewrite * /api/v1/public/page
+            reverse_proxy server:8000 {
+                header_up X-Forwarded-Proto https
+                header_up X-Garage16-Page-Path {http.request.orig_uri.path}
+            }
+        }
+    }
+
+    # Upload body size — see server/core/config.py's max_upload_bytes (default
     # 50 MiB). Keep this a little above that so Caddy doesn't reject a
     # borderline-sized upload before the app gets to enforce its own
     # limit with a proper JSON error body.
@@ -110,7 +145,7 @@
 
     encode zstd gzip
 
-    # V1.0: the access log holds IP addresses — kept 7 days (privacy policy, section 4)
+    # The access log holds IP addresses — kept 7 days (privacy policy, section 4)
     log {
         output file /data/access.log {
             roll_size 50MB

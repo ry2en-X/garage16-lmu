@@ -1,7 +1,7 @@
-"""initial baseline — mirrors server/models.py as of the current schema
+"""initial baseline — mirrors server/core/models.py as of the current schema
 
 This migration is a *baseline*: it creates all six tables exactly as
-server/models.py currently defines them (including drivers.discord_user_id,
+server/core/models.py currently defines them (including drivers.discord_user_id,
 teams, team_memberships, discord_channels, link_codes, record_events).
 
 - Brand-new/empty dev DB: `alembic upgrade head` runs this and creates

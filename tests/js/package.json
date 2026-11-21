@@ -2,6 +2,6 @@
   "name": "garage16-web-tests",
   "private": true,
   "type": "module",
-  "description": "DOM tests for the vanilla-JS frontend (run by tests/test_web_discord_card.py; needs `npm install` here once).",
+  "description": "DOM tests for the vanilla-JS frontend (run by tests/web/test_discord_card.py; needs `npm install` here once).",
   "devDependencies": { "jsdom": "^24.0.0" }
 }

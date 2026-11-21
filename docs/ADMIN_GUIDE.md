@@ -1,4 +1,4 @@
-# Admin-Leitfaden (V1.0.1)
+# Admin-Leitfaden (V1.0.2)
 
 Kurz und praktisch — für den, der Garage16 auf der NAS betreibt, in der Reihenfolge, in der man es
 braucht. Die technische Referenz zu jedem Punkt (alle Einstellungen, beide Zugangsvarianten,
@@ -73,18 +73,18 @@ Die wichtigsten Variablen (vollständige Liste mit Erklärung: `.env.example`):
 
 | Variable | Wofür |
 |---|---|
-| `LMU_GARAGE_SECRET_KEY` | Verschlüsselt Client-Secrets in der DB — einmal generieren, nie ändern (sonst werden bestehende Secrets unlesbar) |
-| `LMU_GARAGE_ADMIN_TOKEN` | Dein Zugang zur Admin-Oberfläche (`#/admin`) |
-| `LMU_GARAGE_REGISTRATION_SECRET` | Verhindert, dass Fremde sich registrieren können, sobald die Instanz öffentlich erreichbar ist |
-| `LMU_GARAGE_OPEN_REGISTRATION=1` | V1.0: jeder darf sich auf der Website registrieren (statt des Kennworts; eins von beiden ist Pflicht) |
-| `LMU_GARAGE_OPERATOR_NAME` / `_ADDRESS` / `_EMAIL` | V1.0: Betreiber für Impressum und Datenschutzerklärung (Seite „Rechtliches“) |
-| `LMU_GARAGE_REQUIRE_EMAIL_VERIFICATION`, `LMU_GARAGE_UNVERIFIED_ACCOUNT_DAYS`, `LMU_GARAGE_NEW_DRIVER_REVIEW_LAPS`, `LMU_GARAGE_MAX_DEVICES` | V1.0.1: Kontoregeln (E-Mail vor dem Verbinden bestätigen, unbestätigte Anmeldungen nach 7 Tagen löschen, Fair-Play-Prüfung neuer Fahrer, PCs pro Konto) — die Standards passen, nur bei Bedarf setzen |
+| `GARAGE16_SECRET_KEY` | Verschlüsselt Client-Secrets in der DB — einmal generieren, nie ändern (sonst werden bestehende Secrets unlesbar) |
+| `GARAGE16_ADMIN_TOKEN` | Dein Zugang zur Admin-Oberfläche (`/admin`) |
+| `GARAGE16_REGISTRATION_SECRET` | Verhindert, dass Fremde sich registrieren können, sobald die Instanz öffentlich erreichbar ist |
+| `GARAGE16_OPEN_REGISTRATION=1` | V1.0: jeder darf sich auf der Website registrieren (statt des Kennworts; eins von beiden ist Pflicht) |
+| `GARAGE16_OPERATOR_NAME` / `_ADDRESS` / `_EMAIL` | V1.0: Betreiber für Impressum und Datenschutzerklärung (Seite „Rechtliches“) |
+| `GARAGE16_REQUIRE_EMAIL_VERIFICATION`, `GARAGE16_UNVERIFIED_ACCOUNT_DAYS`, `GARAGE16_NEW_DRIVER_REVIEW_LAPS`, `GARAGE16_MAX_DEVICES` | V1.0.1: Kontoregeln (E-Mail vor dem Verbinden bestätigen, unbestätigte Anmeldungen nach 7 Tagen löschen, Fair-Play-Prüfung neuer Fahrer, PCs pro Konto) — die Standards passen, nur bei Bedarf setzen |
 | `POSTGRES_PASSWORD` | Datenbank-Passwort |
 | `CADDY_SITE_ADDRESS` oder `CLOUDFLARE_TUNNEL_TOKEN` | Je nach gewählter Zugangsvariante (Abschnitt 1) |
 
 Secrets generieren:
 ```
-python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"   # LMU_GARAGE_SECRET_KEY
+python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"   # GARAGE16_SECRET_KEY
 python3 -c "import secrets; print(secrets.token_urlsafe(32))"                                  # ADMIN_TOKEN, REGISTRATION_SECRET
 ```
 
@@ -112,7 +112,7 @@ Wege, es einzurichten (einen davon wählen):
   Läuft dann dauerhaft im Hintergrund, Intervall über
   `BACKUP_INTERVAL_SECONDS` in `.env` einstellbar (Default: täglich).
 - **NAS-nativ** (z. B. Synology Task Scheduler): einen geplanten Task
-  anlegen, der `./scripts/backup.sh /pfad/zu/backups` ausführt.
+  anlegen, der `./scripts/ops/backup.sh /pfad/zu/backups` ausführt.
 
 Beide sichern PostgreSQL **und** Telemetrie-Dateien zusammen (beide
 müssen zueinander passen — ein Lap-Eintrag ohne zugehörige Datei ist ein
@@ -123,13 +123,18 @@ Seit V0.9.8 ist jedes Backup ein Ordner `garage16_<Zeitstempel>/` (Dump, Telemet
 kurz mit „Wartung“ abgewiesen (der Client wiederholt sie), laufende werden noch fertig. Der Ordner
 erscheint erst, wenn beide Dateien geprüft sind.
 
+Seit V1.0.2 sind die Backups **inkrementell**: die Datenbank wird jedes Mal ganz gesichert, von der
+Telemetrie nur die Dateien, die noch nicht im gemeinsamen Ordner `telemetry-store/` (neben den
+Backup-Ordnern) liegen; das Manifest listet, welche Dateien zu diesem Stand gehören. Dateien, die
+kein Backup mehr braucht, räumt das Skript selbst weg. `telemetry-store/` nie von Hand löschen.
+
 **Restore ist ein Release-Gate — nicht nur Backups erstellen, sondern
 mindestens einmal echt wiederherstellen und prüfen:**
-1. `./scripts/restore.sh /pfad/zu/garage16_<Zeitstempel>` (Ablauf und Rückweg: `docs/ROLLBACK.md`) —
+1. `./scripts/ops/restore.sh /pfad/zu/garage16_<Zeitstempel>` (Ablauf und Rückweg: `docs/ROLLBACK.md`) —
    der Stack läuft dabei weiter; das Skript stoppt und startet server/bot selbst
 2. Prüfen: Login funktioniert, Leaderboard zeigt die erwarteten Daten,
    Teams sind vorhanden, eine Testrunde lässt sich hochladen
-3. `./scripts/restore.sh --cleanup <stamp>` gibt den Platz des Rückfallpunkts frei
+3. `./scripts/ops/restore.sh --cleanup <stamp>` gibt den Platz des Rückfallpunkts frei
 
 Ohne diesen echten Durchlauf ist ein Backup nur eine unbewiesene Annahme.
 
@@ -163,7 +168,7 @@ Passwort-Reset- und Verifizierungs-E-Mails werden nur geloggt, nicht
 verschickt (praktisch zum Testen, aber Freunde bekommen dann keine
 echten E-Mails). **Seit V1.0.1 verbindet sich der Desktop-Client erst mit
 bestätigter E-Mail** — ohne funktionierendes SMTP also
-`LMU_GARAGE_REQUIRE_EMAIL_VERIFICATION=0` setzen. Unsere Instanz verschickt
+`GARAGE16_REQUIRE_EMAIL_VERIFICATION=0` setzen. Unsere Instanz verschickt
 über Gmail (Kapitel 10, Teil B).
 
 **Einen echten Anbieter einrichten** (jeder SMTP-fähige Anbieter
@@ -172,13 +177,13 @@ funktioniert; Beispiel mit einem kostenlosen Kontingent):
    Konto mit "App-Passwort") Zugangsdaten besorgen.
 2. In `.env`:
    ```
-   LMU_GARAGE_EMAIL_PROVIDER=smtp
-   LMU_GARAGE_SMTP_HOST=smtp.deinanbieter.example
-   LMU_GARAGE_SMTP_PORT=587
-   LMU_GARAGE_SMTP_USER=dein-benutzername
-   LMU_GARAGE_SMTP_PASSWORD=dein-passwort
-   LMU_GARAGE_SMTP_FROM=garage16@deine-domain.example
-   LMU_GARAGE_FRONTEND_URL=https://deine-domain.example
+   GARAGE16_EMAIL_PROVIDER=smtp
+   GARAGE16_SMTP_HOST=smtp.deinanbieter.example
+   GARAGE16_SMTP_PORT=587
+   GARAGE16_SMTP_USER=dein-benutzername
+   GARAGE16_SMTP_PASSWORD=dein-passwort
+   GARAGE16_SMTP_FROM=garage16@deine-domain.example
+   GARAGE16_FRONTEND_URL=https://deine-domain.example
    ```
 3. `docker compose up -d server` (Neustart, damit die neuen Variablen
    greifen).
@@ -186,7 +191,7 @@ funktioniert; Beispiel mit einem kostenlosen Kontingent):
    eigenen E-Mail-Adresse auslösen — die Mail muss tatsächlich ankommen.
    Kommt nichts an: `docker compose logs server | grep -i smtp` prüfen.
 
-`LMU_GARAGE_FRONTEND_URL` muss auf die echte, von außen erreichbare
+`GARAGE16_FRONTEND_URL` muss auf die echte, von außen erreichbare
 Domain zeigen — sie steckt im Link, den die E-Mail enthält.
 
 ## 8. Updates
@@ -198,7 +203,7 @@ Schluss unangetastet und ist der Rückweg. Die Daten (Datenbank, Telemetrie) lie
 und gehören keinem Ordner; der neue Stack übernimmt sie automatisch (gleicher Projektname
 `garage16`).
 
-1. **Backup** im alten Ordner (`scripts/backup.sh`, Kapitel 5).
+1. **Backup** im alten Ordner (`scripts/ops/backup.sh`, Kapitel 5).
 2. **Neuer Ordner**, ZIP hinein, entpacken, die `.env` aus dem alten Ordner kopieren.
 3. **Alten Stack stoppen** — immer **ohne** `-v` (das `-v` löscht die Volumes!).
 4. **Neuen Stack bauen und starten**: `sudo docker compose --profile tunnel up -d --build`.
@@ -210,7 +215,7 @@ und gehören keinem Ordner; der neue Stack übernimmt sie automatisch (gleicher 
 
 Auf dem PC: Git-Arbeitskopie aktualisieren und — wenn es einen neuen Client gibt — einen Tag
 `client-vX.Y.Z` pushen (Kapitel 11). Zum Erzwingen eines Client-Updates
-`LMU_GARAGE_MIN_CLIENT_VERSION` erhöhen; zu alte Clients zeigen dann ein Banner mit Download-Knopf,
+`GARAGE16_MIN_CLIENT_VERSION` erhöhen; zu alte Clients zeigen dann ein Banner mit Download-Knopf,
 ihre Runden bleiben erhalten. Ab V1.0.1 zeigen ältere Clients ohnehin einen Hinweis „neue Version
 verfügbar“ (freiwillig).
 
@@ -221,21 +226,123 @@ G16=/volume1/homes/Moritz/garage16
 BACKUPS=/volumeUSB2/usbshare/garage16-backups
 ```
 
-### 8.2 Neu in V1.0.1 — Konten für eine offene Instanz, mehrere PCs, aufgeräumte Doku
+### 8.2 Neu in V1.0.2 — lesbare Links, Website auf Cloudflare Pages, aufgeräumter Code
+
+- **Lesbare Adressen:** statt `#/leaderboard?track=…` jetzt z. B. `garage16.de/leaderboard/fuji-speedway/hypercar`,
+  `/driver/<name>`, `/team/<name>`, `/analysis/123/vs/456`, `/stints/fuji-speedway/2026-11-14`,
+  `/impressum`, `/datenschutz`, `/terms`. **Alte Links (`#/…`) leiten von selbst weiter.**
+  Nach dem Umbenennen eines Fahrers oder Teams führt der alte Link weiter zum neuen Namen.
+- **Vorschau in Discord:** jede Seite hat einen eigenen Titel („Fuji Speedway · Hypercar – Garage16“);
+  Bestenliste, Analyse und Fahrerprofil haben einen Knopf **„Link kopieren“**; unbekannte Adressen zeigen
+  eine echte 404-Seite.
+- **Menü auf Deutsch:** „Rundenanalyse“ und „Stint-Analyse“.
+- **API unter `/api/v1`.** Die alten Pfade bleiben für Clients 1.0.0/1.0.1 erhalten, bis
+  `GARAGE16_MIN_CLIENT_VERSION` angehoben wird.
+- **Website auf Cloudflare Pages** (optional, empfohlen): die Seite selbst kommt dann von Cloudflare,
+  die NAS beantwortet nur noch die API. Ohne Pages läuft alles wie bisher über den Tunnel.
+- **Schneller:** Dateien mit Versionsnummer werden ein Jahr gecacht, öffentliche Bestenlisten 30–60 s;
+  neuer Index für die Bestenliste; Streckenkarte, Kachel-Editor und Stint-Diagramme laden erst bei Bedarf.
+- **Backups jetzt inkrementell:** die Datenbank wird jedes Mal ganz gesichert, von der Telemetrie nur
+  noch neue Dateien (Ordner `telemetry-store/` neben den Backups). Alte Backups (Format 1) lassen sich
+  weiterhin wiederherstellen und werden wie bisher nach und nach aussortiert.
+- **Neue Namen der Einstellungen:** `LMU_GARAGE_*` heißt jetzt `GARAGE16_*`. **Die alte `.env` funktioniert
+  unverändert** (alte Namen werden weiter gelesen); umbenennen kannst du in Ruhe.
+- **Skripte liegen in Unterordnern:** `scripts/ops/` (Betrieb: backup, restore, Prüfungen),
+  `scripts/dev/`, `scripts/release/`. **Die DSM-Backup-Aufgabe muss auf `scripts/ops/backup.sh` zeigen.**
+- **Client 1.0.2:** spricht die neue API (fällt bei einem älteren Server von selbst auf die alten Pfade
+  zurück); Einstellungen liegen in `%USERPROFILE%\.garage16` (wird beim ersten Start aus `.lmu_garage`
+  übernommen).
+- **Eine Migration (0020):** Spalten `drivers.slug`, `teams.slug`, Tabelle `slug_redirects`, zwei Indizes
+  auf `laps`. Rein additiv.
+
+**Update der NAS von V1.0.1 auf V1.0.2**
+
+1. **Backup** (noch im alten Ordner):
+   ```
+   ALT="$G16/Garage16_Lmu_V1_0_1/Garage16 - LMU"
+   cd "$ALT"
+   sudo ./scripts/ops/backup.sh "$BACKUPS"
+   ```
+2. **Neuen Ordner anlegen**, `Garage16_Lmu_V1_0_2.zip` per File Station hineinladen und dort entpacken,
+   `.env` übernehmen:
+   ```
+   mkdir -p "$G16/Garage16_Lmu_V1_0_2"
+   # … ZIP per File Station in diesen Ordner laden und dort entpacken …
+   NEU="$G16/Garage16_Lmu_V1_0_2/Garage16 - LMU"
+   ls "$NEU"
+   sudo cp "$ALT/.env" "$NEU/.env"
+   ```
+3. **Alten Stack stoppen** (ohne `-v`), **neuen bauen und starten** — Migration 0020 läuft dabei:
+   ```
+   cd "$ALT" && sudo docker compose --profile tunnel down
+   cd "$NEU" && sudo docker compose --profile tunnel up -d --build
+   sudo docker compose --profile tunnel ps
+   sudo docker compose exec -T server python -c "import urllib.request as u; print(u.urlopen('http://localhost:8000/api/v1/health/ready').read().decode())"
+   ```
+   Erwartet: `"status":"ready"`, `"version":"1.0.2"`. Die Healthchecks prüfen jetzt alle 30–60 s;
+   `ps` kann deshalb in der ersten Minute noch „starting“ zeigen. Der `quicktunnel`-Container bleibt
+   unangetastet.
+4. **Im Browser prüfen** (Strg+F5): Bestenliste öffnen — die Adresse lautet z. B.
+   `/leaderboard/fuji-speedway/hypercar`; „Link kopieren“ ausprobieren; einen alten Link mit `#/`
+   öffnen — er springt auf die neue Adresse; `/gibtsnicht` zeigt die 404-Seite.
+5. **Konsistenz prüfen** (ändert nichts):
+   ```
+   sudo docker compose exec -T server sh -c 'GARAGE16_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.ops.consistency_check'
+   ```
+6. **Backup mit dem neuen Ordner** (jetzt inkrementell) und Aufgabenplaner umstellen:
+   ```
+   sudo ./scripts/ops/backup.sh "$BACKUPS"
+   ls "$BACKUPS"            # neu: Ordner telemetry-store/ neben den garage16_<Zeit>-Ordnern
+   ```
+   DSM → Systemsteuerung → Aufgabenplaner → die tägliche Garage16-Backup-Aufgabe → Befehl auf
+   `cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V1_0_2/Garage16 - LMU" && ./scripts/ops/backup.sh /volumeUSB2/usbshare/garage16-backups`
+   ändern. Den Ordner `telemetry-store/` **nie einzeln löschen** — alle neuen Backups verweisen darauf.
+7. **Client 1.0.2 veröffentlichen** (auf dem PC, Kapitel 11): Tag `client-v1.0.2` pushen.
+8. **Optional: Website auf Cloudflare Pages umziehen** — Schritt für Schritt in `docs/DEPLOYMENT.md`,
+   Abschnitt „The website on Cloudflare Pages“. Kurz:
+   1. Im Cloudflare-Dashboard dem bestehenden Tunnel einen zweiten öffentlichen Hostnamen
+      `api.garage16.de` → `http://reverse_proxy:80` geben.
+   2. Ein langes Zufallswort erzeugen (`openssl rand -hex 32`) und als `GARAGE16_EDGE_KEY=` in die `.env`
+      eintragen, dann `sudo docker compose --profile tunnel up -d`.
+   3. Workers & Pages → Pages-Projekt `garage16` anlegen, Umgebungsvariablen `GARAGE16_API_ORIGIN=https://api.garage16.de`
+      und `GARAGE16_EDGE_KEY=<dasselbe Wort>` setzen, eigene Domain `garage16.de` zuweisen.
+   4. In GitHub (Settings → Secrets and variables → Actions) die Secrets `CLOUDFLARE_API_TOKEN`,
+      `CLOUDFLARE_ACCOUNT_ID` und die Variable `CLOUDFLARE_PAGES_PROJECT=garage16` anlegen. Ab dann
+      veröffentlicht jeder Push auf `main` (nach grüner CI) die Website von selbst.
+   5. Cloudflare-Regeln (kostenloser Plan): Cache-Regel für `/api/v1/public/` und die
+      Rate-Limit-Regel aus `docs/DEPLOYMENT.md`, „Cloudflare rules“.
+   6. Vorher die Datenschutzerklärung anpassen (Cloudflare liefert dann auch die Website aus) —
+      siehe `docs/DATA_PROTECTION.md`, „Verantwortung beim Betrieb“, V1.0.2.
+
+**Zurück auf V1.0.1:** erst die Migration zurücknehmen, dann im alten Ordner starten:
+```
+cd "$G16/Garage16_Lmu_V1_0_2/Garage16 - LMU"
+sudo docker compose exec -T server sh -c 'GARAGE16_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" alembic downgrade 0019'
+sudo docker compose --profile tunnel down
+cd "$G16/Garage16_Lmu_V1_0_1/Garage16 - LMU"
+sudo docker compose --profile tunnel up -d
+```
+(Der Downgrade löscht nur die Kurz-Namen und Weiterleitungen; lesbare Links funktionieren dann nicht
+mehr, alles andere bleibt. Falls Pages schon eingerichtet ist: im Pages-Projekt die eigene Domain
+wieder entfernen, damit `garage16.de` wieder über den Tunnel läuft. Inkrementelle Backups (Format 2)
+kann V1.0.1 nicht wiederherstellen — vorher ein Backup mit V1.0.1 anlegen oder mit `restore.sh` aus
+V1.0.2 zurückspielen.)
+
+### 8.3 Neu in V1.0.1 — Konten für eine offene Instanz, mehrere PCs, aufgeräumte Doku
 
 - **E-Mail zuerst bestätigen:** Neue Konten melden den Browser nicht mehr sofort an; der Desktop-Client
-  verbindet sich erst, wenn die E-Mail bestätigt ist (`LMU_GARAGE_REQUIRE_EMAIL_VERIFICATION`,
+  verbindet sich erst, wenn die E-Mail bestätigt ist (`GARAGE16_REQUIRE_EMAIL_VERIFICATION`,
   Standard an). Nie bestätigte Anmeldungen ohne Runden und ohne Team werden nach 7 Tagen gelöscht
-  (`LMU_GARAGE_UNVERIFIED_ACCOUNT_DAYS`). **Beta-Fahrer, die ihre E-Mail nie bestätigt haben,
+  (`GARAGE16_UNVERIFIED_ACCOUNT_DAYS`). **Beta-Fahrer, die ihre E-Mail nie bestätigt haben,
   müssen das beim nächsten Verbinden nachholen** (Konto → „Bestätigungs-E-Mail erneut senden“) —
   bereits verbundene Clients laden weiter hoch.
 - **Nutzungsbedingungen:** Konten von vor V1.0 (und alle nach einer Änderung der Texte) werden nach
   dem Anmelden auf der Website einmal um Zustimmung gebeten; der Client 1.0.1 fragt beim Verbinden.
 - **Mehrere PCs pro Konto:** Rig und Laptop bleiben gleichzeitig verbunden (bis 5,
-  `LMU_GARAGE_MAX_DEVICES`), sichtbar und trennbar unter Konto → Desktop-Client & Anmeldungen →
+  `GARAGE16_MAX_DEVICES`), sichtbar und trennbar unter Konto → Desktop-Client & Anmeldungen →
   Verbundene PCs. Bereits verbundene Clients behalten ihre Anmeldung.
 - **Fair Play:** Fährt ein neuer Fahrer (weniger als 10 offizielle Runden,
-  `LMU_GARAGE_NEW_DRIVER_REVIEW_LAPS`) schneller als das Garage16 Best anderer, wartet die Runde auf
+  `GARAGE16_NEW_DRIVER_REVIEW_LAPS`) schneller als das Garage16 Best anderer, wartet die Runde auf
   dich (Admin → Track-Limit-Prüfung, mit Begründung). Siehe Kapitel 12.
 - **Eindeutige Fahrernamen** (Groß-/Kleinschreibung, unsichtbare Zeichen und Breitschrift zählen
   nicht als Unterschied; „admin“, „garage16“ u. ä. sind reserviert). Schon doppelt vergebene Namen
@@ -258,7 +365,7 @@ BACKUPS=/volumeUSB2/usbshare/garage16-backups
    ```
    ALT="$G16/Garage16_Lmu_V1_0_0/Garage16 - LMU"
    cd "$ALT"
-   sudo ./scripts/backup.sh "$BACKUPS"
+   sudo ./scripts/ops/backup.sh "$BACKUPS"
    ```
 2. **Neuen Ordner anlegen**, `Garage16_Lmu_V1_0_1.zip` per File Station hineinladen und dort
    entpacken („Hierher extrahieren“), `.env` übernehmen:
@@ -285,7 +392,7 @@ BACKUPS=/volumeUSB2/usbshare/garage16-backups
    keine roten CSP-Fehler.
 5. **Konsistenz prüfen** (ändert nichts):
    ```
-   sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.consistency_check'
+   sudo docker compose exec -T server sh -c 'GARAGE16_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.ops.consistency_check'
    ```
 6. **Doppelte Fahrernamen finden** (nur Anzeige — sie bleiben bestehen, siehe oben):
    ```
@@ -294,7 +401,7 @@ BACKUPS=/volumeUSB2/usbshare/garage16-backups
    Leer = keine Doppel.
 7. **Backup mit dem neuen Ordner** und Aufgabenplaner umstellen:
    ```
-   sudo ./scripts/backup.sh "$BACKUPS"
+   sudo ./scripts/ops/backup.sh "$BACKUPS"
    ```
    DSM → Systemsteuerung → Aufgabenplaner → die tägliche Garage16-Backup-Aufgabe → Pfad auf
    `Garage16_Lmu_V1_0_1` ändern.
@@ -305,7 +412,7 @@ BACKUPS=/volumeUSB2/usbshare/garage16-backups
 **Zurück auf V1.0.0:** erst die Migration zurücknehmen, dann im alten Ordner starten:
 ```
 cd "$G16/Garage16_Lmu_V1_0_1/Garage16 - LMU"
-sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" alembic downgrade 0018'
+sudo docker compose exec -T server sh -c 'GARAGE16_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" alembic downgrade 0018'
 sudo docker compose --profile tunnel down
 cd "$G16/Garage16_Lmu_V1_0_0/Garage16 - LMU"
 sudo docker compose --profile tunnel up -d
@@ -313,7 +420,7 @@ sudo docker compose --profile tunnel up -d
 (Der Downgrade löscht die Tabelle `device_tokens` und die Namensspalte. PCs, die mit Client 1.0.1
 über E-Mail verbunden wurden, müssen sich danach neu verbinden; alles andere bleibt.)
 
-### 8.3 Ältere Updates
+### 8.4 Ältere Updates
 
 Die Anleitungen für V0.9 bis V1.0 (mit den damaligen Rückwegen) stehen unverändert in
 `docs/archive/UPDATES_V0_9_BIS_V1_0.md`.
@@ -325,23 +432,23 @@ Die Anleitungen für V0.9 bis V1.0 (mit den damaligen Rückwegen) stehen unverä
 | `/health` antwortet nicht | `server`-Container läuft nicht | `docker compose ps`, dann `docker compose logs server` |
 | `/health` liefert `db_ok: false` | PostgreSQL nicht erreichbar | `docker compose logs db`; `docker compose restart db server` |
 | Website und Clients erreichen den Server nicht mehr, Stack ist aber „healthy“ | Die Quick-Tunnel-Adresse hat sich geändert (Container neu erstellt) | `docs/RUNBOOKS.md`, „Quick-Tunnel-Adresse hat sich geändert“ |
-| Registrierung schlägt fehl (403) | Ohne `LMU_GARAGE_OPEN_REGISTRATION=1` verlangt das Formular das Registrierungs-Kennwort | Für alle öffnen: `LMU_GARAGE_OPEN_REGISTRATION=1`; sonst `LMU_GARAGE_REGISTRATION_SECRET` weitergeben |
+| Registrierung schlägt fehl (403) | Ohne `GARAGE16_OPEN_REGISTRATION=1` verlangt das Formular das Registrierungs-Kennwort | Für alle öffnen: `GARAGE16_OPEN_REGISTRATION=1`; sonst `GARAGE16_REGISTRATION_SECRET` weitergeben |
 | Registrierung: „That driver name is already taken“ | V1.0.1: Namen sind eindeutig (ohne Groß-/Kleinschreibung) | Anderen Namen wählen |
-| Server startet nicht: „Neither LMU_GARAGE_REGISTRATION_SECRET nor LMU_GARAGE_OPEN_REGISTRATION=1 …“ | Keins von beiden in der `.env` | Eins von beiden setzen |
-| Client: „Please confirm your email address first“ | V1.0.1: Der Client verbindet sich erst mit bestätigter E-Mail | Fahrer öffnet den Link aus der Mail (Spam-Ordner) oder sendet ihn unter Konto neu. Kommt keine Mail: SMTP prüfen (Kapitel 7). Für einen geschlossenen Kreis ohne SMTP: `LMU_GARAGE_REQUIRE_EMAIL_VERIFICATION=0` |
+| Server startet nicht: „Neither GARAGE16_REGISTRATION_SECRET nor GARAGE16_OPEN_REGISTRATION=1 …“ | Keins von beiden in der `.env` | Eins von beiden setzen |
+| Client: „Please confirm your email address first“ | V1.0.1: Der Client verbindet sich erst mit bestätigter E-Mail | Fahrer öffnet den Link aus der Mail (Spam-Ordner) oder sendet ihn unter Konto neu. Kommt keine Mail: SMTP prüfen (Kapitel 7). Für einen geschlossenen Kreis ohne SMTP: `GARAGE16_REQUIRE_EMAIL_VERIFICATION=0` |
 | Client: „The terms of use and the privacy policy have changed“ | Die Bedingungen wurden noch nicht (neu) akzeptiert | Haken im Verbinden-Fenster setzen (Client 1.0.1) oder auf der Website anmelden und zustimmen |
 | Client 1.0.0 meldet beim Verbinden „error (409)“ | Einer der beiden Fälle darüber; Client 1.0.0 kennt die Meldung noch nicht | Auf der Website anmelden: dort steht, was fehlt (E-Mail bestätigen / zustimmen). Oder Client 1.0.1 installieren |
 | Runde eines neuen Fahrers zählt nicht, steht auf „wartet“ | V1.0.1 Fair Play: neue Fahrer, schneller als das Garage16 Best anderer | Kapitel 12 |
-| Rechtliches zeigt „Betreiberangaben … noch nicht eingetragen“ | `LMU_GARAGE_OPERATOR_*` fehlen in der `.env` | Eintragen, `docker compose --profile tunnel up -d server` |
+| Rechtliches zeigt „Betreiberangaben … noch nicht eingetragen“ | `GARAGE16_OPERATOR_*` fehlen in der `.env` | Eintragen, `docker compose --profile tunnel up -d server` |
 | Discord-Bot postet nichts | Bot offline oder falscher Token | `docker compose logs discord_bot`; Token in `.env` prüfen |
 | Keine Verifizierungs-/Reset-Mails | SMTP nicht konfiguriert oder falsch | Kapitel 7; `docker compose logs server \| grep -i smtp` |
 | Nach Update: alte Fahrer können sich nicht einloggen | Unwahrscheinlich — Migrationen sind rückwärtskompatibel gebaut | `docker compose logs server` auf Migrationsfehler prüfen; im Zweifel `docs/ROLLBACK.md` |
 | Freund meldet Banner „Garage16 rejected your login“ | Anmeldung dieses PCs gilt nicht mehr (unter Konto → Verbundene PCs getrennt, mehr als 5 PCs, oder Token erneuert) | Freund klickt „Reconnect account…“ und meldet sich mit E-Mail und Passwort an |
 | Freund kann nicht installieren / Windows warnt | Unsignierte `.exe` → SmartScreen | „Weitere Informationen → Trotzdem ausführen“ (`docs/CLIENT_BUILD.md`, „Bekannte Eigenheiten“); Prüfsumme in `SHA256SUMS.txt` des Releases |
-| Analyse meldet „The telemetry of this lap is no longer stored“ | Die Datei der Runde fehlt auf der Platte | Prüfen, ob das `telemetry_data`-Volume dasselbe ist wie vorher; `scripts.telemetry_cleanup` (Dry-Run) listet Runden ohne Datei — sie werden nie automatisch gelöscht |
+| Analyse meldet „The telemetry of this lap is no longer stored“ | Die Datei der Runde fehlt auf der Platte | Prüfen, ob das `telemetry_data`-Volume dasselbe ist wie vorher; `scripts.ops.telemetry_cleanup` (Dry-Run) listet Runden ohne Datei — sie werden nie automatisch gelöscht |
 | Analyse: Federweg/Reifen/TC/ABS fehlen für eine Runde | Runde wurde mit einem Client < 0.9.0 aufgezeichnet | Kein Fehler — die Runde neu fahren |
 | Speicherplatz läuft voll | Verwaiste Telemetrie-Dateien, alte Backups | Aufräum-Werkzeug im Server-Container (Dry-Run zuerst, Befehl in `README.md`, „Operations in one minute“); `docs/RUNBOOKS.md`, „Speicher voll“ |
-| Ein Fahrer cheatet / meldet eine verdächtige Runde | — | Admin-Oberfläche (`#/admin`) → Reports, Track-Limit-Prüfung, oder Fahrer sperren |
+| Ein Fahrer cheatet / meldet eine verdächtige Runde | — | Admin-Oberfläche (`/admin`) → Reports, Track-Limit-Prüfung, oder Fahrer sperren |
 
 Für alles, was hier nicht auftaucht: `docker compose logs -f` (alle Dienste gleichzeitig) zeigt fast
 immer die eigentliche Fehlermeldung.
@@ -396,8 +503,8 @@ bleiben.**
 **4. Änderungen in der `.env` auf der NAS**
 ```
 CLOUDFLARE_TUNNEL_TOKEN=<der Token>
-LMU_GARAGE_CORS_ORIGINS=https://garage16.de
-LMU_GARAGE_FRONTEND_URL=https://garage16.de
+GARAGE16_CORS_ORIGINS=https://garage16.de
+GARAGE16_FRONTEND_URL=https://garage16.de
 ```
 `CADDY_SITE_ADDRESS` bleibt unverändert (Standardwert `:80`).
 
@@ -408,10 +515,10 @@ LMU_GARAGE_FRONTEND_URL=https://garage16.de
    notierte IP, **„DNS only"** (graue Wolke — sonst kann All-Inkl kein
    Zertifikat ausstellen).
 3. Optional in der `.env`, damit zu alte Clients den richtigen Download
-   anbieten: `LMU_GARAGE_CLIENT_DOWNLOAD_URL=https://download.garage16.de/Garage16-Client-Setup.exe`
+   anbieten: `GARAGE16_CLIENT_DOWNLOAD_URL=https://download.garage16.de/Garage16-Client-Setup.exe`
 4. Ab V0.9.2 gibt es zwei Downloads. Leg beide Setup-Dateien dorthin und trag auch
    den zweiten ein:
-   `LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL=https://download.garage16.de/Garage16-Client-Analysis-Setup.exe`
+   `GARAGE16_CLIENT_APP_DOWNLOAD_URL=https://download.garage16.de/Garage16-Client-Analysis-Setup.exe`
    Beide erscheinen dann auf **garage16.de → Download** nebeneinander. Fehlt einer,
    steht dort „Noch nicht verfügbar“ statt eines kaputten Knopfs.
 
@@ -419,12 +526,12 @@ LMU_GARAGE_FRONTEND_URL=https://garage16.de
 
 Dieselbe Datei — ergänze zusätzlich:
 ```
-LMU_GARAGE_EMAIL_PROVIDER=smtp
-LMU_GARAGE_SMTP_HOST=smtp.gmail.com
-LMU_GARAGE_SMTP_PORT=587
-LMU_GARAGE_SMTP_USER=garage16.lmu@gmail.com
-LMU_GARAGE_SMTP_PASSWORD=<App-Passwort ohne Leerzeichen>
-LMU_GARAGE_SMTP_FROM=garage16.lmu@gmail.com
+GARAGE16_EMAIL_PROVIDER=smtp
+GARAGE16_SMTP_HOST=smtp.gmail.com
+GARAGE16_SMTP_PORT=587
+GARAGE16_SMTP_USER=garage16.lmu@gmail.com
+GARAGE16_SMTP_PASSWORD=<App-Passwort ohne Leerzeichen>
+GARAGE16_SMTP_FROM=garage16.lmu@gmail.com
 ```
 Das App-Passwort erstellst du so: im Google-Konto die Bestätigung in zwei
 Schritten aktivieren, dann unter `myaccount.google.com/apppasswords` ein
@@ -449,7 +556,7 @@ damit bestehende Clients den Umzug mitbekommen können.
    `sudo docker compose logs server | grep -i smtp`.
 3. **Clients umstellen — Variante 1, automatisch.** In der `.env` ergänzen:
    ```
-   LMU_GARAGE_MIGRATED_TO=https://garage16.de
+   GARAGE16_MIGRATED_TO=https://garage16.de
    ```
    und `sudo docker compose up -d server`. Der Server sagt dann über
    `/health`, wohin er umgezogen ist. Laufende Clients (ab 0.8.6) prüfen das alle
@@ -464,7 +571,7 @@ damit bestehende Clients den Umzug mitbekommen können.
    (siehe `docs/CLIENT_BUILD.md`).
 5. **Aufräumen**, wenn alle umgestellt sind (Faustregel: ein paar Tage warten):
    den Quick Tunnel stoppen (`sudo docker rm -f <name>`) und die Zeile
-   `LMU_GARAGE_MIGRATED_TO` wieder aus der `.env` entfernen, dann
+   `GARAGE16_MIGRATED_TO` wieder aus der `.env` entfernen, dann
    `sudo docker compose up -d server`.
 
 ### Gut zu wissen
@@ -524,13 +631,13 @@ sie aus).
 
 ## 12. Review-Warteschlange und Fair Play
 
-Admin (`#/admin`, mit `LMU_GARAGE_ADMIN_TOKEN`) → **Track-Limit-Prüfung** listet jede Runde, die
+Admin (`/admin`, mit `GARAGE16_ADMIN_TOKEN`) → **Track-Limit-Prüfung** listet jede Runde, die
 erst nach deiner Entscheidung zählt:
 
 - **Track Limits / Datenqualität** (seit V0.9.9): die Prüfung konnte die Runde nicht sicher
   entscheiden — die Befunde stehen darunter, mit Ort auf der Runde.
-- **Neuer Fahrer schneller als das Garage16 Best** (seit V1.0.1, `server/fair_play.py`): Ein Fahrer
-  mit weniger als `LMU_GARAGE_NEW_DRIVER_REVIEW_LAPS` (Standard 10) offiziellen Runden fährt auf
+- **Neuer Fahrer schneller als das Garage16 Best** (seit V1.0.1, `server/laps/fair_play.py`): Ein Fahrer
+  mit weniger als `GARAGE16_NEW_DRIVER_REVIEW_LAPS` (Standard 10) offiziellen Runden fährt auf
   einer Strecke mit einem Auto schneller als die bisher schnellste Runde **anderer** Fahrer. Der
   Hinweis nennt die Zahl seiner bisherigen Runden und das bisherige Garage16 Best.
 
@@ -539,4 +646,4 @@ vergleichen (Linie, Bremspunkte, Tempo plausibel? Datenqualität-Kachel grün?).
 (erst jetzt gibt es PB/WR/Team-Bestzeit und die Discord-Meldung) oder **„Runde ungültig machen“** mit
 Grund. Die Runde ist in der Zwischenzeit sichtbar und analysierbar, nur nicht in den Bestenlisten.
 Die erste Runde überhaupt auf einer Strecke/einem Auto wird nie zurückgehalten, langsamere Runden
-neuer Fahrer auch nicht. `LMU_GARAGE_NEW_DRIVER_REVIEW_LAPS=0` schaltet die Regel ab.
+neuer Fahrer auch nicht. `GARAGE16_NEW_DRIVER_REVIEW_LAPS=0` schaltet die Regel ab.

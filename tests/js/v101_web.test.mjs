@@ -13,7 +13,7 @@ const dom = new JSDOM(html, { url: "https://garage16.example/#/", pretendToBeVis
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, localStorage: dom.window.localStorage, sessionStorage: dom.window.sessionStorage });
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
-dom.window.LMU_GARAGE_API_BASE_URL = "";
+dom.window.GARAGE16_API_BASE_URL = "";
 localStorage.setItem("garage16_language", lang);
 
 const VENUES = [
@@ -43,18 +43,18 @@ globalThis.fetch = async (url) => {
   calls.push(u.pathname);
   const json = (body, status = 200) => ({ ok: status < 400, status, statusText: String(status), json: async () => body, text: async () => JSON.stringify(body) });
   const p = u.pathname;
-  if (p === "/leaderboard/catalog/venues") return json(VENUES);
-  if (p === "/leaderboard/recent") return json(RECENT);
-  if (p === "/leaderboard/catalog/class-options") return json([{ name: "GT3", lap_count: 0 }, { name: "Hypercar", lap_count: 40 }, { name: "LMP3", lap_count: 2 }]);
-  if (p === "/leaderboard/catalog/cars") return json(["499P"]);
-  if (p.startsWith("/leaderboard/class/")) {
+  if (p === "/api/v1/public/catalog/venues") return json(VENUES);
+  if (p === "/api/v1/public/activity") return json(RECENT);
+  if (p === "/api/v1/public/catalog/class-options") return json([{ name: "GT3", lap_count: 0 }, { name: "Hypercar", lap_count: 40 }, { name: "LMP3", lap_count: 2 }]);
+  if (p === "/api/v1/public/catalog/cars") return json(["499P"]);
+  if (p.startsWith("/api/v1/public/leaderboards/class/")) {
     await boardGate;
     return json([
       { driver_id: 1, driver_name: "Mika", lap_time: 99.1, sector_times: [30, 34, 35.1], is_valid: true, uploaded_at: H(3), lap_id: 28 },
       { driver_id: 2, driver_name: "Nito", lap_time: 99.6, sector_times: [30.2, 34.1, 35.3], is_valid: true, uploaded_at: H(3), lap_id: 21 },
     ]);
   }
-  if (p === "/drivers/1/public") return json({ driver_id: 1, display_name: "Mika", total_laps: 5, tracks_driven: 2, cars_driven: 1, teams: [], recent_activity: [],
+  if (p === "/api/v1/public/drivers/1") return json({ driver_id: 1, display_name: "Mika", total_laps: 5, tracks_driven: 2, cars_driven: 1, teams: [], recent_activity: [],
     personal_records: [
       { track_name: "Algarve International Circuit", car_name: "#7", car_class: "Hypercar", car_model: "499P", lap_time: 99.1, set_at: H(3), class_best_time: 99.1, class_best_driver_id: 1, class_best_driver_name: "Mika" },
       // a second Hypercar at Algarve (slower: not shown) and a GT3 there — its own row, against the GT3 record
@@ -62,8 +62,8 @@ globalThis.fetch = async (url) => {
       { track_name: "Algarve International Circuit", car_name: "#91", car_class: "GT3", car_model: "911 GT3 R", lap_time: 112.4, set_at: H(9), class_best_time: 111.9, class_best_driver_id: 2, class_best_driver_name: "Nito" },
       { track_name: "Silverstone National Circuit", car_name: "#7", car_class: "Hypercar", car_model: "499P", lap_time: 62.0, set_at: H(60), class_best_time: 61.2, class_best_driver_id: 2, class_best_driver_name: "Nito" },
     ] });
-  if (p === "/teams/mine") return json([]);
-  if (p === "/telemetry/laps") return json([{ id: 28, track_name: "Algarve International Circuit", car_name: "#7", car_model: "499P", lap_number: 3, lap_time: 99.1, is_valid: true, uploaded_at: H(3) }]);
+  if (p === "/api/v1/teams/mine") return json([]);
+  if (p === "/api/v1/laps") return json([{ id: 28, track_name: "Algarve International Circuit", car_name: "#7", car_model: "499P", lap_number: 3, lap_time: 99.1, is_valid: true, uploaded_at: H(3) }]);
   return json({ detail: `unexpected ${p}` }, 404);
 };
 const settle = (ms = 30) => new Promise((r) => setTimeout(r, ms));
@@ -71,15 +71,15 @@ const text = (n) => n.textContent.replace(/\s+/g, " ").trim();
 const app = document.getElementById("app");
 
 // ---------------------------------------------------------------- tracks.js
-const { loadTrackNames, trackLabel, _resetTrackNames } = await import("../../web/js/tracks.js");
+const { loadTrackNames, trackLabel, _resetTrackNames } = await import("../../web/js/core/tracks.js");
 assert.equal(trackLabel("Algarve International Circuit"), "Algarve International Circuit", "before loading: LMU's name, never blank");
 await loadTrackNames();
 assert.equal(trackLabel("Algarve International Circuit"), "Portimão (Algarve)", "one layout: the venue name, like the leaderboard");
 assert.equal(trackLabel("Silverstone National Circuit"), "Silverstone National Circuit", "several layouts: the layout's own name");
 assert.equal(trackLabel("Unknown Ring"), "Unknown Ring");
-const n = calls.filter((c) => c === "/leaderboard/catalog/venues").length;
+const n = calls.filter((c) => c === "/api/v1/public/catalog/venues").length;
 await loadTrackNames();
-assert.equal(calls.filter((c) => c === "/leaderboard/catalog/venues").length, n, "loaded once per page load");
+assert.equal(calls.filter((c) => c === "/api/v1/public/catalog/venues").length, n, "loaded once per page load");
 
 // ---------------------------------------------------------------- landing: sessions
 const { renderLanding, groupRecentSessions } = await import("../../web/js/pages/landing.js");
@@ -98,7 +98,7 @@ assert.equal(rows.length, 3);
 assert.ok(text(rows[0]).includes("Portimão (Algarve)"), "the venue name, not LMU's string");
 assert.ok(text(rows[0]).includes(de ? "3 Runden" : "3 laps"));
 assert.ok(text(rows[0]).includes("1:39.100"));
-assert.equal(rows[0].querySelector(".activity__side a").getAttribute("href"), "#/analysis?a=28", "the best lap of the session opens the analysis");
+assert.equal(rows[0].querySelector(".activity__side a").getAttribute("href"), "/analysis/28", "the best lap of the session opens the analysis");
 assert.equal(rows[0].querySelectorAll(".tag").length, 2);
 assert.ok(text(rows[0].querySelector(".tag")).includes("Garage16 Best"));
 assert.equal(app.querySelectorAll(".feature").length, 4, "four features, each with a drawing");
@@ -139,7 +139,7 @@ assert.equal(text(app.querySelector(".board-title")), "Portimão (Algarve) · Hy
 
 // ---------------------------------------------------------------- dashboard: "Your Best" as a table
 app.innerHTML = "";
-const { store } = await import("../../web/js/state.js");
+const { store } = await import("../../web/js/core/state.js");
 store.setSession({ driverId: 1, displayName: "Mika", viaCookie: true });
 const { renderDashboard } = await import("../../web/js/pages/dashboard.js");
 await renderDashboard(app);
@@ -158,10 +158,8 @@ const bestCells = [...best.querySelectorAll("tbody tr")].map((tr) => text(tr.chi
 assert.equal(bestCells[0], de ? "Dein Rekord" : "Your record", "own class record marked");
 assert.equal(bestCells[1], "1:51.900 +0.500", "the GT3 lap against the GT3 record, not the Hypercar time");
 assert.equal(bestCells[2], "1:01.200 +0.800");
-const gt3Link = new URL(best.querySelectorAll("tbody tr")[1].querySelector("a").getAttribute("href").slice(1), "https://x");
-assert.equal(gt3Link.searchParams.get("scope"), "class");
-assert.equal(gt3Link.searchParams.get("model"), "911 GT3 R");
-assert.equal(gt3Link.searchParams.get("track"), "Algarve International Circuit");
+// V1.0.2: a readable address — the track, the car model and "the class's best lap"
+assert.equal(best.querySelectorAll("tbody tr")[1].querySelector("a").getAttribute("href"), "/analysis/algarve-international-circuit/911-gt3-r/vs/class-best");
 const { parseAnalysisExtras } = await import("../../web/js/pages/analysis.js");
 assert.equal(parseAnalysisExtras("#/analysis?quick=wr&track=X&model=Y&scope=class").scope, "class");
 assert.equal(parseAnalysisExtras("#/analysis?quick=wr&track=X&scope=evil").scope, null);

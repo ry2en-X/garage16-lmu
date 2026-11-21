@@ -11,7 +11,7 @@ globalThis.document = dom.window.document;
 globalThis.localStorage = dom.window.localStorage;
 globalThis.sessionStorage = dom.window.sessionStorage;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
-dom.window.LMU_GARAGE_API_BASE_URL = "";
+dom.window.GARAGE16_API_BASE_URL = "";
 
 // ---- in-memory backend ----
 const backend = { linked: false, calls: [], failNextCodeWith409: false };
@@ -19,13 +19,13 @@ globalThis.fetch = async (url, opts = {}) => {
   const method = opts.method || "GET";
   backend.calls.push(`${method} ${url}`);
   const json = (status, body) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) });
-  if (url === "/accounts/discord" && method === "GET") return json(200, { linked: backend.linked });
-  if (url === "/accounts/discord" && method === "DELETE") {
+  if (url === "/api/v1/accounts/discord" && method === "GET") return json(200, { linked: backend.linked });
+  if (url === "/api/v1/accounts/discord" && method === "DELETE") {
     const was = backend.linked;
     backend.linked = false;
     return json(200, { status: was ? "unlinked" : "not_linked" });
   }
-  if (url === "/accounts/discord/link-code" && method === "POST") {
+  if (url === "/api/v1/accounts/discord/link-code" && method === "POST") {
     if (backend.failNextCodeWith409) {
       backend.failNextCodeWith409 = false;
       return json(409, { detail: "Your account is already linked to a Discord account. Unlink it first to link a different one." });
@@ -35,7 +35,7 @@ globalThis.fetch = async (url, opts = {}) => {
   return json(404, { detail: "unexpected " + url });
 };
 
-const { store } = await import("../../web/js/state.js");
+const { store } = await import("../../web/js/core/state.js");
 store.setSession({ driverId: 1, displayName: "Tester", viaCookie: true });
 const { renderDiscordCard } = await import("../../web/js/pages/account.js");
 
@@ -58,7 +58,7 @@ await settle();
 assert.ok(text().includes("/link ABCD-EFGH"), text());
 assert.match(text(), /expires in (9|10):\d\d/);
 assert.ok(buttons().includes("Copy command"));
-assert.ok(backend.calls.includes("POST /accounts/discord/link-code"));
+assert.ok(backend.calls.includes("POST /api/v1/accounts/discord/link-code"));
 
 // 3. the bot redeems the code (out-of-band): the card flips to "linked"
 //    by itself via the status poll — no manual refresh

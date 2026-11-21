@@ -5,7 +5,7 @@ Revises: 0018
 Create Date: 2026-10-26
 
 * drivers.display_name_key: the name in its compared form (NFKC, case folded, invisible characters
-  removed, whitespace collapsed — server/names.py), unique. Filled here for every driver in the
+  removed, whitespace collapsed — server/accounts/names.py), unique. Filled here for every driver in the
   order of their id: when two existing drivers already share a name, the OLDER one gets the key;
   the younger keeps its name but no key (NULL) and has to pick a free name at the next rename.
   Nothing is renamed and no row is lost.
@@ -29,7 +29,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def _key(name: str) -> str:
-    # frozen copy of server/names.py name_key() as of V1.0.1 — a migration must not change later
+    # frozen copy of server/accounts/names.py name_key() as of V1.0.1 — a migration must not change later
     text = unicodedata.normalize("NFKC", str(name or ""))
     text = "".join(ch for ch in text if not unicodedata.category(ch).startswith("C") or ch.isspace())
     text = text.casefold()

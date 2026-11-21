@@ -1,7 +1,7 @@
 """
 async_saver.py — writes completed laps to disk on a background thread.
 
-Why this exists (V0.9.0): the telemetry loop reads LMU's shared memory at 60 Hz
+Why this exists: the telemetry loop reads LMU's shared memory at 60 Hz
 and calls `recorder.save()` the instant a lap is completed. With the extended
 channels a lap is ~15,000 samples x ~180 columns; building the DataFrame and
 compressing the parquet file takes a noticeable fraction of a second. Done

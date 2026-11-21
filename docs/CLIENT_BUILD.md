@@ -26,8 +26,8 @@
 > eine über die andere zu installieren wechselt die Variante, Anmeldung und Runden
 > bleiben. GitHub baut beide; ein Tag `client-v…` legt ein Release mit allen vier
 > Dateien an. Selbst bauen: `.\packaging\build_windows.ps1 -Edition analysis`.
-> Beide Download-Links gehören in die `.env` (`LMU_GARAGE_CLIENT_DOWNLOAD_URL`,
-> `LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL`) — sie erscheinen dann auf der Download-Seite der
+> Beide Download-Links gehören in die `.env` (`GARAGE16_CLIENT_DOWNLOAD_URL`,
+> `GARAGE16_CLIENT_APP_DOWNLOAD_URL`) — sie erscheinen dann auf der Download-Seite der
 > Website. `Garage16.exe --analysis-selftest` sagt, ob das Analysefenster auf einem PC
 > laufen kann (der Build prüft das bei jedem Paket).
 
@@ -81,7 +81,7 @@ Link weitergeben. Trag denselben Link in `.env` ein, damit sich veraltete
 Clients selbst dorthin schicken:
 
 ```
-LMU_GARAGE_CLIENT_DOWNLOAD_URL=https://…/Garage16-Client-Setup.exe
+GARAGE16_CLIENT_DOWNLOAD_URL=https://…/Garage16-Client-Setup.exe
 ```
 
 Danach den Server neu starten (`docker compose up -d server`).
@@ -91,7 +91,7 @@ Danach den Server neu starten (`docker compose up -d server`).
 1. Version in `client/uploader/uploader.py` (`CLIENT_VERSION`) erhöhen —
    der Installer übernimmt sie automatisch (`packaging/sync_version.py`).
 2. Neu bauen (Variante A oder B) und die neue Setup-Datei verteilen.
-3. **Optional erzwingen:** `LMU_GARAGE_MIN_CLIENT_VERSION` in `.env` auf
+3. **Optional erzwingen:** `GARAGE16_MIN_CLIENT_VERSION` in `.env` auf
    die neue Version setzen. Clients darunter zeigen dann ein Banner mit
    Download-Button; ihre bereits aufgezeichneten Runden bleiben erhalten
    und laden nach dem Update hoch.
@@ -133,7 +133,7 @@ den neuen Server ist, braucht er das Update wie oben.
 - [ ] Eine Runde fahren → erscheint im Aktivitätsfenster und im Web-Leaderboard
 - [ ] Zweites Mal `Garage16-Client-Setup.exe` ausführen → Update in Place,
       Anmeldung bleibt, kein neues Einrichtungsfenster
-- [ ] Deinstallieren → Anmeldung/Runden bleiben (`%USERPROFILE%\.lmu_garage`,
+- [ ] Deinstallieren → Anmeldung/Runden bleiben (`%USERPROFILE%\.garage16`,
       `%LOCALAPPDATA%\Garage16`)
 - [ ] **Client + Analysetool** (V0.9.2): *Open analysis* → Fenster „Garage16 — Analysis“
       öffnet sich **angemeldet**, ohne Eingabe; nach einer Runde *Analyse last lap* →

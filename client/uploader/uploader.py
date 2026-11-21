@@ -10,7 +10,7 @@ so this implements a placeholder HMAC signature using a locally-stored
 client secret, clearly marked so it's swapped for the real scheme before
 this ships to real users. As-is, this stops naive tampering with the
 upload payload in transit, not a determined attacker with the secret. See
-server/security.py's docstring: this is authentication + integrity, not
+server/core/security.py's docstring: this is authentication + integrity, not
 anti-cheat, even once a real key-management story replaces this
 placeholder.
 
@@ -43,12 +43,13 @@ from typing import Iterator, Optional
 import requests
 
 from client.telemetry.recorder import LapRecorder
+from client.api_paths import fall_back, url_for
 
 logger = logging.getLogger("lmu_garage.uploader")
 
-CLIENT_VERSION = "1.0.1"
+CLIENT_VERSION = "1.0.2"
 DEFAULT_BACKEND_URL = "https://api.example-lmu-garage.invalid"  # placeholder, replace with real backend
-UPLOAD_ENDPOINT = "/telemetry/upload"
+UPLOAD_ENDPOINT = "/api/v1/laps/upload"   # V1.0.2; servers before 1.0.2: /telemetry/upload (client/api_paths.py)
 MAX_RETRIES = 5
 RETRY_BACKOFF_SECONDS = 3
 # Statuses worth retrying: request timeout, rate limiting, and any server
@@ -59,7 +60,7 @@ RETRY_BACKOFF_SECONDS = 3
 _TRANSIENT_STATUS_CODES = {408, 429}
 
 # Allowlist of fields the server's LapMetadata schema actually accepts
-# (server/schemas.py) — NOT a denylist of local-only fields. A denylist
+# (server/laps/schemas.py) — NOT a denylist of local-only fields. A denylist
 # has to be remembered and updated every time a new local bookkeeping
 # field is added (this is exactly how the P0-1 bug happened: `uploaded`
 # was added to the metadata dict and nobody remembered to exclude it
@@ -67,7 +68,7 @@ _TRANSIENT_STATUS_CODES = {408, 429}
 # `rejected`/`rejected_reason`) is silently dropped here instead of
 # crashing every upload with a 400.
 #
-# V0.6.3: added car_class/car_model — the reverse risk of the allowlist
+# Added car_class/car_model — the reverse risk of the allowlist
 # design applies here: a field ADDED to the server schema that ISN'T
 # added here just silently never gets sent, no error either way. Adding
 # a new server-accepted field means updating both schemas.py AND this
@@ -79,7 +80,7 @@ _SERVER_FIELDS = {
     "car_class", "car_model",
 }
 
-# V0.9.3: accepted by servers from 0.9.3 on. A 0.9.2 server rejects unknown fields
+# Accepted by servers from 0.9.3 on. A 0.9.2 server rejects unknown fields
 # ("Extra inputs are not permitted"), so the uploader sends these, and if the server
 # turns them down it repeats the SAME upload once without them and remembers that for
 # this run (see upload_one). Nothing is lost either way: the telemetry file — which is
@@ -89,7 +90,7 @@ _V093_FIELDS = {
     "track_limits_steps_per_point", "track_limits_steps_per_penalty",
     "game_lap_state", "grid_vehicles",
 }
-# V0.9.3.1: accepted by servers from 0.9.3.1 on — the client's reason codes and the late
+# Accepted by servers from 0.9.3.1 on — the client's reason codes and the late
 # window after the finish line (client/telemetry/lap_verdict.py). A 0.9.3 server refuses
 # it like a 0.9.2 server refuses the 0.9.3 fields, so the uploader steps down ONE level at a
 # time: everything -> without the 0.9.3.1 fields -> the 0.9.2 metadata (V0.9.4: one level more
@@ -97,7 +98,7 @@ _V093_FIELDS = {
 _V0931_FIELDS = {"lap_report"}
 _EXTRA_FIELDS_REFUSED = "Extra inputs are not permitted"
 
-# V0.9.4: the car and the session at the end of the lap (pit stops, compound, damage, tank,
+# The car and the session at the end of the lap (pit stops, compound, damage, tank,
 # position, time left) for the Stint Analyzer. Refused by a 0.9.3.1 server -> one level lower.
 _V094_FIELDS = {"lap_context"}
 
@@ -110,7 +111,7 @@ _LEVELS = (
 )
 
 
-# Chunk size for hashing and for streaming the multipart body (V0.9.1). A lap
+# Chunk size for hashing and for streaming the multipart body. A lap
 # file is several MiB; reading it in 1 MiB pieces keeps the extra RAM at
 # O(chunk) instead of O(file) — and the file is read straight from disk each
 # time, never copied into one big bytes object.
@@ -265,7 +266,7 @@ class Uploader:
         self.recorder = recorder
         self.backend_url = backend_url.rstrip("/")
         # Set by run_once() when the server answers 426 UPDATE_REQUIRED;
-        # client/main.py's upload loop reads and reports it (V0.8.6).
+        # client/main.py's upload loop reads and reports it.
         self.update_required = None
         # Set by run_once() when the server answers 401 (login revoked/
         # invalid) — client/main.py shows a 'Reconnect account' prompt.
@@ -274,7 +275,7 @@ class Uploader:
         # Both should come from a config file / secure storage, not hardcoded.
         self.client_secret = (client_secret or "unset-dev-secret").encode()
         self.auth_token = auth_token
-        # V0.9.2: the server's id of the lap uploaded last (the client window offers
+        # The server's id of the lap uploaded last (the client window offers
         # "Analyse last lap" for it). None until a lap was uploaded in this run.
         self.last_uploaded_lap_id: Optional[int] = None
         # How much metadata the server takes (index into _LEVELS): 0 = all (0.9.4 server),
@@ -300,7 +301,7 @@ class Uploader:
 
         # Hash the raw telemetry bytes so the server can detect any
         # mismatch between what was recorded and what arrived. Streamed in
-        # chunks (V0.9.1): the file is never held in memory just to be hashed.
+        # chunks: the file is never held in memory just to be hashed.
         telemetry_hash = sha256_file(parquet_path)
 
         if level is None:
@@ -335,9 +336,8 @@ class Uploader:
         if self.auth_token:
             headers["Authorization"] = f"Bearer {self.auth_token}"
 
-        url = f"{self.backend_url}{UPLOAD_ENDPOINT}"
-
         for attempt in range(1, MAX_RETRIES + 1):
+            url = url_for(self.backend_url, UPLOAD_ENDPOINT)
             try:
                 # Streamed from disk with an exact Content-Length (see
                 # StreamingMultipart); a fresh body object per attempt.
@@ -346,6 +346,15 @@ class Uploader:
                         url, data=body, timeout=30,
                         headers={**headers, "Content-Type": body.content_type},
                     )
+                if fall_back(self.backend_url, UPLOAD_ENDPOINT, resp):
+                    # A server before 1.0.2 — the same lap again on its old path, at once
+                    logger.info("The server is older than 1.0.2 — uploading on its old path.")
+                    resp = None
+                    with StreamingMultipart(fields, "telemetry", payload["telemetry_path"]) as body:
+                        resp = requests.post(
+                            url_for(self.backend_url, UPLOAD_ENDPOINT), data=body, timeout=30,
+                            headers={**headers, "Content-Type": body.content_type},
+                        )
                 if resp.status_code == 200:
                     self.recorder.mark_uploaded(meta_path)
                     logger.info("Uploaded %s", meta_path.name)

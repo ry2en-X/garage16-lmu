@@ -1,4 +1,4 @@
-// analysis/tile_picker.js — choosing a tile and putting it on the grid (V0.9.5).
+// analysis/tile_picker.js — choosing a tile and putting it on the grid.
 //
 // Two ways, both from the same catalog (tile_catalog.js):
 //
@@ -15,7 +15,7 @@
 // Nothing here changes the layout itself: it calls onAdd(spec) with { type, channel?, x?, y?,
 // w, h } and the page applies it (layout.js addWidget).
 
-import { el } from "../format.js";
+import { el } from "../core/format.js";
 import { contentHeight, rowsToPx } from "./grid.js";
 import { COLS, GAP_PX, sizeName } from "./layout.js";
 import { presetsFor, tileTree } from "./tile_catalog.js";

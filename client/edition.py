@@ -1,4 +1,4 @@
-"""client/edition.py — which Garage16 client this is, and where its analysis opens (V0.9.2).
+"""client/edition.py — which Garage16 client this is, and where its analysis opens.
 
 The desktop client ships in two editions, built from the same code:
 
@@ -9,7 +9,7 @@ The desktop client ships in two editions, built from the same code:
 
 The edition is a one-line file baked into the package next to the executable
 (garage16_edition.txt, written by packaging/garage16.spec — the same mechanism as
-garage16_server.txt). Running from source it can be set with LMU_GARAGE_EDITION.
+garage16_server.txt). Running from source it can be set with GARAGE16_EDITION.
 Nothing about it is a security decision: both editions talk to the same server with
 the same credentials; the edition only decides what the "Open analysis" button does.
 
@@ -28,6 +28,7 @@ from typing import List, Optional
 from urllib.parse import urlparse
 
 from client.config import bundled_file_candidates, read_setting, write_setting
+from client.env import env
 
 logger = logging.getLogger("lmu_garage.edition")
 
@@ -47,9 +48,9 @@ WEBVIEW2_CLIENT_GUID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 
 
 def edition() -> str:
-    env = (os.environ.get("LMU_GARAGE_EDITION") or "").strip().lower()
-    if env in EDITIONS:
-        return env
+    chosen = (env("EDITION") or "").strip().lower()
+    if chosen in EDITIONS:
+        return chosen
     for candidate in bundled_file_candidates(EDITION_FILENAME):
         try:
             if candidate.is_file():
@@ -103,7 +104,7 @@ def analysis_window_problem() -> Optional[str]:
         return "The analysis app is missing from this installation — reinstall the \"Client + analysis app\" download."
     if os.name == "nt" and webview2_runtime_version() is None:
         # No link here on purpose (the client contains no web addresses except the
-        # driver's own server — tests/test_client_setup.py); the name is enough to find it.
+        # driver's own server — tests/client/test_client_setup.py); the name is enough to find it.
         return ("The analysis window needs the free \"Microsoft Edge WebView2 Runtime\" from Microsoft, "
                 "which is not installed on this PC (Windows 11 and updated Windows 10 have it).")
     return None
@@ -124,7 +125,7 @@ def set_preferred_view(view: str) -> None:
     write_setting(SETTING_KEY, view)
 
 
-# V0.9.4: two dashboards — the LapTime Analyzer (one lap against another) and the Stint
+# Two dashboards — the LapTime Analyzer (one lap against another) and the Stint
 # Analyzer (whole sessions: stints, tyres, fuel, pit stops, strategy)
 VIEW_LAPTIME = "laptime"
 VIEW_STINTS = "stints"

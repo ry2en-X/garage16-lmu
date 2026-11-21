@@ -4,7 +4,7 @@ Revision ID: 0013
 Revises: 0012
 Create Date: 2026-10-10
 
-1. Car identity (server/car_identity.py). Up to V0.9.2 laps.car_model held LMU's raw
+1. Car identity (server/catalog/car_identity.py). Up to V0.9.2 laps.car_model held LMU's raw
    veh_filename, which is per livery ("397_25_499P" = car #397, season 25, model 499P),
    so every car number counted as a different car. Now:
      laps.car_model_raw        what car_model held until now (kept, never changed)
@@ -14,19 +14,19 @@ Create Date: 2026-10-10
                                without the car number, season kept: "499P (2025)"
      car_aliases               veh_filename group -> model name, learned from uploads
    Laps keep their exact grouping data: car_model_raw holds the original, so the
-   identity can always be re-derived (scripts/car_identity_report.py) and the downgrade
+   identity can always be re-derived (scripts/ops/car_identity_report.py) and the downgrade
    restores car_model byte for byte.
 
-2. Track limits and review (server/track_limits.py): laps.validation (JSON verdict with
+2. Track limits and review (server/laps/track_limits.py): laps.validation (JSON verdict with
    every finding), laps.review_status. Existing laps keep their is_valid unchanged; they
-   simply have no verdict until scripts/revalidate_laps.py is run (dry run by default).
+   simply have no verdict until scripts/ops/revalidate_laps.py is run (dry run by default).
 
-3. Per-lap figures (server/lap_insights.py): laps.lap_stats (JSON). Filled for new laps
-   at upload; scripts/revalidate_laps.py --stats fills it for existing ones.
+3. Per-lap figures (server/analysis/lap_insights.py): laps.lap_stats (JSON). Filled for new laps
+   at upload; scripts/ops/revalidate_laps.py --stats fills it for existing ones.
 
 The fallback rule is COPIED here on purpose (like 0012's class table): a migration must
 keep producing the same result after the application code changes.
-tests/test_v093_car_identity.py pins this copy to server/car_identity.py.
+tests/laps/test_car_identity.py pins this copy to server/catalog/car_identity.py.
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ down_revision: Union[str, None] = "0012"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-# KEEP IN SYNC with server/car_identity.py (enforced by a test).
+# KEEP IN SYNC with server/catalog/car_identity.py (enforced by a test).
 _PATTERN = re.compile(r"^(?P<number>\d{1,4})_(?P<season>\d{2})_(?P<model>.+)$")
 _SPACES = re.compile(r"\s+")
 

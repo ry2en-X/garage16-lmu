@@ -1,16 +1,16 @@
 """
 client/telemetry/lap_verdict.py — the client's verdict on a finished lap, with its reasons
-(V0.9.3.1), and the "late window" observed right after the finish line.
+, and the "late window" observed right after the finish line.
 
 Same rules as the server
 ------------------------
-The server decides (server/track_limits.py). The client only says what it saw — but its
+The server decides (server/laps/track_limits.py). The client only says what it saw — but its
 yes/no must follow the SAME rules, or a lap the server would let count (and review) arrives
 as "client rejected it" and stays invalid. That was the V0.9.3 bug: the client rejected
 every lap whose track-limits step counter rose, although a rise is only a fraction of an
 LMU warning point and LMU itself had not invalidated the lap.
 
-INVALIDATING and REVIEW_ONLY below must therefore match server/track_limits.py RULES
+INVALIDATING and REVIEW_ONLY below must therefore match server/laps/track_limits.py RULES
 (tests/test_v0931_verdict.py compares them). Since 0.9.3.1 the client also sends the
 reason codes, so the server never has to guess why a lap was rejected.
 
@@ -23,7 +23,7 @@ LATE_WINDOW_SECONDS after the line and records, change by change, what LMU repor
 time: the step counter, the finished lap's time (LMU's mLastLapTime — other LMU tools read
 a value <= 0 as "last lap invalid"; unconfirmed, so the server only asks for a review), the
 penalties, and when the new lap first left the track (to tell a late report of this lap
-from an early offence of the next one). See server/track_limits.py attribute_rise.
+from an early offence of the next one). See server/laps/track_limits.py attribute_rise.
 """
 
 from __future__ import annotations
@@ -31,12 +31,12 @@ from __future__ import annotations
 import time
 from typing import List, Optional
 
-# --- the rules (must match server/track_limits.py RULES; see the module docstring)
+# --- the rules (must match server/laps/track_limits.py RULES; see the module docstring)
 INVALIDATING = frozenset({
     "no_lap_time", "pit_lane",
     "game_invalidated", "game_time_not_counted", "game_lap_not_counted",
 })
-# V0.9.4: sector_times_implausible moved here — LMU writes the sector times late; a lap LMU
+# Sector_times_implausible moved here — LMU writes the sector times late; a lap LMU
 # counts is not rejected for an unknown sector split (the client also waits for them, parser.py)
 REVIEW_ONLY = frozenset({
     "track_limits_points", "penalty_added", "late_track_limits", "game_last_lap_time_withdrawn",
@@ -66,7 +66,7 @@ def lap_reasons(*, lap_time: float, in_pits: bool, sector1: float, sector2: floa
         reasons.append("no_lap_time")
     if in_pits:
         reasons.append("pit_lane")
-    # V0.9.4: a split at or beyond the lap time cannot belong to this lap (the previous lap's
+    # A split at or beyond the lap time cannot belong to this lap (the previous lap's
     # values, LMU had not updated them yet)
     if sector1 <= 0 or sector2 <= sector1 or (lap_time > 0 and sector2 >= lap_time):
         reasons.append("sector_times_implausible")

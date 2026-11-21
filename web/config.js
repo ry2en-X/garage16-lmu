@@ -1,19 +1,13 @@
-// config.js — sets the API base URL for THIS deployment of the web
-// frontend. Loaded as a plain (non-module) script, before js/router.js,
-// so window.LMU_GARAGE_API_BASE_URL is already set by the time
-// js/api.js reads it — see that file for the fallback logic.
+// config.js — where THIS copy of the website finds the API. Loaded as a plain (non-module) script
+// before js/main.js, so window.GARAGE16_API_BASE_URL is set by the time js/core/api.js reads it.
 //
-// Two deployment shapes:
+// Leave it "" (the default): the API is on the same address as the pages — under /api/v1. That is
+// true for both ways of serving the website:
 //
-//   1. Same domain as the API (the default docker-compose setup: Caddy
-//      serves both these static files AND the API, via path-based
-//      routing — see docker/Caddyfile). Leave this as "": requests go to
-//      whatever domain the page itself was loaded from.
+//   1. Cloudflare Pages: the Pages function
+//      (web/functions/_middleware.js) passes /api/* on to the NAS.
+//   2. The NAS itself: Caddy serves these files and the API on one address (docker/Caddyfile).
 //
-//   2. Separate domain (e.g. this web/ folder deployed to Cloudflare
-//      Pages, with the API running elsewhere on the NAS/VPS). Set this
-//      to the API's full public URL, e.g.:
-//        window.LMU_GARAGE_API_BASE_URL = "https://api.your-domain.example";
-//      The API's LMU_GARAGE_CORS_ORIGINS (.env) must then include this
-//      Pages domain, or the browser will block the requests.
-window.LMU_GARAGE_API_BASE_URL = "";
+// Only for local development with the pages on another port than the API, set the API's address,
+// e.g. "http://localhost:8000" (scripts/dev/serve_web.py does that for you). Do not commit that.
+window.GARAGE16_API_BASE_URL = "";

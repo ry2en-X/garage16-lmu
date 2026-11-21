@@ -46,7 +46,7 @@ from client.uploader.uploader import CLIENT_VERSION, Uploader
 SERVER_CHECK_INTERVAL_SECONDS = 600  # re-check for migration / min-version changes every 10 min
 SERVER_UNREACHABLE_RETRY_SECONDS = 60
 UPLOAD_POLL_SECONDS = 15
-LOCAL_CLEANUP_INTERVAL_SECONDS = 3600  # V0.9.1: drop old, already-uploaded local telemetry files hourly
+LOCAL_CLEANUP_INTERVAL_SECONDS = 3600  # Drop old, already-uploaded local telemetry files hourly
 
 logging.basicConfig(level=resolve_log_level(), format="%(asctime)s [%(name)s] %(message)s")
 logger = logging.getLogger("lmu_garage.main")
@@ -56,7 +56,7 @@ GRID_SCAN_EVERY_FRAMES = 600  # ~10 s at 60 Hz
 
 
 def _submit_held(parser: LapParser, saver) -> None:
-    """V0.9.3.1: a FINISHED lap still held for its late window is saved before the parser is
+    """A FINISHED lap still held for its late window is saved before the parser is
     reset (game closed, telemetry error) — it is a complete lap, only its late window is
     marked incomplete."""
     try:
@@ -94,7 +94,7 @@ def telemetry_loop(app: GarageApp, recorder: LapRecorder) -> None:
 
     saver = AsyncLapSaver(recorder, on_saved=lap_saved)
     atexit.register(saver.flush, 15.0)
-    # V0.9.3.1: runs BEFORE the flush above (atexit is last-in, first-out): a finished lap
+    # Runs BEFORE the flush above (atexit is last-in, first-out): a finished lap
     # still held for its late window is queued, then the queue is written
     atexit.register(_submit_held, parser, saver)
 
@@ -105,13 +105,13 @@ def telemetry_loop(app: GarageApp, recorder: LapRecorder) -> None:
             frames_until_grid = 0
             for frame in reader.stream(poll_hz=60.0, idle_seconds=1.0):
                 if frame is None:
-                    # V0.9.3.1: no player car (menu, garage) — a lap held for its late
+                    # No player car (menu, garage) — a lap held for its late
                     # window after the finish line is sent once its time limit is over
                     held = parser.idle()
                     if held is not None:
                         saver.submit(held)
                     continue
-                # V0.9.3: the cars of the session (veh_filename -> model), every ~10 s —
+                # The cars of the session (veh_filename -> model), every ~10 s —
                 # a few short strings per car, never on every frame
                 frames_until_grid -= 1
                 if frames_until_grid <= 0:
@@ -146,7 +146,7 @@ def telemetry_loop(app: GarageApp, recorder: LapRecorder) -> None:
 def uploader_loop(app: GarageApp, recorder: LapRecorder, config: ClientConfig, reconfig_queue: "queue.Queue[ClientConfig]") -> None:
     """Runs in a background thread. `config` was already resolved on the
     MAIN thread (client/main.py's main()) — first-run setup is a GUI
-    dialog now (V0.8.6), and Tkinter dialogs must run on the main thread,
+    dialog now, and Tkinter dialogs must run on the main thread,
     so config loading can no longer happen in here.
 
     Every SERVER_CHECK_INTERVAL_SECONDS (and immediately at startup) one
@@ -220,7 +220,7 @@ def uploader_loop(app: GarageApp, recorder: LapRecorder, config: ClientConfig, r
                 announced_lap_id = uploader.last_uploaded_lap_id
                 app.push(StatusUpdate(log_only=True, last_lap_id=announced_lap_id))
 
-            # V0.9.1: local retention. Only laps the server already accepted, only after
+            # Local retention. Only laps the server already accepted, only after
             # the configured number of days (default 14, 0 = keep everything) — see
             # LapRecorder.cleanup_uploaded. A failure here must never stop uploads.
             if now >= next_cleanup:
@@ -319,7 +319,11 @@ def main() -> None:
         "does this automatically for HTTPS servers.",
     )
     parser.add_argument("--version", action="store_true", help="Print the client version and exit.")
-    # V0.9.2: started by the window's "Open analysis" button (Client + analysis app)
+    parser.add_argument(
+        "--minimized", action="store_true",
+        help="Start with the window minimized to the taskbar (the installer's autostart option).",
+    )
+    # Started by the window's "Open analysis" button (Client + analysis app)
     parser.add_argument("--analysis-window", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--lap", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--view", choices=("laptime", "stints"), default="laptime", help=argparse.SUPPRESS)
@@ -355,7 +359,7 @@ def main() -> None:
 
     _attach_file_logging()
 
-    # Setup happens HERE, on the main thread, as a window (V0.8.6) —
+    # Setup happens HERE, on the main thread, as a window —
     # never as console prompts, and never on a background thread (Tk
     # dialogs must run on the main thread). Headless/dev callers of
     # load_config() without a setup_ui still get the console wizard.
@@ -386,7 +390,7 @@ def main() -> None:
         )
 
     app = holder["app"] = GarageApp(on_reconnect=on_reconnect, on_open_analysis=launcher.open,
-                                    analysis_choice=analysis_choice)
+                                    analysis_choice=analysis_choice, start_minimized=args.minimized)
     recorder = LapRecorder(data_dir=str(resolve_data_dir()))
 
     run_in_background(telemetry_loop, app, recorder)

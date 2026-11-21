@@ -3,7 +3,7 @@
 # runs migrations as an explicit deploy step, THEN starts the app.
 #
 # Secrets: works with EITHER plain .env values OR Docker secrets, with no
-# code change either way — server/config.py only ever sees a normal
+# code change either way — server/core/config.py only ever sees a normal
 # environment variable. For each secret NAME below, if NAME_FILE is set
 # (pointing at a file — a Docker secret is mounted as one under
 # /run/secrets/<name> by default), its content is read into NAME. Compose
@@ -48,14 +48,14 @@ resolve_secret() {
     fi
 }
 
-for secret_name in POSTGRES_PASSWORD LMU_GARAGE_SECRET_KEY LMU_GARAGE_REGISTRATION_SECRET LMU_GARAGE_ADMIN_TOKEN; do
+for secret_name in POSTGRES_PASSWORD GARAGE16_SECRET_KEY GARAGE16_REGISTRATION_SECRET GARAGE16_ADMIN_TOKEN; do
     resolve_secret "$secret_name"
 done
 
-# Build LMU_GARAGE_DB_URL from pieces unless it was already set directly
+# Build GARAGE16_DB_URL from pieces unless it was already set directly
 # (e.g. pointing at an external/managed Postgres instance instead of the
 # db container — still supported, this is just the default path).
-if [ -z "${LMU_GARAGE_DB_URL:-}" ]; then
+if [ -z "${GARAGE16_DB_URL:-}" ]; then
     : "${POSTGRES_HOST:=db}"
     : "${POSTGRES_PORT:=5432}"
     : "${POSTGRES_DB:=garage16}"
@@ -64,12 +64,12 @@ if [ -z "${LMU_GARAGE_DB_URL:-}" ]; then
         echo "[entrypoint] ERROR: POSTGRES_PASSWORD (or POSTGRES_PASSWORD_FILE) is not set." >&2
         exit 1
     fi
-    export LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
+    export GARAGE16_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}"
 fi
 
 # BUGFIX (found via real deployment testing, 2026-09-26): fix ownership
 # of the telemetry storage directory before dropping to the non-root
-# `garage` user. When LMU_GARAGE_STORAGE_DIR points at a Docker volume
+# `garage` user. When GARAGE16_STORAGE_DIR points at a Docker volume
 # (the normal docker-compose case — see that file's `telemetry_data`
 # mount), Docker creates the mount point itself the first time it's
 # used, owned by root — a Dockerfile-time `chown` can't reach it, since
@@ -80,22 +80,22 @@ fi
 # (see Dockerfile.server — no more `USER garage` there) and drops
 # privileges itself, right here, via gosu — after this point everything
 # (migrations, the server process) runs as `garage`, not root.
-: "${LMU_GARAGE_STORAGE_DIR:=/app/server_telemetry_storage}"
-mkdir -p "$LMU_GARAGE_STORAGE_DIR"
-# V0.9.9.3: the backup's write lock file (server/write_lock.py) exists BEFORE anything else can
+: "${GARAGE16_STORAGE_DIR:=/app/server_telemetry_storage}"
+mkdir -p "$GARAGE16_STORAGE_DIR"
+# The backup's write lock file (server/ops/write_lock.py) exists BEFORE anything else can
 # create it — created by root (the backup helper) it blocked every upload with PermissionError.
-touch "$LMU_GARAGE_STORAGE_DIR/.garage16-write.lock"
-chmod 664 "$LMU_GARAGE_STORAGE_DIR/.garage16-write.lock"
-chown -R garage:garage "$LMU_GARAGE_STORAGE_DIR"
+touch "$GARAGE16_STORAGE_DIR/.garage16-write.lock"
+chmod 664 "$GARAGE16_STORAGE_DIR/.garage16-write.lock"
+chown -R garage:garage "$GARAGE16_STORAGE_DIR"
 
 echo "[entrypoint] Running migrations (alembic upgrade head)..."
 gosu garage alembic upgrade head
 
 echo "[entrypoint] Starting server..."
-# LMU_GARAGE_WORKERS: number of uvicorn worker processes. Each worker has
-# its OWN in-memory rate-limit state (server/rate_limit.py) and its own DB
+# GARAGE16_WORKERS: number of uvicorn worker processes. Each worker has
+# its OWN in-memory rate-limit state (server/core/rate_limit.py) and its own DB
 # connection pool — see that module's docstring for the multi-worker
 # caveat. Defaults to 1 (safest, matches this project's current scale);
 # raise it once traffic actually needs it, and replace the rate limiter
 # with a Redis-backed one first if you do.
-exec gosu garage uvicorn server.main:app --host 0.0.0.0 --port 8000 --workers "${LMU_GARAGE_WORKERS:-1}"
+exec gosu garage uvicorn server.main:app --host 0.0.0.0 --port 8000 --workers "${GARAGE16_WORKERS:-1}"

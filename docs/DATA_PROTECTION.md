@@ -1,27 +1,27 @@
-# Datenschutz — welche Daten Garage16 speichert, wozu, wie lange (V1.0.1)
+# Datenschutz — welche Daten Garage16 speichert, wozu, wie lange (V1.0.2)
 
 Bestandsaufnahme für den Betreiber. **Ab V1.0 steht die fertige Datenschutzerklärung auf der
 Website** (Rechtliches → Datenschutz, Text in `web/js/legal/de.js` und `web/js/legal/en.js`); sie
 beruht auf dieser Tabelle. Wer hier etwas ändert, ändert dort mit (und `TERMS_VERSION` in
-`server/routers/legal.py`). Keine Rechtsberatung.
+`server/api/v1/legal.py`). Keine Rechtsberatung.
 
 ## Was gespeichert wird
 
 | Daten | Wo | Zweck | Wer sieht es | Aufbewahrung |
 |---|---|---|---|---|
 | Anzeigename, Konto-ID, Anlagedatum | DB `drivers` | Leaderboards, Teams, Profil | öffentlich (Name), Admin | bis zur Löschung |
-| E-Mail (seit V1.0 bei der Registrierung Pflicht; Konten von davor teils ohne), Bestätigungsstatus | DB `drivers` | Web-Login, Anmeldung des Clients, Passwort-Reset | nur der Fahrer, Admin | bis zur Löschung; **V1.0.1:** eine Anmeldung, deren E-Mail nie bestätigt wird (ohne Runden, ohne Team), nach **7 Tagen** (`LMU_GARAGE_UNVERIFIED_ACCOUNT_DAYS`) |
+| E-Mail (seit V1.0 bei der Registrierung Pflicht; Konten von davor teils ohne), Bestätigungsstatus | DB `drivers` | Web-Login, Anmeldung des Clients, Passwort-Reset | nur der Fahrer, Admin | bis zur Löschung; **V1.0.1:** eine Anmeldung, deren E-Mail nie bestätigt wird (ohne Runden, ohne Team), nach **7 Tagen** (`GARAGE16_UNVERIFIED_ACCOUNT_DAYS`) |
 | V1.0.1: Vergleichsform des Anzeigenamens (Kleinbuchstaben, normalisiert) | DB `drivers.display_name_key` | eindeutige Namen | niemand (abgeleitet vom öffentlichen Namen) | wie der Name |
 | Passwort | DB `drivers.password_hash` (Argon2, nie im Klartext) | Web-Login, ab V1.0 auch Anmeldung des Clients | niemand | bis zur Löschung |
 | V1.0: Zustimmung zu Nutzungsbedingungen/Datenschutz (Zeitpunkt, Fassung) | DB `drivers.terms_accepted_at`, `terms_version` | Nachweis der Zustimmung bei der Registrierung und (V1.0.1) bei jeder neuen Fassung | Admin; der Fahrer im Export | bis zur Löschung |
-| Desktop-Token (Hash) je Konto, Client-Geheimnis (verschlüsselt, `LMU_GARAGE_SECRET_KEY`) | DB `drivers` | Upload-Authentifizierung und -Signatur | niemand | bis zur Löschung / Erneuerung |
+| Desktop-Token (Hash) je Konto, Client-Geheimnis (verschlüsselt, `GARAGE16_SECRET_KEY`) | DB `drivers` | Upload-Authentifizierung und -Signatur | niemand | bis zur Löschung / Erneuerung |
 | V1.0.1: verbundene PCs — Token (Hash), Name des PCs (Computername, vom Client gemeldet), verbunden am, zuletzt genutzt, getrennt am | DB `device_tokens` | Anmeldung mehrerer PCs; der Fahrer sieht und trennt sie (Konto → Verbundene PCs) | der Fahrer, Admin; im Export ohne Token | bis zur Löschung des Kontos (getrennte PCs bleiben als Zeile mit Zeitpunkt, ohne gültiges Token) |
 | Discord-Nutzer-ID (optional) | DB `drivers` | Rekord-Ankündigungen mit Erwähnung | Admin | bis Trennung / Löschung |
 | Web-Sitzungen (Token-Hash, Ablauf, Browser-Kennung) | DB `sessions` | angemeldet bleiben, Sitzungen beenden | der Fahrer (Konto → Sitzungen) | bis Ablauf / Abmeldung / Löschung |
 | Runden: Strecke, Auto, Zeiten, Sektoren, Gültigkeit mit Begründung, Kennzahlen, Temperaturen, Client-Version | DB `laps` | Leaderboards, Analyse, Prüfung | gültige Runden: angemeldete Nutzer; ungültige: nur der Fahrer, Admin | bis zur Löschung |
 | Telemetrie (eine Datei pro Runde: Eingaben, Tempo, Position auf der Strecke, Fahrzeugdaten) — **die empfangene Originaldatei**, unverändert und schreibgeschützt (0440) | Volume `telemetry_data` | Analyse, Nachprüfbarkeit | wie die Runde (eine zurückgestellte Runde: nur der Fahrer und Admins) | wie die Runde |
 | V0.9.9: Fingerabdruck der Originaldatei: SHA-256, Größe, Request-ID des Uploads, Server-Signatur (MAC) | DB `laps` | Manipulation an gespeicherten Runden erkennen | Admin; der Fahrer im Export | wie die Runde |
-| V0.9.9: Audit-Protokoll: Zeit, Ereignis (angenommen, zurückgestellt, freigegeben, Admin-Entscheidung, neu bewertet, Fahrer gelöscht), Runden-ID, Fahrer-ID, Request-ID, Details (Prüfsumme, Größe, Befund-Codes, Prüfversionen; **keine** Namen, E-Mails, Tokens, IPs, Telemetrie-Inhalte) | DB `audit_events` | Nachvollziehbarkeit von Integritäts- und Prüfentscheidungen | Admin; der Fahrer im Export (seine Ereignisse) | **365 Tage** (`LMU_GARAGE_AUDIT_RETENTION_DAYS`, mind. 30) |
+| V0.9.9: Audit-Protokoll: Zeit, Ereignis (angenommen, zurückgestellt, freigegeben, Admin-Entscheidung, neu bewertet, Fahrer gelöscht), Runden-ID, Fahrer-ID, Request-ID, Details (Prüfsumme, Größe, Befund-Codes, Prüfversionen; **keine** Namen, E-Mails, Tokens, IPs, Telemetrie-Inhalte) | DB `audit_events` | Nachvollziehbarkeit von Integritäts- und Prüfentscheidungen | Admin; der Fahrer im Export (seine Ereignisse) | **365 Tage** (`GARAGE16_AUDIT_RETENTION_DAYS`, mind. 30) |
 | Rekord-Ereignisse | DB `record_events` | Feeds, Discord | angemeldete Nutzer | bis zur Löschung des Fahrers |
 | Teams, Mitgliedschaften, Einladungen | DB | Teamfunktionen | Teammitglieder | bis Austritt / Löschung |
 | Meldungen zu Runden | DB `lap_reports` | Moderation | Admin | bis Löschung des Fahrers |
@@ -38,7 +38,7 @@ Runden mit Metadaten, Teams, Sitzungen, Rekorde, Upload-Protokoll, **seit V0.9.9
 jeder Originaldatei (`lap_files`: SHA-256, Größe, Upload-Zeit, Request-ID, Prüfstatus) und die
 Audit-Ereignisse zu seinen Runden (`audit_events`, ohne die Signaturen)**, seit V1.0.1 auch die
 verbundenen PCs (`devices`: Name und Zeitpunkte, ohne Token) — maschinenlesbar (JSON). Die Telemetriedateien selbst lassen
-sich je Runde im LapTime Analyzer ansehen.
+sich je Runde in der Rundenanalyse ansehen.
 
 ## Löschung
 
@@ -50,9 +50,9 @@ der Ereignisse entfernt (die Ereignisse selbst bleiben als Verlauf der — jetzt
 ohne Personenbezug außer der Runden-ID, und laufen mit der Aufbewahrung aus); die Löschung selbst
 wird nur mit der Anzahl der Runden protokolliert. Die Fahrer-ID gehört absichtlich nicht zur
 Hash-Kette, damit das ohne Kettenbruch geht. Besitzt er ein Team mit anderen Mitgliedern, wird erst
-die Besitzerrolle übertragen. Getestet: `tests/test_driver_deletion.py` (eine Wächter-Prüfung schlägt
+die Besitzerrolle übertragen. Getestet: `tests/accounts/test_driver_deletion.py` (eine Wächter-Prüfung schlägt
 fehl, sobald eine neue Tabelle auf Fahrer verweist, ohne in der Löschung berücksichtigt zu sein),
-`tests/test_v097_operations.py`.
+`tests/ops/test_upload_log.py`.
 
 **Grenzen, die in die Datenschutzerklärung gehören:**
 * **Backups** enthalten gelöschte Daten noch bis zu 14 Tage (bis das Backup selbst gelöscht wird).
@@ -63,19 +63,29 @@ fehl, sobald eine neue Tabelle auf Fahrer verweist, ohne in der Löschung berüc
 
 ## Verantwortung beim Betrieb
 
-* `LMU_GARAGE_SECRET_KEY` schützt die Client-Geheimnisse; Wechsel: `docs/RUNBOOKS.md` Punkt 8.
-* V0.9.9: `LMU_GARAGE_INTEGRITY_KEY` signiert die Fingerabdrücke der Runden und das Audit-Protokoll
-  (ein eigener Schlüssel für einen eigenen Zweck; nicht gesetzt: aus `LMU_GARAGE_SECRET_KEY`
+* `GARAGE16_SECRET_KEY` schützt die Client-Geheimnisse; Wechsel: `docs/RUNBOOKS.md` Punkt 8.
+* V0.9.9: `GARAGE16_INTEGRITY_KEY` signiert die Fingerabdrücke der Runden und das Audit-Protokoll
+  (ein eigener Schlüssel für einen eigenen Zweck; nicht gesetzt: aus `GARAGE16_SECRET_KEY`
   abgeleitet). Er steht nur in `.env` (bzw. als Docker-Secret), nie im Repository, in Logs oder in
   Backups. Wechsel und Verlust: `docs/RUNBOOKS.md` Punkt 16. Eine Signatur beweist nur, dass der Server
   den Datensatz so gespeichert hat — nicht, dass die Spieldaten echt sind.
 * Backups liegen unverschlüsselt — auf einer Platte, auf die nur der Betreiber Zugriff hat, ablegen.
 * Öffentlich (ohne Anmeldung) sind nur: Leaderboards, Streckenbibliothek, Kanalliste, öffentliche
-  Fahrerprofile, Health-Checks (`tests/test_v097_permissions.py` prüft das für jeden Endpunkt).
+  Fahrerprofile, Health-Checks (`tests/security/test_permissions.py` prüft das für jeden Endpunkt).
 * V1.0.1: Die Datenschutzerklärung (Fassung `2026-10-26`) nennt die neuen Daten (Name des PCs,
   Löschung unbestätigter Anmeldungen, Prüfwert der E-Mail bei Anmeldeversuchen, Prüfung der Runden
   neuer Fahrer). Weil sich die Fassung geändert hat, fragt die Website alle angemeldeten Fahrer einmal
-  nach Zustimmung (`POST /accounts/accept-terms`).
+  nach Zustimmung (`POST /api/v1/accounts/accept-terms`).
+* V1.0.2: Neue gespeicherte Daten gibt es nicht; die Kurz-Namen in den Adressen (`/driver/<name>`)
+  werden aus dem öffentlichen Fahrer-/Teamnamen gebildet, alte Kurz-Namen leiten nach einem
+  Umbenennen weiter (Tabelle `slug_redirects`, gelöscht mit dem Fahrer bzw. Team). **Wird die
+  Website auf Cloudflare Pages umgestellt**, liefert Cloudflare auch die Seite selbst aus (bisher nur
+  der Tunnel). Cloudflare steht schon als Dienstleister in der Datenschutzerklärung, mit denselben
+  Daten (Anfragen inkl. IP-Adresse); vor dem Umstellen den Zweck in der Cloudflare-Zeile ergänzen
+  (`web/js/legal/de.js`, `en.js`) und — falls der Webspace bei ALL-INKL dann nicht mehr genutzt
+  wird — dessen Zeile anpassen. Jede Änderung der Texte heißt: `DATE` und `TERMS_VERSION`
+  (`server/api/v1/legal.py`) anpassen; danach stimmen alle Fahrer einmal neu zu. In V1.0.2 sind die
+  Texte bewusst unverändert, weil die Umstellung optional ist.
 * V1.0: Name, Anschrift und E-Mail des Betreibers für Impressum und Datenschutzerklärung stehen in
-  `.env` (`LMU_GARAGE_OPERATOR_*`) und werden nur über `GET /legal` an die Seite „Rechtliches“
+  `.env` (`GARAGE16_OPERATOR_*`) und werden nur über `GET /legal` an die Seite „Rechtliches“
   gegeben (mit `X-Robots-Tag: noindex`) — nie im Repository.

@@ -18,7 +18,7 @@ Abkürzungen (einmal pro SSH-Sitzung einfügen):
 ALT="/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_8/Garage16 - LMU"
 NEU="/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_9/Garage16 - LMU"
 BK=/volumeUSB2/usbshare/garage16-backups
-RUN_IN_SERVER() { sudo docker compose exec -T server sh -c "LMU_GARAGE_DB_URL=\"postgresql+psycopg://\${POSTGRES_USER}:\${POSTGRES_PASSWORD}@\${POSTGRES_HOST}:\${POSTGRES_PORT}/\${POSTGRES_DB}\" $*"; }
+RUN_IN_SERVER() { sudo docker compose exec -T server sh -c "GARAGE16_DB_URL=\"postgresql+psycopg://\${POSTGRES_USER}:\${POSTGRES_PASSWORD}@\${POSTGRES_HOST}:\${POSTGRES_PORT}/\${POSTGRES_DB}\" $*"; }
 ```
 `RUN_IN_SERVER` immer aus dem Ordner aufrufen, dessen Stack gerade läuft (`cd "$ALT"` oder `cd "$NEU"`).
 
@@ -38,18 +38,18 @@ Damit der Vergleich V0.9.8 ↔ V0.9.9 auf derselben Hardware mit denselben Runde
 2. Lap-Check und Hash auf dem NAS mit V0.9.8 messen (liest nur):
    ```
    cd "$ALT"
-   sudo docker compose cp "$NEU/scripts/bench_server.py" server:/tmp/bench_server.py
+   sudo docker compose cp "$NEU/scripts/dev/bench_server.py" server:/tmp/bench_server.py
    RUN_IN_SERVER python /tmp/bench_server.py --root /app --laps 20 --repeat 3 > ~/bench_098.json
    tail -25 ~/bench_098.json
    ```
    Erwartet: JSON mit `"version": "0.9.8"`, `"laps": 20` (oder weniger, wenn du weniger Runden hast)
    und Werten unter `median`.
 3. API-Antwortzeiten von außen (auf dem Mac, Terminal, im entpackten Ordner — Python 3 reicht).
-   Zwei Runden-IDs derselben Strecke aus der Website (Analyse-URL `#/analysis?a=<ID>`) und dein
+   Zwei Runden-IDs derselben Strecke aus der Website (Analyse-Adresse `/analysis/<ID>`) und dein
    Desktop-Token (auf dem Windows-PC in `C:\Users\<Name>\.lmu_garage\client_config.json`, Eintrag
    `auth_token`):
    ```
-   python3 -m scripts.load_test https://garage16.de --token <TOKEN> --lap-a <ID1> --lap-b <ID2> --users 4 --seconds 30 > ~/load_098.txt
+   python3 -m scripts.dev.load_test https://garage16.de --token <TOKEN> --lap-a <ID1> --lap-b <ID2> --users 4 --seconds 30 > ~/load_098.txt
    tail -15 ~/load_098.txt
    ```
    Nur laufen lassen, wenn gerade niemand fährt.
@@ -93,21 +93,21 @@ Genau wie `docs/ADMIN_GUIDE.md` „Neu in V0.9.9“, Schritte 1–5. Zusätzlich
 1. **Integrität aller Dateien** (Dauer ≈ Gesamtgröße ÷ 100–300 MB/s):
    ```
    cd "$NEU"
-   RUN_IN_SERVER python -m scripts.integrity_check --json /tmp/integrity_before.json
+   RUN_IN_SERVER python -m scripts.ops.integrity_check --json /tmp/integrity_before.json
    ```
    Erwartet: `ok (unsigned)` für alle Runden (sie sind vor V0.9.9 gespeichert) und
    `Audit chain: OK`. Exit-Code 1 + Zeilen `FAILED lap …` = gefunden: notieren (Runde, Grund).
 2. **Signieren** (ändert nur die drei neuen Spalten und stellt kaputte Runden zurück):
    ```
-   RUN_IN_SERVER python -m scripts.integrity_check --apply --backfill
-   RUN_IN_SERVER python -m scripts.integrity_check
+   RUN_IN_SERVER python -m scripts.ops.integrity_check --apply --backfill
+   RUN_IN_SERVER python -m scripts.ops.integrity_check
    ```
    Der zweite Lauf muss `ok (ok)` für alle intakten Runden zeigen.
-   **Wenn Runden „missing“ sind:** zuerst `RUN_IN_SERVER python -m scripts.consistency_check` —
+   **Wenn Runden „missing“ sind:** zuerst `RUN_IN_SERVER python -m scripts.ops.consistency_check` —
    fehlen viele, ist das Volume nicht richtig eingebunden (STOPP, mir schreiben); einzelne: Runbook 12.
 3. **Trockenlauf der V0.9.9-Regeln über alle alten Runden:**
    ```
-   RUN_IN_SERVER python -m scripts.revalidate_laps --hold --details 200 > ~/v099_trockenlauf.txt
+   RUN_IN_SERVER python -m scripts.ops.revalidate_laps --hold --details 200 > ~/v099_trockenlauf.txt
    grep -A40 "^Summary" ~/v099_trockenlauf.txt
    ```
    Die Zusammenfassung zeigt je Übergang die Anzahl und die Gründe. Wichtig sind:
@@ -143,7 +143,7 @@ Papier oder Handy eine Tabelle: `Runde Nr. | Rundenzeit | sauber/Verstoß | Kurv
 5. **Grenzfälle** (5–10): alle vier Räder knapp (ca. eine Handbreit) über der Linie, nur auf dem Kerb.
 
 Danach auf der Website unter Dashboard → Meine Runden die Runden der Session suchen (Zeit und Uhrzeit
-vergleichen) und die **Runden-ID** aus dem Link „Analysieren“ (`#/analysis?a=<ID>`) in die Tabelle
+vergleichen) und die **Runden-ID** aus dem Link „Analysieren“ (`/analysis/<ID>`) in die Tabelle
 übertragen. Dann die Datei `labels.csv` anlegen (Vorlage: `docs/trackcheck_labels_vorlage.csv`,
 Beispielzeilen löschen):
 ```
@@ -161,7 +161,7 @@ Linie). Bist du dir bei einer Runde nicht sicher: **weglassen** (lieber weniger,
 ```
 cd "$NEU"
 sudo docker compose cp ~/labels.csv server:/tmp/labels.csv
-RUN_IN_SERVER python -m scripts.trackcheck_eval --labels /tmp/labels.csv --json /tmp/real_eval.json --markdown /tmp/real_eval.md
+RUN_IN_SERVER python -m scripts.ops.trackcheck_eval --labels /tmp/labels.csv --json /tmp/real_eval.json --markdown /tmp/real_eval.md
 sudo docker compose cp server:/tmp/real_eval.md ~/real_eval.md
 sudo docker compose cp server:/tmp/real_eval.json ~/real_eval.json
 cat ~/real_eval.md
@@ -188,8 +188,8 @@ Ich passe danach — falls nötig — die Schwellen an und dokumentiere die echt
 Wie Teil A, Schritte 2–4, nur im neuen Ordner und mit neuen Dateinamen:
 ```
 cd "$NEU"
-RUN_IN_SERVER python -m scripts.bench_server --root /app --laps 20 --repeat 3 > ~/bench_099.json
-python3 -m scripts.load_test https://garage16.de --token <TOKEN> --lap-a <ID1> --lap-b <ID2> --users 4 --seconds 30 > ~/load_099.txt
+RUN_IN_SERVER python -m scripts.dev.bench_server --root /app --laps 20 --repeat 3 > ~/bench_099.json
+python3 -m scripts.dev.load_test https://garage16.de --token <TOKEN> --lap-a <ID1> --lap-b <ID2> --users 4 --seconds 30 > ~/load_099.txt
 ```
 (`load_test` auf dem Mac, mit denselben IDs wie in Teil A.) Nach einer Woche Betrieb: Screenshot
 Admin → Betrieb „letzte 7 Tage“.
@@ -207,21 +207,21 @@ Entscheidungsschicht; beim ersten Öffnen einer Analyse einmal das Hashen der Da
 
 ## Teil F — Backup und Restore mit V0.9.9 einmal üben (optional, aber empfohlen)
 
-1. Backup: `sudo ./scripts/backup.sh "$BK"`; im neuen `manifest.json` muss `"audit_head": {"id": …}` stehen.
+1. Backup: `sudo ./scripts/ops/backup.sh "$BK"`; im neuen `manifest.json` muss `"audit_head": {"id": …}` stehen.
 2. Restore-Übung **auf einer Kopie** ist auf dem NAS aufwendig; der Restore wurde im Drill-Test
-   automatisch geprüft (`tests/test_v098_backup_restore.py`, läuft bei jedem Release). Wenn du es
+   automatisch geprüft (`tests/ops/test_backup_restore_drill.py`, läuft bei jedem Release). Wenn du es
    trotzdem real üben willst: nur nach `docs/ROLLBACK.md` Abschnitt 3 und vorher ein frisches Backup.
 
 ---
 
 ## Optionale Härtung (deine Entscheidung)
 
-* **Alte Clients sperren:** in `.env` `LMU_GARAGE_MIN_CLIENT_VERSION=0.9.4` und
+* **Alte Clients sperren:** in `.env` `GARAGE16_MIN_CLIENT_VERSION=0.9.4` und
   `sudo docker compose up -d server`. Dann muss jede Runde alle Tracklimit-Signale enthalten; ältere
   Clients bekommen „bitte aktualisieren“ (ihre Runden bleiben im Client).
 * **Integritätsprüfung regelmäßig:** Synology Aufgabenplaner → Benutzerdefiniertes Skript, wöchentlich:
   ```
-  cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_9/Garage16 - LMU" && sudo docker compose exec -T server sh -c 'LMU_GARAGE_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.integrity_check --apply'
+  cd "/volume1/homes/Moritz/garage16/Garage16_Lmu_V0_9_9/Garage16 - LMU" && sudo docker compose exec -T server sh -c 'GARAGE16_DB_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" python -m scripts.ops.integrity_check --apply'
   ```
   Mit „Ausführungsdetails per E-Mail senden“ bekommst du eine Mail, wenn etwas zurückgestellt wurde.
 

@@ -1,7 +1,7 @@
-// analysis/distribution.js — histograms (V0.9.3): the damper window and the
+// analysis/distribution.js — histograms: the damper window and the
 // "histogram of any channel" window.
 //
-// The numbers come from GET /telemetry/analysis/distribution (server/routers/analysis.py),
+// The numbers come from GET /telemetry/analysis/distribution (server/api/v1/analysis.py),
 // fetched through ctx.fetchDistribution (the page binds it to the two laps):
 // per channel the bin edges (the same for both laps) and, per lap, the share of the lap's
 // TIME in each bin. Nothing here depends on the cursor, so these windows never redraw
@@ -11,11 +11,11 @@
 // velocity in mm/s, bump (compression) positive to the right, rebound negative to the
 // left; the vertical lines mark the low/high-speed split (`knee`, default 25 mm/s).
 
-import { el } from "../format.js";
+import { el } from "../core/format.js";
 import { coalesce, cssVar, fitCanvas, onResize } from "./charts.js";
 import { formatValue, LAP_COLORS, niceTicks, WHEEL_LABEL, WHEELS } from "./model.js";
 
-import { t } from "../i18n.js";
+import { t } from "../core/i18n.js";
 
 const PAD = { left: 40, right: 8, top: 8, bottom: 22 };
 export const DAMPER_CHANNELS = WHEELS.map((w) => `damper_vel_${w}`);

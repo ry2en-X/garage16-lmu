@@ -1,123 +1,123 @@
 {
- "_comment": "V0.9.8/V0.9.9 \u2014 line / branch coverage floors (percent) checked by scripts/release_check.py. A floor is the level reached when it was set, rounded down: it may rise, never fall. Goal for the critical modules: 90 % lines, 85 % branches \u2014 the modules below it are listed in docs/QUALITY.md with what is missing.",
+ "_comment": "V0.9.8/V0.9.9 \u2014 line / branch coverage floors (percent) checked by scripts/release/release_check.py. A floor is the level reached when it was set, rounded down: it may rise, never fall. Goal for the critical modules: 90 % lines, 85 % branches \u2014 the modules below it are listed in docs/QUALITY.md with what is missing.",
  "total": {
   "lines": 88,
   "branches": 77
  },
  "files": {
-  "server/auth.py": {
+  "server/accounts/auth.py": {
    "lines": 100,
    "branches": 100
   },
-  "server/records.py": {
+  "server/laps/records.py": {
    "lines": 100,
    "branches": 100
   },
-  "server/driver_lifecycle.py": {
+  "server/accounts/driver_lifecycle.py": {
    "lines": 100,
    "branches": 100
   },
-  "server/leaderboard_ranking.py": {
+  "server/laps/leaderboard_ranking.py": {
    "lines": 100,
    "branches": 100
   },
-  "server/security.py": {
+  "server/core/security.py": {
    "lines": 90,
    "branches": 62
   },
-  "server/crypto.py": {
+  "server/core/crypto.py": {
    "lines": 100,
    "branches": 87
   },
-  "server/client_ip.py": {
+  "server/core/client_ip.py": {
    "lines": 97,
    "branches": 95
   },
-  "server/rate_limit.py": {
+  "server/core/rate_limit.py": {
    "lines": 97,
    "branches": 83
   },
-  "server/write_lock.py": {
+  "server/ops/write_lock.py": {
    "lines": 96,
    "branches": 77
   },
-  "server/sessions.py": {
+  "server/accounts/sessions.py": {
    "lines": 100,
    "branches": 87
   },
-  "server/validation.py": {
+  "server/laps/validation.py": {
    "lines": 93,
    "branches": 80
   },
-  "server/lap_check.py": {
+  "server/laps/lap_check.py": {
    "lines": 96,
    "branches": 92
   },
-  "server/track_limits.py": {
+  "server/laps/track_limits.py": {
    "lines": 94,
    "branches": 84
   },
-  "server/distance_axis.py": {
+  "server/analysis/distance_axis.py": {
    "lines": 95,
    "branches": 71
   },
-  "server/telemetry_analysis.py": {
+  "server/analysis/telemetry_analysis.py": {
    "lines": 92,
    "branches": 74
   },
-  "server/lap_insights.py": {
+  "server/analysis/lap_insights.py": {
    "lines": 97,
    "branches": 85
   },
-  "server/car_identity.py": {
+  "server/catalog/car_identity.py": {
    "lines": 97,
    "branches": 89
   },
-  "server/consistency.py": {
+  "server/ops/consistency.py": {
    "lines": 83,
    "branches": 75
   },
-  "server/upload_log.py": {
+  "server/ops/upload_log.py": {
    "lines": 96,
    "branches": 92
   },
-  "server/telemetry_lifecycle.py": {
+  "server/ops/telemetry_lifecycle.py": {
    "lines": 98,
    "branches": 90
   },
-  "server/team_lifecycle.py": {
+  "server/accounts/team_lifecycle.py": {
    "lines": 94,
    "branches": 85
   },
-  "server/routers/telemetry.py": {
+  "server/api/v1/telemetry.py": {
    "lines": 93,
    "branches": 90
   },
-  "server/lap_decision.py": {
+  "server/laps/lap_decision.py": {
    "lines": 97,
    "branches": 93
   },
-  "server/integrity.py": {
+  "server/laps/integrity.py": {
    "lines": 98,
    "branches": 97
   },
-  "server/audit.py": {
+  "server/ops/audit.py": {
    "lines": 97,
    "branches": 95
   },
-  "server/official.py": {
+  "server/laps/official.py": {
    "lines": 100,
    "branches": 100
   },
-  "server/request_context.py": {
+  "server/core/request_context.py": {
    "lines": 100,
    "branches": 100
   },
-  "server/fair_play.py": {
+  "server/laps/fair_play.py": {
    "lines": 100,
    "branches": 100
   },
-  "server/names.py": {
+  "server/accounts/names.py": {
    "lines": 100,
    "branches": 100
   }

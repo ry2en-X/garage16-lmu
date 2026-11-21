@@ -14,7 +14,7 @@ globalThis.sessionStorage = dom.window.sessionStorage;
 Object.defineProperty(globalThis, "navigator", { value: dom.window.navigator, configurable: true });
 globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
 globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0);
-dom.window.LMU_GARAGE_API_BASE_URL = "";
+dom.window.GARAGE16_API_BASE_URL = "";
 dom.window.localStorage.setItem("lmu_garage_session", JSON.stringify({ driverId: 1, displayName: "Me", viaCookie: true }));
 
 // no JavaScript error may escape anywhere in this test ("Keine JavaScript-Fehler")
@@ -102,9 +102,9 @@ globalThis.fetch = async (url) => {
   const u = new URL(url, "http://x");
   const json = (body, status = 200) => ({ ok: status < 400, status, statusText: String(status), json: async () => body, text: async () => JSON.stringify(body) });
   const p = u.pathname;
-  if (world.fail && p === "/telemetry/analysis/compare") return json({ detail: world.fail }, 404);
-  if (p === "/telemetry/analysis/channels") return json(CATALOG);
-  if (p === "/telemetry/analysis/compare") {
+  if (world.fail && p === "/api/v1/analysis/compare") return json({ detail: world.fail }, 404);
+  if (p === "/api/v1/public/analysis/channels") return json(CATALOG);
+  if (p === "/api/v1/analysis/compare") {
     const requested = (u.searchParams.get("channels") || "").split(",").filter(Boolean);
     const withB = u.searchParams.get("lap_b") !== null;
     if (u.searchParams.has("start") && u.searchParams.has("end")) {
@@ -119,46 +119,50 @@ globalThis.fetch = async (url) => {
     }
     return json(compareBody(requested, withB));
   }
-  if (p === "/telemetry/analysis/reference") {
+  if (p === "/api/v1/analysis/reference") {
     const answer = replies.reference[u.searchParams.get("kind")];
     return answer ? json(answer) : json({ detail: "unexpected" }, 500);
   }
-  if (p === "/telemetry/analysis/quick") return replies.quick ? json(replies.quick) : json({ detail: "unexpected" }, 500);
+  if (p === "/api/v1/analysis/quick") return replies.quick ? json(replies.quick) : json({ detail: "unexpected" }, 500);
   // V0.9.3: the events window (one small request per opened comparison)
-  if (p === "/telemetry/analysis/events") {
+  if (p === "/api/v1/analysis/events") {
     return json({
       track_limits: { a: { status: "valid", findings: [], signals: ["lap_invalidated", "client"], review_status: null }, b: u.searchParams.get("lap_b") ? { status: "valid", findings: [], signals: ["client"], review_status: null } : null },
       wheels: { a: [], b: u.searchParams.get("lap_b") ? [] : null },
     });
   }
-  const lapMatch = p.match(/^\/telemetry\/analysis\/laps\/(\d+)$/);
+  const lapMatch = p.match(/^\/api\/v1\/laps\/(\d+)\/analysis$/);
   if (lapMatch) {
     const answer = replies.lap[lapMatch[1]];
     if (answer) return answer.status ? json({ detail: answer.detail }, answer.status) : json(answer.body);
     return json({ lap: lapHeader(Number(lapMatch[1]), "Other", 88, [29, 30, 29]), available_channels: ["speed"] });
   }
-  if (p === "/telemetry/analysis/drivers/1/laps") return json({ driver_id: 1, driver_name: "Me", laps: [{ id: 11, lap_number: 3, lap_time: 91.2, is_valid: true, track_name: "Le Mans", car_name: "#7", car_model: "Ferrari 499P", uploaded_at: "2026-10-01T10:00:00", data_level: "full" }] });
-  if (p === "/telemetry/laps") return json([]);
-  if (p === "/drivers/1/public") return json({ personal_records: [], recent_activity: [] });
-  if (p === "/teams/mine") return json([]);
-  if (p === "/leaderboard/catalog/class-options") return json([{ name: "Hypercar", lap_count: 2 }]);
-  if (p.startsWith("/leaderboard/")) return json([]);
+  if (p === "/api/v1/drivers/1/laps") return json({ driver_id: 1, driver_name: "Me", laps: [{ id: 11, lap_number: 3, lap_time: 91.2, is_valid: true, track_name: "Le Mans", car_name: "#7", car_model: "Ferrari 499P", uploaded_at: "2026-10-01T10:00:00", data_level: "full" }] });
+  if (p === "/api/v1/laps") return json([]);
+  if (p === "/api/v1/public/drivers/1") return json({ personal_records: [], recent_activity: [] });
+  if (p === "/api/v1/teams/mine") return json([]);
+  if (p === "/api/v1/public/catalog/class-options") return json([{ name: "Hypercar", lap_count: 2 }]);
+  if (p.startsWith("/api/v1/public/leaderboards/")) return json([]);
   return json({ detail: `unexpected ${p}` }, 404);
 };
 
 const settle = (ms = 40) => new Promise((r) => setTimeout(r, ms));
+// V1.0.2: readable addresses — an old "#/analysis?..." test address becomes /analysis/... (quick
+// links keep their query in the hash: their track names are only resolved by the router)
+const { legacyHashToPath } = await import("../../web/js/core/routes.js");
+const visit = (hash) => window.history.replaceState(null, "", /quick=/.test(hash) ? `/analysis${hash}` : legacyHashToPath(hash));
 const { renderAnalysis, parseAnalysisExtras } = await import("../../web/js/pages/analysis.js");
-const { store } = await import("../../web/js/state.js");
+const { store } = await import("../../web/js/core/state.js");
 const { LAP_COLORS, DEFAULT_COLORS } = await import("../../web/js/analysis/model.js");
 const text = (node) => node.textContent.replace(/\s+/g, " ");
 const fresh = () => { document.body.innerHTML = `<main class="panel" id="app"></main>`; return document.getElementById("app"); };
 const LAYOUT_KEY = "garage16_analysis_layout";
-const compareCalls = () => calls.filter((u) => u.includes("/telemetry/analysis/compare")).map((u) => new URL(u, "http://x"));
+const compareCalls = () => calls.filter((u) => u.includes("/api/v1/analysis/compare")).map((u) => new URL(u, "http://x"));
 const order = (app) => [...app.querySelectorAll(".awin")].map((w) => w.getAttribute("data-channel") ? `chart:${w.getAttribute("data-channel")}` : w.getAttribute("data-type"));
 const stored = () => JSON.parse(localStorage.getItem(LAYOUT_KEY));
 async function open(hash = "#/analysis?a=1&b=2") {
   const app = fresh();
-  window.location.hash = hash;
+  visit(hash);
   await renderAnalysis(app);
   await settle(70);
   return app;
@@ -875,19 +879,19 @@ replies.reference.wr = refAnswer({});
 app.querySelector(".analysis-compare-open").click();
 calls.length = 0;
 await go();
-assert.ok(calls.some((u) => u.includes("/telemetry/analysis/reference") && u.includes("kind=wr") && u.includes("lap_id=1")));
+assert.ok(calls.some((u) => u.includes("/api/v1/analysis/reference") && u.includes("kind=wr") && u.includes("lap_id=1")));
 assert.equal(dialog(), null);
-assert.equal(window.location.hash, "#/analysis?a=1&b=7");
+assert.equal(window.location.pathname + window.location.search, "/analysis/1/vs/7");
 
 // not found: a plain message, no navigation, no substitute lap
-window.location.hash = "#/analysis?a=1&b=2";
+visit("#/analysis?a=1&b=2");
 replies.reference.wr = refAnswer({ found: false, lap: null, reason: "no_lap" });
 replies.reference.team_best = refAnswer({ kind: "team_best", found: false, lap: null, reason: "no_team" });
 replies.reference.my_best = refAnswer({ kind: "my_best", found: false, lap: null, reason: "no_own_lap" });
 await openDialog();
 await go();
 assert.equal(message(), "No suitable Garage16 Best lap available.");
-assert.equal(window.location.hash, "#/analysis?a=1&b=2", "no wrong lap was chosen");
+assert.equal(window.location.pathname + window.location.search, "/analysis/1/vs/2", "no wrong lap was chosen");
 assert.ok(dialog(), "the dialog stays open so another choice can be made");
 pick("team_best");
 await go();
@@ -900,19 +904,19 @@ replies.reference.team_best = refAnswer({ kind: "team_best", found: false, lap: 
 pick("team_best");
 await go();
 assert.equal(message(), "No Team Best available.");
-assert.equal(window.location.hash, "#/analysis?a=1&b=2");
+assert.equal(window.location.pathname + window.location.search, "/analysis/1/vs/2");
 
 // "you already are the best": say so, offer the next lap, never the same lap twice
 replies.reference.team_best = refAnswer({ kind: "team_best", already_best: true, lap: lapHeader(8, "Mate", 91, [30, 31, 30]) });
 pick("team_best");
 await go();
 assert.equal(message(), "You already are Team Best.");
-assert.equal(window.location.hash, "#/analysis?a=1&b=2", "nothing happens until the user confirms");
+assert.equal(window.location.pathname + window.location.search, "/analysis/1/vs/2", "nothing happens until the user confirms");
 assert.equal(text(dialog().querySelector(".compare-dialog__go")), "Compare with the next-fastest lap");
 await go();
 assert.equal(dialog(), null);
-assert.equal(window.location.hash, "#/analysis?a=1&b=8&note=already_best_team_best");
-app = await open(window.location.hash);
+assert.equal(window.location.pathname + window.location.search, "/analysis/1/vs/8?note=already_best_team_best");
+app = await open("#/analysis?a=1&b=8&note=already_best_team_best");
 assert.ok(text(app).includes("You already are Team Best — compared with the next-fastest team lap."), "the analysis explains why this lap was picked");
 assert.deepEqual(parseAnalysisExtras("#/analysis?a=1&b=8&note=<script>"), { laps: [], quick: null, ref: null, track: null, model: null, scope: null, note: null }, "the note parameter is whitelisted");
 
@@ -955,13 +959,13 @@ for (const [id, expected] of [["404", "Lap not found."], ["422", "This lap canno
   await go();
   assert.equal(message(), expected, `lap ${id}`);
   assert.ok(!/Traceback|boom/.test(text(dialog())), "no stack trace is ever shown");
-  assert.equal(window.location.hash, "#/analysis?a=1&b=2", "no analysis opens for a lap that failed the check");
+  assert.equal(window.location.pathname + window.location.search, "/analysis/1/vs/2", "no analysis opens for a lap that failed the check");
 }
 lapInput.value = " 55 ";
 await go();
 assert.equal(dialog(), null, "a valid lap closes the dialog");
-assert.equal(window.location.hash, "#/analysis?a=1&b=55");
-window.location.hash = "#/analysis?a=1&b=2";
+assert.equal(window.location.pathname + window.location.search, "/analysis/1/vs/55");
+visit("#/analysis?a=1&b=2");
 
 // ================================================================ quick starts
 replies.quick = { mode: "wr", label: "Garage16 Best", found: true, lap_a: lapHeader(11, "Me", 91.2, [30, 31, 30]), lap_b: lapHeader(7, "Fast", 80, [27, 27, 26]), reason: null, message: null, already_best: false };
@@ -971,8 +975,8 @@ assert.ok(text(app).includes("Choose Lap 1"), "the lap picker is still there");
 calls.length = 0;
 app.querySelector('[data-quick="wr"]').click();
 await settle(40);
-assert.ok(calls.some((u) => u.includes("/telemetry/analysis/quick") && u.includes("mode=wr") && !u.includes("track_name")));
-assert.equal(window.location.hash, "#/analysis?a=11&b=7");
+assert.ok(calls.some((u) => u.includes("/api/v1/analysis/quick") && u.includes("mode=wr") && !u.includes("track_name")));
+assert.equal(window.location.pathname + window.location.search, "/analysis/11/vs/7");
 
 // nothing to pair: the message says WHERE (the server picked the track of the latest lap) and
 // offers to look at that lap alone
@@ -984,12 +988,12 @@ assert.equal(app.querySelector(".quick__status").textContent, "At Spa: You alrea
 const alone = app.querySelector(".quick__alone");
 assert.ok(alone && alone.textContent === "Analyse Lap 1 alone", "a way on");
 alone.click();
-assert.equal(window.location.hash, "#/analysis?a=11");
+assert.equal(window.location.pathname + window.location.search, "/analysis/11");
 replies.quick = { mode: "wr", label: "Garage16 Best", found: true, lap_a: lapHeader(11, "Me", 91.2, [30, 31, 30]), lap_b: lapHeader(7, "Fast", 80, [27, 27, 26]), reason: null, message: null, already_best: false };
 
 app = await open("#/analysis?quick=wr&track=Le%20Mans");
 assert.ok(calls.some((u) => u.includes("/quick") && u.includes("track_name=Le+Mans")), "the circuit link passes the track");
-assert.equal(window.location.hash, "#/analysis?a=11&b=7");
+assert.equal(window.location.pathname + window.location.search, "/analysis/11/vs/7");
 
 replies.quick = { mode: "team_best", found: false, lap_a: lapHeader(11, "Me", 91.2, [30, 31, 30]), lap_b: null, reason: "already_best", message: "x", already_best: true };
 app = await open("#/analysis?quick=team_best");
@@ -1006,7 +1010,7 @@ assert.ok(text(app).includes("Choose Lap 1"), "an unknown quick mode is ignored,
 // "?a=<id>&ref=": resolved on the server, then replaced by the real URL
 replies.reference.my_best = refAnswer({ kind: "my_best", lap: lapHeader(11, "Me", 91.2, [30, 31, 30]) });
 app = await open("#/analysis?a=1&ref=my_best");
-assert.equal(window.location.hash, "#/analysis?a=1&b=11");
+assert.equal(window.location.pathname + window.location.search, "/analysis/1/vs/11");
 
 // ================================================================ laps from old clients, missing channels
 world.aBasic = true;

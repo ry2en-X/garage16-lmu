@@ -70,11 +70,17 @@ services:
       # POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     volumes:
       - db_data:/var/lib/postgresql/data
+    # Health checks every 30–60 s instead of every 10–15 s — less idle load on the NAS.
+    # Docker runs the first check one interval after the start, so after a restart the services
+    # that wait for "healthy" (server -> db, Caddy -> server, tunnel -> Caddy) come up about a
+    # minute later than before. (`start_interval` would avoid that, but needs Docker Engine 25+;
+    # Synology's Container Manager ships 24.)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-garage16}"]
-      interval: 10s
+      interval: 30s
       timeout: 5s
       retries: 5
+      start_period: 10s
     # secrets:
     #   - postgres_password
 
@@ -87,9 +93,10 @@ services:
       db:
         condition: service_healthy
     environment:
-      LMU_GARAGE_ENV: production
+      GARAGE16_ENV: production
+      GARAGE16_WEB_DIR: /srv/web
       # DB connection pieces — docker/entrypoint.sh assembles
-      # LMU_GARAGE_DB_URL from these INSIDE the container, which is what
+      # GARAGE16_DB_URL from these INSIDE the container, which is what
       # lets POSTGRES_PASSWORD come from a Docker secret too (see that
       # script's header comment for why this can't be done here in
       # docker-compose.yml's own variable interpolation).
@@ -98,85 +105,87 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-garage16}
       POSTGRES_USER: ${POSTGRES_USER:-garage16}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      LMU_GARAGE_SECRET_KEY: ${LMU_GARAGE_SECRET_KEY:?set a real Fernet key in .env}
-      # V1.0: EITHER a registration secret (only people who know it can sign up) OR
-      # LMU_GARAGE_OPEN_REGISTRATION=1 (anybody can sign up on the website) — the server refuses to
-      # start with neither (server/config.py).
-      LMU_GARAGE_REGISTRATION_SECRET: ${LMU_GARAGE_REGISTRATION_SECRET:-}
-      LMU_GARAGE_OPEN_REGISTRATION: ${LMU_GARAGE_OPEN_REGISTRATION:-}
-      LMU_GARAGE_MIN_AGE: ${LMU_GARAGE_MIN_AGE:-16}
-      # V1.0 — the operator shown in the legal notice and privacy policy (#/legal); see .env.example
-      LMU_GARAGE_OPERATOR_NAME: ${LMU_GARAGE_OPERATOR_NAME:-}
-      LMU_GARAGE_OPERATOR_ADDRESS: ${LMU_GARAGE_OPERATOR_ADDRESS:-}
-      LMU_GARAGE_OPERATOR_EMAIL: ${LMU_GARAGE_OPERATOR_EMAIL:-}
-      # V1.0.1 — account rules for an open server; see .env.example
-      LMU_GARAGE_REQUIRE_EMAIL_VERIFICATION: ${LMU_GARAGE_REQUIRE_EMAIL_VERIFICATION:-1}
-      LMU_GARAGE_UNVERIFIED_ACCOUNT_DAYS: ${LMU_GARAGE_UNVERIFIED_ACCOUNT_DAYS:-7}
-      LMU_GARAGE_NEW_DRIVER_REVIEW_LAPS: ${LMU_GARAGE_NEW_DRIVER_REVIEW_LAPS:-10}
-      LMU_GARAGE_MAX_DEVICES: ${LMU_GARAGE_MAX_DEVICES:-5}
-      LMU_GARAGE_LATEST_CLIENT_VERSION: ${LMU_GARAGE_LATEST_CLIENT_VERSION:-}
-      LMU_GARAGE_ADMIN_TOKEN: ${LMU_GARAGE_ADMIN_TOKEN:?set an admin token in .env}
-      LMU_GARAGE_CORS_ORIGINS: ${LMU_GARAGE_CORS_ORIGINS:-https://garage16.de}
-      LMU_GARAGE_REQUIRE_HTTPS: "1"
-      # V0.9.8 — believe X-Forwarded-For only from the reverse proxy (the app publishes no port,
-      # only containers on this network reach it); see server/client_ip.py
-      LMU_GARAGE_TRUSTED_PROXIES: ${LMU_GARAGE_TRUSTED_PROXIES:-private}
-      LMU_GARAGE_LOG_FORMAT: json
-      LMU_GARAGE_STORAGE_DIR: /data/telemetry
-      LMU_GARAGE_MIN_CLIENT_VERSION: ${LMU_GARAGE_MIN_CLIENT_VERSION:-0.5.3}
-      # V0.6.9 — password reset email. Defaults to "development" (logs
+      GARAGE16_SECRET_KEY: ${GARAGE16_SECRET_KEY:-${LMU_GARAGE_SECRET_KEY:?set GARAGE16_SECRET_KEY (a real Fernet key) in .env}}
+      # EITHER a registration secret (only people who know it can sign up) OR
+      # GARAGE16_OPEN_REGISTRATION=1 (anybody can sign up on the website) — the server refuses to
+      # start with neither (server/core/config.py).
+      GARAGE16_REGISTRATION_SECRET: ${GARAGE16_REGISTRATION_SECRET:-${LMU_GARAGE_REGISTRATION_SECRET:-}}
+      GARAGE16_OPEN_REGISTRATION: ${GARAGE16_OPEN_REGISTRATION:-${LMU_GARAGE_OPEN_REGISTRATION:-}}
+      GARAGE16_MIN_AGE: ${GARAGE16_MIN_AGE:-${LMU_GARAGE_MIN_AGE:-16}}
+      # The operator shown in the legal notice and privacy policy (#/legal); see .env.example
+      GARAGE16_OPERATOR_NAME: ${GARAGE16_OPERATOR_NAME:-${LMU_GARAGE_OPERATOR_NAME:-}}
+      GARAGE16_OPERATOR_ADDRESS: ${GARAGE16_OPERATOR_ADDRESS:-${LMU_GARAGE_OPERATOR_ADDRESS:-}}
+      GARAGE16_OPERATOR_EMAIL: ${GARAGE16_OPERATOR_EMAIL:-${LMU_GARAGE_OPERATOR_EMAIL:-}}
+      # Account rules for an open server; see .env.example
+      GARAGE16_REQUIRE_EMAIL_VERIFICATION: ${GARAGE16_REQUIRE_EMAIL_VERIFICATION:-${LMU_GARAGE_REQUIRE_EMAIL_VERIFICATION:-1}}
+      GARAGE16_UNVERIFIED_ACCOUNT_DAYS: ${GARAGE16_UNVERIFIED_ACCOUNT_DAYS:-${LMU_GARAGE_UNVERIFIED_ACCOUNT_DAYS:-7}}
+      GARAGE16_NEW_DRIVER_REVIEW_LAPS: ${GARAGE16_NEW_DRIVER_REVIEW_LAPS:-${LMU_GARAGE_NEW_DRIVER_REVIEW_LAPS:-10}}
+      GARAGE16_MAX_DEVICES: ${GARAGE16_MAX_DEVICES:-${LMU_GARAGE_MAX_DEVICES:-5}}
+      GARAGE16_LATEST_CLIENT_VERSION: ${GARAGE16_LATEST_CLIENT_VERSION:-${LMU_GARAGE_LATEST_CLIENT_VERSION:-}}
+      GARAGE16_ADMIN_TOKEN: ${GARAGE16_ADMIN_TOKEN:-${LMU_GARAGE_ADMIN_TOKEN:?set GARAGE16_ADMIN_TOKEN in .env}}
+      GARAGE16_CORS_ORIGINS: ${GARAGE16_CORS_ORIGINS:-${LMU_GARAGE_CORS_ORIGINS:-https://garage16.de}}
+      GARAGE16_REQUIRE_HTTPS: "1"
+      # Believe X-Forwarded-For only from the reverse proxy (the app publishes no port,
+      # only containers on this network reach it); see server/core/client_ip.py
+      GARAGE16_TRUSTED_PROXIES: ${GARAGE16_TRUSTED_PROXIES:-${LMU_GARAGE_TRUSTED_PROXIES:-private}}
+      GARAGE16_LOG_FORMAT: json
+      GARAGE16_STORAGE_DIR: /data/telemetry
+      GARAGE16_MIN_CLIENT_VERSION: ${GARAGE16_MIN_CLIENT_VERSION:-${LMU_GARAGE_MIN_CLIENT_VERSION:-0.5.3}}
+      # Password reset email. Defaults to "development" (logs
       # instead of sending) so an unconfigured deployment doesn't crash;
-      # set LMU_GARAGE_EMAIL_PROVIDER=smtp in .env once real SMTP
+      # set GARAGE16_EMAIL_PROVIDER=smtp in .env once real SMTP
       # credentials are filled in there.
-      LMU_GARAGE_EMAIL_PROVIDER: ${LMU_GARAGE_EMAIL_PROVIDER:-development}
-      LMU_GARAGE_SMTP_HOST: ${LMU_GARAGE_SMTP_HOST:-}
-      LMU_GARAGE_SMTP_PORT: ${LMU_GARAGE_SMTP_PORT:-587}
-      LMU_GARAGE_SMTP_USER: ${LMU_GARAGE_SMTP_USER:-}
-      LMU_GARAGE_SMTP_PASSWORD: ${LMU_GARAGE_SMTP_PASSWORD:-}
-      LMU_GARAGE_SMTP_FROM: ${LMU_GARAGE_SMTP_FROM:-garage16@localhost}
-      LMU_GARAGE_FRONTEND_URL: ${LMU_GARAGE_FRONTEND_URL:-https://garage16.de}
-      # V0.7.2 §7 — leave unset normally; set only on the OLD instance during a deliberate cutover.
-      LMU_GARAGE_MIGRATED_TO: ${LMU_GARAGE_MIGRATED_TO:-}
-      # V0.8.6 — where too-old desktop clients are sent to update (shown as an
+      GARAGE16_EMAIL_PROVIDER: ${GARAGE16_EMAIL_PROVIDER:-${LMU_GARAGE_EMAIL_PROVIDER:-development}}
+      GARAGE16_SMTP_HOST: ${GARAGE16_SMTP_HOST:-${LMU_GARAGE_SMTP_HOST:-}}
+      GARAGE16_SMTP_PORT: ${GARAGE16_SMTP_PORT:-${LMU_GARAGE_SMTP_PORT:-587}}
+      GARAGE16_SMTP_USER: ${GARAGE16_SMTP_USER:-${LMU_GARAGE_SMTP_USER:-}}
+      GARAGE16_SMTP_PASSWORD: ${GARAGE16_SMTP_PASSWORD:-${LMU_GARAGE_SMTP_PASSWORD:-}}
+      GARAGE16_SMTP_FROM: ${GARAGE16_SMTP_FROM:-${LMU_GARAGE_SMTP_FROM:-garage16@localhost}}
+      GARAGE16_FRONTEND_URL: ${GARAGE16_FRONTEND_URL:-${LMU_GARAGE_FRONTEND_URL:-https://garage16.de}}
+      # Leave unset normally; set only on the OLD instance during a deliberate cutover.
+      GARAGE16_MIGRATED_TO: ${GARAGE16_MIGRATED_TO:-${LMU_GARAGE_MIGRATED_TO:-}}
+      # Where too-old desktop clients are sent to update (shown as an
       # 'Open download page' button). Optional; see docs/CLIENT_BUILD.md.
-      LMU_GARAGE_CLIENT_DOWNLOAD_URL: ${LMU_GARAGE_CLIENT_DOWNLOAD_URL:-}
-      # V0.9.2 — the "Client + analysis app" download (website Download page,
+      GARAGE16_CLIENT_DOWNLOAD_URL: ${GARAGE16_CLIENT_DOWNLOAD_URL:-${LMU_GARAGE_CLIENT_DOWNLOAD_URL:-}}
+      # The "Client + analysis app" download (website Download page,
       # and the update button of that edition). Optional; see .env.example.
-      LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL: ${LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL:-}
-      # V1.0 — empty download URLs = the newest release of this GitHub repository (no colon in
+      GARAGE16_CLIENT_APP_DOWNLOAD_URL: ${GARAGE16_CLIENT_APP_DOWNLOAD_URL:-${LMU_GARAGE_CLIENT_APP_DOWNLOAD_URL:-}}
+      # Empty download URLs = the newest release of this GitHub repository (no colon in
       # "-": an explicitly empty value in .env switches the GitHub defaults off)
-      LMU_GARAGE_GITHUB_REPO: ${LMU_GARAGE_GITHUB_REPO-ry2en-X/garage16-lmu}
-      LMU_GARAGE_CLIENT_RELEASE_PAGE_URL: ${LMU_GARAGE_CLIENT_RELEASE_PAGE_URL:-}
-      # V0.7.2 — off by default in production; see .env.example.
-      LMU_GARAGE_ENABLE_API_DOCS: ${LMU_GARAGE_ENABLE_API_DOCS:-false}
-      # V0.9.3.1 — track-limits measurements that may invalidate a lap on their own
+      GARAGE16_GITHUB_REPO: ${GARAGE16_GITHUB_REPO-${LMU_GARAGE_GITHUB_REPO-ry2en-X/garage16-lmu}}
+      GARAGE16_CLIENT_RELEASE_PAGE_URL: ${GARAGE16_CLIENT_RELEASE_PAGE_URL:-${LMU_GARAGE_CLIENT_RELEASE_PAGE_URL:-}}
+      # Off by default in production; see .env.example.
+      GARAGE16_ENABLE_API_DOCS: ${GARAGE16_ENABLE_API_DOCS:-${LMU_GARAGE_ENABLE_API_DOCS:-false}}
+      # Track-limits measurements that may invalidate a lap on their own
       # (comma separated, e.g. four_wheels_off). Empty = review only; see .env.example.
-      LMU_GARAGE_TRACK_LIMITS_INVALIDATING: ${LMU_GARAGE_TRACK_LIMITS_INVALIDATING:-}
-      # V0.9.9 — integrity key (empty = derived from LMU_GARAGE_SECRET_KEY) and audit-log retention
-      LMU_GARAGE_INTEGRITY_KEY: ${LMU_GARAGE_INTEGRITY_KEY:-}
-      LMU_GARAGE_AUDIT_RETENTION_DAYS: ${LMU_GARAGE_AUDIT_RETENTION_DAYS:-365}
+      GARAGE16_TRACK_LIMITS_INVALIDATING: ${GARAGE16_TRACK_LIMITS_INVALIDATING:-${LMU_GARAGE_TRACK_LIMITS_INVALIDATING:-}}
+      # Integrity key (empty = derived from GARAGE16_SECRET_KEY) and audit-log retention
+      GARAGE16_INTEGRITY_KEY: ${GARAGE16_INTEGRITY_KEY:-${LMU_GARAGE_INTEGRITY_KEY:-}}
+      GARAGE16_AUDIT_RETENTION_DAYS: ${GARAGE16_AUDIT_RETENTION_DAYS:-${LMU_GARAGE_AUDIT_RETENTION_DAYS:-365}}
       # Uncomment these three (and set the matching four plain values just
       # above to non-empty PLACEHOLDERS, not blank — Compose's ${VAR:?...}
       # requires non-empty at parse time and can't see a secret file that
       # only exists inside the container — see the `db` service's comment
       # above for the same point) to use Docker secrets instead:
       # POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-      # LMU_GARAGE_SECRET_KEY_FILE: /run/secrets/lmu_secret_key
-      # LMU_GARAGE_REGISTRATION_SECRET_FILE: /run/secrets/lmu_registration_secret
-      # LMU_GARAGE_ADMIN_TOKEN_FILE: /run/secrets/lmu_admin_token
+      # GARAGE16_SECRET_KEY_FILE: /run/secrets/lmu_secret_key
+      # GARAGE16_REGISTRATION_SECRET_FILE: /run/secrets/lmu_registration_secret
+      # GARAGE16_ADMIN_TOKEN_FILE: /run/secrets/lmu_admin_token
     volumes:
       - telemetry_data:/data/telemetry
+      # Index.html for the page addresses with their own titles (server/api/v1/pages.py)
+      - ./web:/srv/web:ro
     expose:
       - "8000"
     healthcheck:
       # Uses Python (already in the image) rather than curl/wget, which
       # aren't installed in python:3.12-slim by default — avoids adding a
       # package just for the healthcheck.
-      # V0.9.8: /health/ready answers 503 when the database or the telemetry storage is unusable
+      # /health/ready answers 503 when the database or the telemetry storage is unusable
       # (/health stays 200 with "degraded" for the clients' version check) — so Docker marks the
       # server unhealthy then instead of reporting it fine
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/health/ready', timeout=3)"]
-      interval: 15s
+      interval: 30s
       timeout: 5s
       retries: 5
       start_period: 20s
@@ -211,7 +220,7 @@ services:
       # (POLL_SECONDS, ~10s) instead — "stale for >2min" means the loop
       # has hung or the process is stuck, not just a slow Discord API call.
       test: ["CMD", "python", "-c", "import os,sys,time; p='/tmp/discord_bot_heartbeat'; sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p)<120 else 1)"]
-      interval: 30s
+      interval: 60s
       timeout: 5s
       retries: 3
       start_period: 30s
@@ -244,7 +253,7 @@ services:
       # default, independent of whatever site address/port the Caddyfile
       # itself is serving — a reliable target regardless of variant A/B.
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:2019/config/"]
-      interval: 15s
+      interval: 30s
       timeout: 5s
       retries: 5
       start_period: 10s
@@ -297,10 +306,11 @@ services:
       # to have backups land somewhere durable outside Docker's own
       # storage. Same env var works on NAS and VPS.
       - ${BACKUP_HOST_PATH:-backup_data}:/backups
-      # V0.9.8: read-write — the backup announces maintenance and takes the write lock in this
-      # volume (server/write_lock.py) so database and files are saved from the same moment
+      # Read-write — the backup announces maintenance and takes the write lock in this
+      # volume (server/ops/write_lock.py) so database and files are saved from the same moment
       - telemetry_data:/data/telemetry
       - ./docker/backup-loop.sh:/backup-loop.sh:ro
+      - ./docker/telemetry-store.sh:/garage16/telemetry-store.sh:ro   # The incremental store
       - ./server/main.py:/garage16/main.py:ro      # the program version for the manifest
     entrypoint: ["/bin/sh", "/backup-loop.sh"]
 

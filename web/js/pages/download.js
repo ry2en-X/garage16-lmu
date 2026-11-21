@@ -1,4 +1,4 @@
-// pages/download.js — the desktop client in its two editions, side by side (V0.9.2).
+// pages/download.js — the desktop client in its two editions, side by side.
 //
 //   Client                  records and uploads laps; the analysis opens in the browser
 //   Client + analysis app   the same, plus the analysis in its own window
@@ -8,10 +8,10 @@
 // page never points at a file that is not there. A missing link shows as "not available
 // yet" instead of a broken button. Public page, no sign-in needed.
 
-import { api } from "../api.js";
-import { el } from "../format.js";
-import { t } from "../i18n.js";
-import { inDesktopApp } from "../app_bridge.js";
+import { api } from "../core/api.js";
+import { el } from "../core/format.js";
+import { t } from "../core/i18n.js";
+import { inDesktopApp } from "../core/app_bridge.js";
 
 const safeLink = (url) => (typeof url === "string" && /^https?:\/\/[^\s]+$/i.test(url) ? url : null);
 
@@ -43,7 +43,7 @@ export async function renderDownload(container) {
     links = {
       standard: safeLink(health.client_download_url),
       analysis: safeLink(health.client_app_download_url),
-      all: safeLink(health.client_release_page_url),   // V1.0: every file of the newest release
+      all: safeLink(health.client_release_page_url),   // Every file of the newest release
     };
   } catch (err) {
     container.appendChild(el("div", { class: "notice notice--error" }, err.message));
@@ -77,10 +77,10 @@ export async function renderDownload(container) {
     }),
   ]));
 
-  // V1.0: what to do once the file is there — the setup guide; shown more prominently after a click
+  // What to do once the file is there — the setup guide; shown more prominently after a click
   const next = el("div", { class: "notice download-next" }, [
     t("After downloading: "),
-    el("a", { href: "#/setup" }, t("follow the setup guide")),
+    el("a", { href: "/setup" }, t("follow the setup guide")),
     t(" — install, sign in with your Garage16 email and password, start Le Mans Ultimate, drive."),
   ]);
   container.querySelectorAll("a[data-download]").forEach((a) => a.addEventListener("click", () => {

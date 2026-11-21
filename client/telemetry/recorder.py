@@ -45,7 +45,7 @@ logger = logging.getLogger("lmu_garage.recorder")
 
 # zstd level for lap files (V0.9.1: pinned explicitly — before, the level was
 # whatever pyarrow's default happened to be, which is 1). Measured with
-# scripts/benchmark_pipeline.py on a synthetic 15,000-sample lap with sensor-like
+# scripts/dev/benchmark_pipeline.py on a synthetic 15,000-sample lap with sensor-like
 # noise (NOT a real LMU recording): level 3 was ~1 % smaller than level 1 at no
 # meaningful extra write time, levels 5 and 7 gained another ~1 % for 40-60 %
 # more write time. Reading is unaffected by the level. The saver runs on a
@@ -146,7 +146,7 @@ class LapRecorder:
             "car_model": lap.car_model or None,
             "uploaded": False,
         }
-        # V0.9.3 — only what the lap actually has, so an older server (and the uploader's
+        # Only what the lap actually has, so an older server (and the uploader's
         # compatibility mode) sees exactly the V0.9.2 metadata when these are empty
         extra = {
             "vehicle_model": getattr(lap, "vehicle_model", "") or None,
@@ -157,9 +157,9 @@ class LapRecorder:
             "track_limits_steps_per_penalty": getattr(lap, "track_limits_steps_per_penalty", None),
             "game_lap_state": getattr(lap, "game_lap_state", None) or None,
             "grid_vehicles": getattr(lap, "grid_vehicles", None) or None,
-            # V0.9.3.1 — the client's reasons and the late window after the line
+            # The client's reasons and the late window after the line
             "lap_report": getattr(lap, "lap_report", None) or None,
-            # V0.9.4 — the car and the session at the end of the lap (Stint Analyzer)
+            # The car and the session at the end of the lap (Stint Analyzer)
             "lap_context": getattr(lap, "lap_context", None) or None,
         }
         metadata.update({key: value for key, value in extra.items() if value is not None})
@@ -206,12 +206,12 @@ class LapRecorder:
     def mark_uploaded(self, meta_path: Path) -> None:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         meta["uploaded"] = True
-        meta["uploaded_at"] = int(time.time())  # when the retention clock starts (V0.9.1)
+        meta["uploaded_at"] = int(time.time())  # when the retention clock starts
         _atomic_write_text(meta_path, json.dumps(meta, indent=2))
 
     def cleanup_uploaded(self, retention_days: float, now: Optional[float] = None) -> list:
         """Deletes the local telemetry FILE of laps that were uploaded more than
-        `retention_days` ago (V0.9.1) and returns the paths it removed.
+        `retention_days` ago and returns the paths it removed.
 
         Why it is safe to do at all: once the server has accepted a lap it keeps the
         one canonical copy, and the local JSON sidecar — which is what the upload

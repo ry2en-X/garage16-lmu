@@ -1,5 +1,94 @@
 # Changelog
 
+## V1.0.2 — Readable links, the website on Cloudflare Pages, less load on the NAS, a tidy code base
+
+Server `1.0.2`, desktop client `1.0.2`. **One additive migration (0020)**: `drivers.slug`,
+`teams.slug`, the table `slug_redirects` and two leaderboard indexes. Rollback:
+`alembic downgrade 0019` (docs/ADMIN_GUIDE.md, 8.2). The existing `.env` keeps working unchanged
+(the settings are called `GARAGE16_*` now, the old `LMU_GARAGE_*` names are still read). Clients
+from 0.5.3 keep uploading — the API paths of V1.0.1 are translated inside the server. No feature
+changes.
+
+### Readable links
+- Normal paths instead of `#/`: `/leaderboard/fuji-speedway/hypercar`,
+  `/leaderboard/fuji-speedway/porsche-963`, `/driver/moritz-lachnit`, `/team/hypermotion-esports`,
+  `/analysis/123/vs/456`, `/analysis/fuji-speedway/porsche-963/vs/class-best`,
+  `/stints/fuji-speedway/2026-11-14` (`-2` for a second session that day), `/stints/lap/123`,
+  `/impressum`, `/datenschutz`, `/terms`, `/licenses`. English for everybody, whatever language is set.
+- **Old `#/` addresses are forwarded** (bookmarks, Discord posts, links of desktop clients 1.0.1):
+  `web/js/core/routes.js legacyHashToPath`. `/legal` → `/impressum`, `/sessions` → `/stints`.
+- Slugs: `server/core/slugs.py` (the browser twin `web/js/core/link.js slugify`, tested to agree).
+  A renamed driver or team keeps its old link (`slug_redirects`); a name that would share a link with
+  another is refused like a taken name. `GET /api/v1/public/drivers/by-slug/{slug}`,
+  `GET /api/v1/public/teams/by-slug/{slug}`.
+- Every page has its own title and link preview ("Fuji Speedway · Hypercar – Garage16"):
+  `GET /api/v1/public/page-meta?path=` (server/api/v1/pages.py), filled into index.html by the Pages
+  function or — when the NAS serves the website — by `GET /api/v1/public/page` behind Caddy.
+- "Copy link" on the leaderboard, the lap analysis and the driver profile; a real **Page not found**
+  page (and HTTP 404) instead of the home page.
+- German menu: **Rundenanalyse** and **Stint-Analyse** (English unchanged).
+
+### API under /api/v1
+- Every endpoint lives under `/api/v1` with one module per area in `server/api/v1/`. The public,
+  same-for-everybody answers are under `/api/v1/public/` (leaderboards, activity, catalog, driver
+  profiles, legal data, channel catalog, circuit cards, page titles). Lap reads are
+  `/api/v1/laps/{id}/analysis`, uploads `/api/v1/laps/upload`.
+- **The paths of V1.0.1 keep working**: `server/api/legacy.py` rewrites them inside the server
+  (no redirect — a POST keeps its body). The reverse proxies send exactly those old API paths to the
+  server and the look-alike page addresses to the website (`is_legacy_api_request`). Remove it once
+  `min_client_version` is 1.0.2. `/health` stays at the root (Docker, old clients).
+- Client 1.0.2 calls `/api/v1/...` and falls back to the old path once for a server that is not
+  updated yet (`client/api_paths.py`).
+- **Installer: autostart in two steps.** "Start Garage16 automatically when I log in to Windows"
+  (off unless ticked), and under it "Open the Garage16 window" (default) or "Start minimized (only
+  in the taskbar)" — the shortcut then starts `Garage16.exe --minimized`. Running the setup again
+  replaces the old autostart shortcut with the new choice (`packaging/garage16.iss`).
+
+### Less load on the NAS
+- **Website on Cloudflare Pages** (`.github/workflows/pages.yml`, after every green CI run on
+  `main`; `scripts/release/build_web.py` builds `build/pages`). The Pages function
+  (`web/functions/_middleware.js`) passes `/api/*` and the old API paths on to the NAS
+  (`GARAGE16_API_ORIGIN`) with the visitor's address (`GARAGE16_EDGE_KEY`, new optional setting —
+  without it all visitors would share one rate limit). Serving the website from the NAS keeps working.
+- **Versioned files:** index.html loads everything from `/v/<version>/` (on Pages: a content hash),
+  cached for a year (`immutable`); index.html itself stays `no-cache`.
+- **Public API answers** get `Cache-Control: public, max-age=30|60` and an ETag, 304 on repeat
+  (`server/api/caching.py`); a Cloudflare Cache Rule can keep them (docs/DEPLOYMENT.md).
+- **Analysis reads** of a signed-in driver: ETag + `private, no-cache` + `Vary: Authorization,
+  Cookie` on every read under `/laps/`, `/analysis/`, `/circuits/`, `/drivers/`, `/stints/` (the heavy
+  ones already decided on their ETag before computing).
+- **Leaderboard indexes** `ix_laps_board_class (track_name, car_class, is_valid, lap_time)` and
+  `ix_laps_board_model (track_name, car_model, is_valid, lap_time)` (migration 0020).
+- **Loaded when opened:** the line map (when its window comes into view), the tile editor and the
+  tile picker (prefetched when idle), the stint charts (with the first session).
+- **Incremental backups** (manifest format 2): the database is dumped completely as before; the
+  telemetry files go once into `<backup dir>/telemetry-store/` and each backup lists them in
+  `telemetry-files.txt` — a night copies only the new files (`docker/telemetry-store.sh`). The store
+  keeps only files a remaining backup lists; old-format backups (`telemetry.tar.gz`) age out by the
+  same retention and can still be restored. Same for the `backup` container.
+- Cloudflare rate-limiting rule for sign-in, sign-up and upload documented (docs/DEPLOYMENT.md);
+  the server's own limits stay as the second stage.
+- Health checks every 30 s (database, server, Caddy) and 60 s (Discord bot) instead of 10–15 s.
+
+### Code layout
+- `server/` in areas: `core/`, `laps/`, `analysis/`, `accounts/`, `catalog/`, `ops/`, `api/v1/`. Split:
+  `api/v1/analysis.py` (+ `circuits.py`, `analysis/lap_access.py`, `analysis/comparison.py`),
+  `analysis/telemetry_analysis.py` (+ `corners.py`, `racing_line.py`, `distribution.py`),
+  `api/v1/accounts.py` (+ `web_sessions.py`, `account_data.py`), `schemas.py` (per area).
+- `web/js/core/` (api, router, routes, link, i18n, format, state, tracks, …), `web/js/pages/` only
+  pages, `web/js/main.js` the entry point. One route table (`core/routes.js`), one link builder
+  (`core/link.js`).
+- Settings `GARAGE16_*` (old `LMU_GARAGE_*` still read: `server/core/env.py`, `client/env.py`,
+  nested defaults in docker-compose.yml); client folder `~/.garage16` (an existing `~/.lmu_garage` is
+  moved once); the website's config variable `GARAGE16_API_BASE_URL`.
+- `scripts/ops/` (backup, restore, checks, revalidation), `scripts/dev/` (benchmarks, probes,
+  mutation check, `serve_web.py` for local work), `scripts/release/` (release gate, `build_web.py`).
+- Tests by topic (`tests/accounts/`, `tests/analysis/`, `tests/leaderboard/`, …) instead of by version;
+  the quick run `python -m pytest -m "not slow"` takes about a minute and a half, the full run stays
+  the release gate.
+- Release tags ("V0.9.1: …") removed from comments and docstrings — the history is here.
+- `docs/README.md`: three ways in — I drive, I run the NAS, I develop.
+
 ## V1.0.1 — Accounts for an open server, several PCs per account, a tidy repository
 
 Server `1.0.1`, desktop client `1.0.1`. **One additive migration (0019)**: `drivers.display_name_key`

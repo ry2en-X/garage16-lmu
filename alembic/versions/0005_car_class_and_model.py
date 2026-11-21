@@ -32,7 +32,7 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column("car_model", sa.String(), nullable=True))
 
     # Both are query filters for the leaderboard endpoints (see
-    # server/routers/leaderboard.py) — index them like track_name/car_name.
+    # server/api/v1/leaderboard.py) — index them like track_name/car_name.
     op.create_index("ix_laps_car_class", "laps", ["car_class"])
     op.create_index("ix_laps_car_model", "laps", ["car_model"])
 

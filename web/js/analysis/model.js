@@ -2,11 +2,11 @@
 // and no network, so it can be tested in plain Node (tests/js/analysis_model.test.mjs).
 //
 // The data shape is the response of GET /telemetry/analysis/compare
-// (server/routers/analysis.py): every series has one value per grid point, point i
+// (server/api/v1/analysis.py): every series has one value per grid point, point i
 // lies at distance  grid.start + i * grid.step  metres, and lap A / lap B are
 // "a" / "b" in every series (null when that lap lacks the channel).
 
-import { t } from "../i18n.js";
+import { t } from "../core/i18n.js";
 
 // The built-in colours. They are never modified: LAP_COLORS below is the live set
 // the views read, and applyColors() can only ever overwrite its entries with a
@@ -15,7 +15,7 @@ import { t } from "../i18n.js";
 export const DEFAULT_COLORS = Object.freeze({ a: "#e0472b", b: "#4fb3e8", delta: "#ecedee" }); // lower case, like every sanitised colour
 export const LAP_COLORS = { a: DEFAULT_COLORS.a, b: DEFAULT_COLORS.b, delta: DEFAULT_COLORS.delta };
 
-// V0.9.4: up to two more laps drawn over Lap 1 / Lap 2 ("c", "d" — Lap 3 / Lap 4). Fixed colours and
+// Up to two more laps drawn over Lap 1 / Lap 2 ("c", "d" — Lap 3 / Lap 4). Fixed colours and
 // line styles, so four laps stay apart on a chart even in black and white: Lap 1 and 2 solid,
 // Lap 3 dashed, Lap 4 dotted.
 export const EXTRA_COLORS = Object.freeze({ c: "#4ca771", d: "#d8a83e" });

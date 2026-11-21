@@ -4,7 +4,7 @@ answers on-demand queries via slash commands.
 
 Two jobs, one process:
   1. Background poll loop: reads unannounced rows from RecordEvent (written
-     by server/records.py whenever an uploaded lap sets a record) and posts
+     by server/laps/records.py whenever an uploaded lap sets a record) and posts
      an embed. WR events go to every channel registered with /link_global;
      TEAM_BEST events go to the channels registered for that team via
      /link_team. PR events aren't broadcast — nobody but the driver cares,
@@ -21,7 +21,7 @@ server, swap the direct DB calls below for HTTP calls to the backend.
 Setup:
     pip install -r discord_bot/requirements.txt
     export DISCORD_BOT_TOKEN=...          # from the Discord developer portal
-    export LMU_GARAGE_DB_URL=...          # same value the server uses, if not sqlite default
+    export GARAGE16_DB_URL=...          # same value the server uses, if not sqlite default
     python -m discord_bot.bot
 """
 
@@ -39,9 +39,10 @@ from discord import app_commands
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from server.database import SessionLocal
-from server.discord_link import redeem_account_link_code, unlink_discord_user
-from server.models import Driver, DiscordChannel, Lap, RecordEvent, Team, TeamMembership
+from server.core.database import SessionLocal
+from server.accounts.discord_link import redeem_account_link_code, unlink_discord_user
+from server.core.models import Driver, DiscordChannel, Lap, RecordEvent, Team, TeamMembership
+from server.core.env import env
 
 logger = logging.getLogger("lmu_garage.discord_bot")
 
@@ -78,7 +79,7 @@ def _db() -> Session:
 # the loop (logged, not re-raised) still updates it, since the process
 # itself is alive and will retry; only a genuine hang or crash lets the
 # file go stale.
-_HEARTBEAT_PATH = os.environ.get("LMU_GARAGE_BOT_HEARTBEAT_PATH", "/tmp/discord_bot_heartbeat")  # nosec B108 — the container's own /tmp, read by its healthcheck
+_HEARTBEAT_PATH = env("BOT_HEARTBEAT_PATH", "/tmp/discord_bot_heartbeat")  # nosec B108 — the container's own /tmp, read by its healthcheck
 
 
 def _touch_heartbeat() -> None:
@@ -123,7 +124,7 @@ async def _post_pending_events() -> None:
                 channel_rows = db.query(DiscordChannel).filter(DiscordChannel.team_id.is_(None)).all()
             else:
                 team = db.query(Team).get(event.team_id) if event.team_id else None
-                # V0.6.8: a team can opt out of TEAM_BEST announcements via
+                # A team can opt out of TEAM_BEST announcements via
                 # the web dashboard (PATCH /teams/{id}). Treat "opted out"
                 # the same as "no channels registered" — the send loop
                 # below already handles that case (stamps announced,
@@ -235,7 +236,7 @@ def _best_lap(
 @app_commands.describe(code="One-time code from the website (Account -> Link Discord), e.g. ABCD-EFGH")
 async def link(interaction: discord.Interaction, code: str) -> None:
     # All rules (single use, expiry, one-to-one, throttling of wrong
-    # guesses) live in server/discord_link.py so they're tested against a
+    # guesses) live in server/accounts/discord_link.py so they're tested against a
     # real database; this command only relays the outcome. Ephemeral: only
     # the person who ran it sees it.
     db = _db()
@@ -382,7 +383,7 @@ async def leaderboard(interaction: discord.Interaction, track: str, car: str, li
     from sqlalchemy import select
     db = _db()
     try:
-        # ROW_NUMBER approach — same fix as server/routers/leaderboard.py:
+        # ROW_NUMBER approach — same fix as server/api/v1/leaderboard.py:
         # the previous GROUP BY + JOIN-on-min(lap_time) returned duplicate
         # rows when a driver had two laps with identical times.
         ranked = (

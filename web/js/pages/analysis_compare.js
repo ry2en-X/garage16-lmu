@@ -1,15 +1,15 @@
-// pages/analysis_compare.js — the "Runde vergleichen" dialog (V0.9.1).
+// pages/analysis_compare.js — the "Runde vergleichen" dialog.
 //
 //   Vergleichen mit:  ○ Garage16 Best   ○ Team Best   ○ Meine Beste   ○ Lap ID [____]
 //
-// The server decides what each choice means (server/analysis_reference.py); this file
+// The server decides what each choice means (server/analysis/analysis_reference.py); this file
 // only asks, and shows the answer — a missing reference is a plain message, never a
 // substitute lap. Lap IDs are checked on the server too (permissions, file, same
 // track): the dialog never opens an analysis for a lap that failed that check, and
 // it never shows a raw error, only the sentences below.
 
-import { api, ApiError } from "../api.js";
-import { el } from "../format.js";
+import { api, ApiError } from "../core/api.js";
+import { el } from "../core/format.js";
 import { T } from "../analysis/strings.js";
 
 const KINDS = ["wr", "team_best", "my_best", "lap_id"];

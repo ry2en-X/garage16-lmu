@@ -1,7 +1,7 @@
 """add drivers.token_revoked_at (token revocation)
 
 Supports POST /accounts/revoke and the rotate-token/rotate-secret flow in
-server/routers/accounts.py: get_current_driver() now rejects any request
+server/api/v1/accounts.py: get_current_driver() now rejects any request
 authenticated with a token whose driver has token_revoked_at set.
 
 Revision ID: 0002

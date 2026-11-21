@@ -27,10 +27,10 @@ account") und fragt nach Server-Adresse, **E-Mail und Passwort** deines
 Garage16-Kontos (seit V1.0; die E-Mail muss bestätigt sein, seit V1.0.1).
 Auth-Token und Client-Secret von Hand gehen weiter unter „Use an auth token
 instead (advanced)“. Die Zugangsdaten landen in
-`~/.lmu_garage/client_config.json` — unter Windows verschlüsselt (V1.0.1,
+`~/.garage16/client_config.json` (bis 1.0.1 `~/.lmu_garage`, wird einmal verschoben) — unter Windows verschlüsselt (V1.0.1,
 `client/secret_store.py`). Gegen einen lokalen Entwicklungsserver:
 `http://localhost:8000` eintragen; ohne SMTP steht der Bestätigungslink im
-Server-Log, oder den Server mit `LMU_GARAGE_REQUIRE_EMAIL_VERIFICATION=0` starten.
+Server-Log, oder den Server mit `GARAGE16_REQUIRE_EMAIL_VERIFICATION=0` starten.
 
 Entwickler-Optionen:
 
@@ -41,15 +41,15 @@ Entwickler-Optionen:
 | `py -m client.main --follow-migration` | Serverumzug **von Hand** folgen — nötig nur für einen alten Server ohne HTTPS; ansonsten folgt die laufende App automatisch (siehe `docs/DEPLOYMENT.md`, "Moving the server later") |
 
 Ohne Fenster (Skripte/CI) geht Konfiguration weiterhin über die
-Umgebungsvariablen `LMU_GARAGE_API_URL`, `LMU_GARAGE_AUTH_TOKEN`,
-`LMU_GARAGE_CLIENT_SECRET`; der Datenordner lässt sich mit
-`LMU_GARAGE_DATA_DIR` festlegen.
+Umgebungsvariablen `GARAGE16_API_URL`, `GARAGE16_AUTH_TOKEN`,
+`GARAGE16_CLIENT_SECRET`; der Datenordner lässt sich mit
+`GARAGE16_DATA_DIR` festlegen.
 
 ## Wo liegt was
 
 | Was | Wo |
 |---|---|
-| Gespeicherte Anmeldung + Server-Adresse | `%USERPROFILE%\.lmu_garage\client_config.json` |
+| Gespeicherte Anmeldung + Server-Adresse | `%USERPROFILE%\.garage16\client_config.json` (bis 1.0.1 `.lmu_garage`) |
 | Aufgezeichnete Runden | `%LOCALAPPDATA%\Garage16\laps` (oder ein vorhandenes `./lmu_garage_data`) |
 | Logdatei | neben dem Rundenordner: `garage16-client.log` |
 
