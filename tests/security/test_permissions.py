@@ -40,6 +40,7 @@ PUBLIC = {
     ("GET", "/api/v1/public/circuits"),                           # the circuit library (layouts, no laps)
     ("GET", "/api/v1/public/drivers/{driver_id}"),                # a driver's public profile
     ("GET", "/api/v1/public/drivers/by-slug/{slug}"),             # /driver/<name> -> id
+    ("GET", "/api/v1/public/drivers/{driver_id}/progress"),       # V1.0.3: best lap per day (valid laps only)
     ("GET", "/api/v1/public/teams/by-slug/{slug}"),               # /team/<name> -> id
     ("GET", "/api/v1/public/page-meta"),                          # Page titles for link previews
     ("GET", "/api/v1/public/legal"),                              # Operator data for the legal pages
