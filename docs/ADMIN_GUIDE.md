@@ -203,7 +203,7 @@ Schluss unangetastet und ist der Rückweg. Die Daten (Datenbank, Telemetrie) lie
 und gehören keinem Ordner; der neue Stack übernimmt sie automatisch (gleicher Projektname
 `garage16`).
 
-1. **Backup** im alten Ordner (`scripts/ops/backup.sh`, Kapitel 5).
+1. **Backup** im alten Ordner (`scripts/ops/backup.sh`, bis V1.0.1 direkt scripts/backup.sh; Kapitel 5).
 2. **Neuer Ordner**, ZIP hinein, entpacken, die `.env` aus dem alten Ordner kopieren.
 3. **Alten Stack stoppen** — immer **ohne** `-v` (das `-v` löscht die Volumes!).
 4. **Neuen Stack bauen und starten**: `sudo docker compose --profile tunnel up -d --build`.
@@ -261,7 +261,7 @@ BACKUPS=/volumeUSB2/usbshare/garage16-backups
    ```
    ALT="$G16/Garage16_Lmu_V1_0_1/Garage16 - LMU"
    cd "$ALT"
-   sudo ./scripts/ops/backup.sh "$BACKUPS"
+   sudo ./scripts/backup.sh "$BACKUPS"      # der alte Ordner (V1.0.1) hat das Skript noch direkt unter scripts/
    ```
 2. **Neuen Ordner anlegen**, `Garage16_Lmu_V1_0_2.zip` per File Station hineinladen und dort entpacken,
    `.env` übernehmen:
@@ -365,7 +365,7 @@ V1.0.2 zurückspielen.)
    ```
    ALT="$G16/Garage16_Lmu_V1_0_0/Garage16 - LMU"
    cd "$ALT"
-   sudo ./scripts/ops/backup.sh "$BACKUPS"
+   sudo ./scripts/backup.sh "$BACKUPS"
    ```
 2. **Neuen Ordner anlegen**, `Garage16_Lmu_V1_0_1.zip` per File Station hineinladen und dort
    entpacken („Hierher extrahieren“), `.env` übernehmen:
@@ -401,7 +401,7 @@ V1.0.2 zurückspielen.)
    Leer = keine Doppel.
 7. **Backup mit dem neuen Ordner** und Aufgabenplaner umstellen:
    ```
-   sudo ./scripts/ops/backup.sh "$BACKUPS"
+   sudo ./scripts/backup.sh "$BACKUPS"
    ```
    DSM → Systemsteuerung → Aufgabenplaner → die tägliche Garage16-Backup-Aufgabe → Pfad auf
    `Garage16_Lmu_V1_0_1` ändern.
