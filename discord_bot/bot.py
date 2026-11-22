@@ -10,8 +10,8 @@ Two jobs, one process:
      /link_team. PR events aren't broadcast — nobody but the driver cares,
      and they're already answerable on demand via /pb.
   2. Slash commands: /link (connect a Discord account to a driver profile),
-     /link_team, /link_global, /pb, /wr, /teambest, /leaderboard — each
-     filterable by track and car.
+     /link_team, /link_global, /channels, /unlink_channel, /pb, /wr, /teambest,
+     /leaderboard — each filterable by track and car.
 
 This talks directly to the same database as the FastAPI server (it's one
 deployment, two processes), so there's no extra internal API to keep in
@@ -30,7 +30,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -42,6 +42,7 @@ from sqlalchemy.orm import Session
 from server.core.database import SessionLocal
 from server.accounts.discord_link import redeem_account_link_code, unlink_discord_user
 from server.core.models import Driver, DiscordChannel, Lap, RecordEvent, Team, TeamMembership
+from server.core.config import discord_digest_seconds
 from server.core.env import env
 
 logger = logging.getLogger("lmu_garage.discord_bot")
@@ -110,22 +111,65 @@ async def announce_loop() -> None:
 #  * a stamp that fails is retried without sending anything again;
 #  * of several waiting events for the same record (same type, team, track, car) only the newest
 #    is posted — after a pause the channel gets one message, not a backlog.
+# V1.0.3: "digest". A driver who improves a team best four times in one session used to cause four
+# messages. Now an event is held back until it is at least DIGEST seconds old AND no newer pending
+# event exists for the same record (a newer one restarts the wait). Then ONE message is posted for
+# the newest event, saying how many improvements it sums up and the time before the first of them;
+# the older events of the group are stamped announced without a message. The wait is the setting
+# GARAGE16_DISCORD_DIGEST_S (seconds, default 300; 0 = post at once, as before V1.0.3). The car of
+# a record is its model (Lap.car_model, as in records.py), not the livery name of the event.
 MAX_SEND_ATTEMPTS = 30            # about five minutes at POLL_SECONDS = 10
+DEFAULT_DIGEST_S = 300
+PENDING_LIMIT = 200               # a digest keeps more events pending than the old 50 per turn
 _delivered: dict[int, set[str]] = {}
 _attempts: dict[int, int] = {}
 
 
+def _digest_seconds() -> int:
+    """GARAGE16_DISCORD_DIGEST_S, read at every turn (see server/core/config.py)."""
+    return discord_digest_seconds(DEFAULT_DIGEST_S)
+
+
+def _car_model(event: RecordEvent) -> Optional[str]:
+    """The readable car model of the event's lap (what the leaderboard shows); None for laps from
+    clients that sent no model."""
+    lap = event.lap
+    return lap.car_model if lap is not None and lap.car_model else None
+
+
 def _record_key(event: RecordEvent) -> tuple:
-    return (event.record_type, event.team_id, event.track_name, event.car_name)
+    model = _car_model(event)
+    car = ("model", model) if model else ("name", event.car_name)
+    return (event.record_type, event.team_id, event.track_name, car)
 
 
-def _coalesce(pending: list) -> tuple[list, list]:
-    """(newest event per record, the older ones it replaces). `pending` is oldest first."""
-    newest: dict[tuple, RecordEvent] = {}
+def _group_records(pending: list) -> list[list]:
+    """Pending events (oldest first) grouped per record, each group oldest first."""
+    groups: dict[tuple, list] = {}
     for event in pending:
-        newest[_record_key(event)] = event
-    keep = {event.id for event in newest.values()}
-    return [e for e in pending if e.id in keep], [e for e in pending if e.id not in keep]
+        groups.setdefault(_record_key(event), []).append(event)
+    return list(groups.values())
+
+
+def _coalesce(pending: list, digest_s: int = 0, now: Optional[datetime] = None) -> tuple[list, list, dict]:
+    """(newest event of each record that is ready, the older events it replaces, {newest id: group}).
+    `pending` is oldest first. A record is ready when its newest event is at least `digest_s`
+    seconds old — so a newer event restarts the wait. PR events (never posted) are always ready."""
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
+    ready, superseded, groups_by_id = [], [], {}
+    for group in _group_records(pending):
+        newest = group[-1]
+        created = newest.created_at
+        if created is not None and created.tzinfo is not None:
+            created = created.astimezone(timezone.utc).replace(tzinfo=None)
+        if newest.record_type != "PR" and digest_s > 0 and created is not None \
+                and now - created < timedelta(seconds=digest_s):
+            continue
+        ready.append(newest)
+        superseded.extend(group[:-1])
+        groups_by_id[newest.id] = group
+    ready.sort(key=lambda e: (e.created_at or datetime.min, e.id))
+    return ready, superseded, groups_by_id
 
 
 def _is_permanent(exc: Exception) -> bool:
@@ -144,11 +188,10 @@ async def _post_pending_events() -> None:
             db.query(RecordEvent)
             .filter(RecordEvent.announced_at.is_(None))
             .order_by(RecordEvent.created_at.asc(), RecordEvent.id.asc())
-            .limit(50)
+            .limit(PENDING_LIMIT)
             .all()
         )
-        pending, superseded = _coalesce(pending)
-        superseded_ids = [event.id for event in superseded]
+        pending, _superseded, groups_by_id = _coalesce(pending, _digest_seconds())
         # Materialize everything we need into plain dicts so the session
         # can close before any network I/O.
         events_to_send = []
@@ -169,11 +212,18 @@ async def _post_pending_events() -> None:
                 else:
                     channel_rows = db.query(DiscordChannel).filter(DiscordChannel.team_id == event.team_id).all()
 
+            group = groups_by_id[event.id]
             events_to_send.append({
                 "event_id": event.id,
+                # older events of the same record: stamped together with this one (not before, so
+                # a retry of this event still knows how many improvements it sums up)
+                "superseded_ids": [e.id for e in group[:-1]],
+                "improvements": len(group),
+                "first_previous": group[0].previous_best,
                 "record_type": event.record_type,
                 "track_name": event.track_name,
-                "car_name": event.car_name,
+                # V1.0.3: the model name the leaderboard shows; the livery name for old laps
+                "car_name": _car_model(event) or event.car_name,
                 "lap_time": event.lap_time,
                 "previous_best": event.previous_best,
                 "driver_name": driver.display_name if driver else "Unknown driver",
@@ -184,35 +234,39 @@ async def _post_pending_events() -> None:
     finally:
         db.close()
 
-    for event_id in superseded_ids:
-        _stamp_announced(event_id)
-
     # Now send — no DB session held.
     for evt in events_to_send:
         if evt["record_type"] == "PR":
             # PR is queryable via /pb, not broadcast.
-            _stamp_announced(evt["event_id"])
+            _finish(evt)
             continue
 
         if not evt["channel_ids"]:
-            _stamp_announced(evt["event_id"])
+            _finish(evt)
             continue
 
         # P0-5: Don't broadcast "first time set" WR — any invented
         # track/car combination creates one, enabling WR spam.
         if evt["is_wr"] and evt["previous_best"] is None:
-            _stamp_announced(evt["event_id"])
+            _finish(evt)
             continue
 
         # Truncate title to Discord's 256-char limit.
         raw_title = ("🌍 World Record" if evt["is_wr"] else "🏁 Team Best") + f": {evt['track_name']} — {evt['car_name']}"
         title = raw_title[:256]
 
+        # "previous" is the record before the FIRST improvement of the digest group
+        previous = evt["first_previous"] if evt["improvements"] > 1 else evt["previous_best"]
+        notes = []
+        if previous:
+            notes.append(f"previous: {_fmt(previous)}")
+        if evt["improvements"] > 1:
+            notes.append(f"{evt['improvements']} improvements this session")
         embed = discord.Embed(
             title=title,
             description=(
                 f"**{evt['driver_name']}** set **{_fmt(evt['lap_time'])}**"
-                + (f" (previous: {_fmt(evt['previous_best'])})" if evt["previous_best"] else "")
+                + (f" ({' · '.join(notes)})" if notes else "")
             ),
             color=discord.Color.gold() if evt["is_wr"] else discord.Color.blue(),
         )
@@ -245,6 +299,14 @@ async def _post_pending_events() -> None:
             if _attempts[event_id] < MAX_SEND_ATTEMPTS:
                 continue
             logger.error("Giving up on announcing event %s after %s attempts", event_id, _attempts[event_id])
+        _finish(evt)
+
+
+def _finish(evt: dict) -> None:
+    """The event is done (posted, skipped or given up): stamp it, then the older events of its
+    digest group, which never get a message of their own."""
+    _stamp_announced(evt["event_id"])
+    for event_id in evt["superseded_ids"]:
         _stamp_announced(event_id)
 
 
@@ -366,6 +428,66 @@ async def link_global(interaction: discord.Interaction) -> None:
         await interaction.response.send_message("This channel now announces world records.")
     finally:
         db.close()
+
+
+@tree.command(description="List the channels of this server that get record announcements.")
+@app_commands.default_permissions(manage_channels=True)
+async def channels(interaction: discord.Interaction) -> None:
+    # V1.0.3: until now the only way to see (or remove) a registered channel was SQL.
+    if interaction.guild_id is None:
+        await interaction.response.send_message("Use this command in a server.", ephemeral=True)
+        return
+    db = _db()
+    try:
+        rows = (
+            db.query(DiscordChannel)
+            .filter(DiscordChannel.guild_id == str(interaction.guild_id))
+            .order_by(DiscordChannel.id.asc())
+            .all()
+        )
+        lines = []
+        for row in rows:
+            what = f"team **{row.team.name}**" if row.team is not None else "global (Garage16 Best)"
+            visible = False
+            try:
+                visible = client.get_channel(int(row.channel_id)) is not None
+            except ValueError:
+                pass
+            mark = "" if visible else " — the bot cannot see this channel (`/unlink_channel channel_id:%s` removes it)" % row.channel_id
+            lines.append(f"<#{row.channel_id}> — {what}{mark}")
+    finally:
+        db.close()
+    if not lines:
+        await interaction.response.send_message(
+            "No channel of this server is registered. Use `/link_team` or `/link_global` in a channel.",
+            ephemeral=True,
+        )
+        return
+    await interaction.response.send_message("Announcement channels:\n" + "\n".join(lines), ephemeral=True)
+
+
+@tree.command(description="Stop record announcements in this channel (or another channel of this server).")
+@app_commands.default_permissions(manage_channels=True)
+@app_commands.describe(channel_id="Optional: ID of another channel of this server, also one that no longer exists")
+async def unlink_channel(interaction: discord.Interaction, channel_id: Optional[str] = None) -> None:
+    # accepts a plain ID or a pasted channel mention like <#123>
+    target = (channel_id or "").strip().strip("<#>").strip() or str(interaction.channel_id)
+    db = _db()
+    try:
+        # only channels of THIS server: another server's registration is none of our business
+        row = db.query(DiscordChannel).filter(
+            DiscordChannel.channel_id == target, DiscordChannel.guild_id == str(interaction.guild_id)
+        ).one_or_none()
+        if row is None:
+            await interaction.response.send_message(
+                "That channel isn't registered for announcements on this server.", ephemeral=True
+            )
+            return
+        db.delete(row)
+        db.commit()
+    finally:
+        db.close()
+    await interaction.response.send_message(f"<#{target}> no longer gets announcements.", ephemeral=True)
 
 
 @tree.command(name="pb", description="Your personal best on a track/car.")

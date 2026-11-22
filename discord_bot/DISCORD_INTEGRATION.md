@@ -47,6 +47,8 @@ Slash commands:
 - `/unlink` — disconnect your Discord account from your driver profile
 - `/link_team <invite_code>` — this channel gets that team's best-lap posts
 - `/link_global` — this channel gets world-record posts
+- `/channels` — lists the channels of this server that get announcements (global or team, and a note for channels the bot cannot see); reply visible only to you (V1.0.3)
+- `/unlink_channel [channel_id]` — stops announcements in this channel, or in another channel of this server given by ID (also one that no longer exists); needs the same "manage channels" permission as linking (V1.0.3)
 - `/pb <track> <car>` — your personal best
 - `/wr <track> <car>` — current world record
 - `/teambest <track> <car> [team]` — your team's(s') best
@@ -54,6 +56,13 @@ Slash commands:
 
 Background loop: every 10s, posts any un-announced `RecordEvent` rows as
 embeds to the right channels, then marks them announced.
+
+V1.0.3: the title shows the car model (`Lap.car_model`, as on the leaderboard), the livery
+name only for laps without a model. Announcements are a digest: an event waits until it is
+`GARAGE16_DISCORD_DIGEST_S` seconds old (default 300, `0` = at once) and no newer event of the
+same record (type, team, track, car model) is pending; then one message is posted for the newest
+one ("... (previous: 1:19.569 · 4 improvements this session)"), the older ones are marked
+announced without a message.
 
 ### Running it
 ```

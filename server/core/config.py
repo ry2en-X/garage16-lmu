@@ -23,6 +23,17 @@ def _github_repo() -> str:
     return env("GITHUB_REPO", DEFAULT_GITHUB_REPO).strip().strip("/")
 
 
+def discord_digest_seconds(default: int = 300) -> int:
+    """V1.0.3: GARAGE16_DISCORD_DIGEST_S — how long the Discord bot holds a record announcement back
+    for a newer improvement of the same record. Read at call time; invalid -> default, negative -> 0.
+    (Lives here, not in discord_bot/, so the docs check finds every documented setting in server/.)"""
+    raw = env("DISCORD_DIGEST_S", str(default))
+    try:
+        return max(0, int(float(raw)))
+    except (TypeError, ValueError):
+        return default
+
+
 def _github_asset(filename: str) -> Optional[str]:
     """Direct link to a file of the newest (non-pre-)release: GitHub redirects
     /releases/latest/download/<name> to the newest release that has a file of that name."""

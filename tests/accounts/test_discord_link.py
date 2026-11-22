@@ -397,3 +397,78 @@ def test_the_bot_registers_link_and_unlink_as_slash_commands():
 
     names = {c.name for c in bot.tree.get_commands()}
     assert {"link", "unlink"} <= names
+
+
+# ------------------------------------------- V1.0.3 /channels and /unlink_channel
+
+class _GuildInteraction(_FakeInteraction):
+    def __init__(self, user_id, guild_id="900", channel_id="111"):
+        super().__init__(user_id)
+        self.guild_id = int(guild_id)
+        self.channel_id = int(channel_id)
+
+
+def test_channels_lists_and_unlink_channel_removes_registrations(client, monkeypatch):
+    pytest.importorskip("discord")
+    import discord_bot.bot as bot
+    from server.core.models import DiscordChannel, Team
+
+    with SessionLocal() as db:
+        team = Team(name="HyperMotion", invite_code="HYPER123")
+        db.add(team)
+        db.commit()
+        db.add_all([
+            DiscordChannel(team_id=None, guild_id="900", channel_id="111", registered_by="1"),
+            DiscordChannel(team_id=team.id, guild_id="900", channel_id="222", registered_by="1"),
+            DiscordChannel(team_id=None, guild_id="901", channel_id="333", registered_by="1"),
+        ])
+        db.commit()
+
+    class _Client:
+        def get_channel(self, channel_id):
+            return object() if channel_id == 111 else None
+
+    monkeypatch.setattr(bot, "client", _Client())
+
+    listing = _GuildInteraction(1)
+    asyncio.run(bot.channels.callback(listing))
+    text, ephemeral = listing.response.sent[0]
+    assert ephemeral is True
+    assert "<#111>" in text and "global (Garage16 Best)" in text
+    assert "<#222>" in text and "HyperMotion" in text
+    assert "<#333>" not in text, "channels of another server are not listed"
+    assert text.count("cannot see") == 1 and "222" in text.split("cannot see")[1]
+
+    # the current channel (111)
+    here = _GuildInteraction(1, channel_id="111")
+    asyncio.run(bot.unlink_channel.callback(here, None))
+    assert "no longer gets" in here.response.sent[0][0] and here.response.sent[0][1] is True
+    # another channel of this guild by ID, one the bot cannot see
+    other = _GuildInteraction(1, channel_id="111")
+    asyncio.run(bot.unlink_channel.callback(other, "222"))
+    assert "no longer gets" in other.response.sent[0][0]
+    # a channel of another server cannot be removed from here
+    foreign = _GuildInteraction(1)
+    asyncio.run(bot.unlink_channel.callback(foreign, "333"))
+    assert "isn't registered" in foreign.response.sent[0][0]
+    # already gone
+    again = _GuildInteraction(1)
+    asyncio.run(bot.unlink_channel.callback(again, None))
+    assert "isn't registered" in again.response.sent[0][0]
+
+    with SessionLocal() as db:
+        assert [c.channel_id for c in db.query(DiscordChannel).all()] == ["333"]
+
+    empty = _GuildInteraction(1)
+    asyncio.run(bot.channels.callback(empty))
+    assert "No channel of this server" in empty.response.sent[0][0]
+
+
+def test_the_bot_registers_the_channel_commands_with_the_linking_permission():
+    pytest.importorskip("discord")
+    import discord_bot.bot as bot
+
+    commands = {c.name: c for c in bot.tree.get_commands()}
+    assert {"channels", "unlink_channel"} <= set(commands)
+    for name in ("channels", "unlink_channel", "link_team", "link_global"):
+        assert commands[name].default_permissions.manage_channels is True

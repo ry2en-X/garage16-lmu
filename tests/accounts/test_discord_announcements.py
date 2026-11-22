@@ -8,13 +8,14 @@ V1.0.2 regression: with one registered channel the bot could not reach, an event
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 discord = pytest.importorskip("discord")
 
 from server.core.database import SessionLocal  # noqa: E402
-from server.core.models import DiscordChannel, RecordEvent, Team  # noqa: E402
+from server.core.models import DiscordChannel, Lap, RecordEvent, Team  # noqa: E402
 from tests.helpers.synthetic_lap import make_lap  # noqa: E402
 from tests.helpers.v093 import headers, register, upload_df  # noqa: E402
 
@@ -42,6 +43,8 @@ class FakeClient:
 def bot(monkeypatch):
     import discord_bot.bot as bot_module
 
+    # V1.0.3: the digest delay is switched off here; the digest tests below set it themselves
+    monkeypatch.setenv("GARAGE16_DISCORD_DIGEST_S", "0")
     bot_module._delivered.clear()
     bot_module._attempts.clear()
     yield bot_module
@@ -186,3 +189,102 @@ def test_a_team_that_switched_announcements_off_gets_nothing(client, bot):
     working = FakeChannel()
     _run(bot, FakeClient({"111": working}), turns=2)
     assert working.sent == [] and _pending() == 0
+
+
+# ------------------------------------------------------------ V1.0.3 car name
+
+def test_the_title_shows_the_car_model_and_falls_back_to_the_livery_name(client, bot):
+    driver_id, team_id, lap_id = _team_with_lap(client)
+    _channels(team_id, "111")
+    with SessionLocal() as db:
+        db.get(Lap, lap_id).car_model = "Peugeot 9X8"
+        db.commit()
+    _add_events(driver_id, team_id, lap_id, [79.569], car="499P Custom Team 2026 #397")
+    working = FakeChannel()
+    _run(bot, FakeClient({"111": working}), turns=2)
+    assert len(working.sent) == 1 and "Peugeot 9X8" in working.sent[0] and "#397" not in working.sent[0]
+
+    with SessionLocal() as db:
+        db.get(Lap, lap_id).car_model = None
+        db.commit()
+    _add_events(driver_id, team_id, lap_id, [78.0], car="R-ace GP 2026 #85:ELMS")
+    _run(bot, FakeClient({"111": working}), turns=2)
+    assert "R-ace GP 2026 #85:ELMS" in working.sent[1]
+
+
+# --------------------------------------------------------------- V1.0.3 digest
+
+def _age_events(seconds_ago_by_index):
+    """Set created_at of the pending events (oldest first) to the given ages in seconds."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with SessionLocal() as db:
+        events = db.query(RecordEvent).order_by(RecordEvent.id.asc()).all()
+        for event, ago in zip(events, seconds_ago_by_index):
+            event.created_at = now - timedelta(seconds=ago)
+        db.commit()
+
+
+def test_the_digest_holds_a_young_event_back(client, bot, monkeypatch):
+    monkeypatch.setenv("GARAGE16_DISCORD_DIGEST_S", "300")
+    driver_id, team_id, lap_id = _team_with_lap(client)
+    _channels(team_id, "111")
+    _add_events(driver_id, team_id, lap_id, [79.569])
+    _age_events([100])
+    working = FakeChannel()
+    _run(bot, FakeClient({"111": working}), turns=3)
+    assert working.sent == [] and _pending() == 1
+
+    _age_events([301])
+    _run(bot, FakeClient({"111": working}), turns=3)
+    assert len(working.sent) == 1 and _pending() == 0
+
+
+def test_a_newer_event_restarts_the_wait(client, bot, monkeypatch):
+    monkeypatch.setenv("GARAGE16_DISCORD_DIGEST_S", "300")
+    driver_id, team_id, lap_id = _team_with_lap(client)
+    _channels(team_id, "111")
+    _add_events(driver_id, team_id, lap_id, [79.569, 79.0])
+    _age_events([1000, 10])          # the first is old, but the second is new: nothing yet
+    working = FakeChannel()
+    _run(bot, FakeClient({"111": working}), turns=3)
+    assert working.sent == [] and _pending() == 2
+
+
+def test_after_the_window_one_message_sums_up_the_improvements(client, bot, monkeypatch):
+    monkeypatch.setenv("GARAGE16_DISCORD_DIGEST_S", "300")
+    driver_id, team_id, lap_id = _team_with_lap(client)
+    _channels(team_id, "111")
+    _add_events(driver_id, team_id, lap_id, [79.569, 79.556, 78.812, 78.477])
+    _age_events([900, 700, 500, 400])
+    working = FakeChannel()
+    _run(bot, FakeClient({"111": working}), turns=3)
+    assert len(working.sent) == 1, working.sent
+    # the first event has no previous time here, so only the count is shown
+    assert "1:18.477" in working.sent[0] and "4 improvements this session" in working.sent[0]
+    assert _pending() == 0
+
+
+def test_the_digest_names_the_time_before_the_first_improvement(client, bot, monkeypatch):
+    monkeypatch.setenv("GARAGE16_DISCORD_DIGEST_S", "300")
+    driver_id, team_id, lap_id = _team_with_lap(client)
+    _channels(team_id, "111")
+    _add_events(driver_id, team_id, lap_id, [80.0, 79.569, 79.0])
+    with SessionLocal() as db:
+        first = db.query(RecordEvent).order_by(RecordEvent.id.asc()).first()
+        first.previous_best = 81.0
+        db.commit()
+    _age_events([900, 800, 700])
+    working = FakeChannel()
+    _run(bot, FakeClient({"111": working}), turns=2)
+    assert len(working.sent) == 1
+    assert "(previous: 1:21.000 · 3 improvements this session)" in working.sent[0], working.sent
+
+
+def test_digest_zero_posts_at_once(client, bot, monkeypatch):
+    monkeypatch.setenv("GARAGE16_DISCORD_DIGEST_S", "0")
+    driver_id, team_id, lap_id = _team_with_lap(client)
+    _channels(team_id, "111")
+    _add_events(driver_id, team_id, lap_id, [79.569])     # created just now
+    working = FakeChannel()
+    _run(bot, FakeClient({"111": working}), turns=1)
+    assert len(working.sent) == 1 and "improvements" not in working.sent[0]
