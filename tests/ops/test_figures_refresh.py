@@ -74,3 +74,14 @@ def test_the_entrypoint_starts_it_in_the_background_with_low_priority():
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     server = compose.split("\n  server:", 1)[1].split("\n  reverse_proxy:", 1)[0]
     assert "init: true" in server, "PID 1 must reap the finished background process"
+
+
+def test_a_lap_deleted_during_the_run_only_skips_that_lap(client):
+    """V1.0.3 review: the run takes minutes; a lap deleted meanwhile must not end it."""
+    owner = register(client, "Figures2")
+    ids = [upload_df(client, owner, make_lap(seed=80 + n, n=1900, lap_time=91.0 + n * 0.1), lap_time=91.0 + n * 0.1, lap_number=n + 1)["lap_id"]
+           for n in range(3)]
+    _age(ids)
+    with SessionLocal() as db:
+        result = recompute_figures(db, lap_ids=[ids[0], 999999, ids[2]], batch=1)
+    assert result["recomputed"] == 2 and result["skipped_without_file"] == 1

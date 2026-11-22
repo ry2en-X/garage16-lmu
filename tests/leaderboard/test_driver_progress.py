@@ -34,7 +34,7 @@ def _add(driver_id, day, lap_time, track="Monza", car_model="499P", valid=True, 
         db.close()
 
 
-def test_days_are_aggregated_best_median_and_count(client):
+def test_days_are_aggregated_to_the_best_lap_only(client):
     d = _register(client, "Prog1")
     _add(d, "2026-11-01", 100.0)
     _add(d, "2026-11-01", 98.0, hour=14)
@@ -42,8 +42,8 @@ def test_days_are_aggregated_best_median_and_count(client):
     _add(d, "2026-11-05", 97.5)
     body = client.get(URL.format(d), params={"track": "Monza", "car_model": "499P"}).json()
     assert body["days"] == [
-        {"day": "2026-11-01", "best": 98.0, "median": 99.0, "laps": 3},
-        {"day": "2026-11-05", "best": 97.5, "median": 97.5, "laps": 1},
+        {"day": "2026-11-01", "best": 98.0},
+        {"day": "2026-11-05", "best": 97.5},
     ]
     assert body["combos"][0]["laps"] == 4
 
@@ -110,3 +110,12 @@ def test_public_cache_headers(client):
     d = _register(client, "Prog6")
     r = client.get(URL.format(d))
     assert "public" in r.headers.get("cache-control", "") and r.headers.get("etag")
+
+
+def test_a_recording_time_that_is_no_date_does_not_break_the_page():
+    """V1.0.3 review: recorded_at comes from the client; milliseconds instead of seconds must not
+    turn the page into a 500."""
+    from server.api.v1.drivers import _day
+
+    assert _day(1_763_000_000) == "2025-11-13"
+    assert _day(1_763_000_000_000_000) == "1970-01-01"

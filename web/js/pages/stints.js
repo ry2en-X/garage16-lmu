@@ -95,7 +95,7 @@ async function renderSessionList(container, driverId) {
 // ------------------------------------------------------------------ one session
 
 const DEFAULT_STATE = () => ({ exclude: [...S.NOT_CLEAN_DEFAULT], outlierPct: S.DEFAULT_OUTLIER_PCT, window: 5, stint: null,
-  paceMode: "time", wheelValue: "temp" });
+  paceMode: "time", wheelValue: "temp", wearLimit: 50, fuelMargin: 1, compare: null });
 
 async function renderSession(container, lapId, compareLap) {
   const status = el("div", { class: "notice" }, t("Loading …"));
@@ -139,8 +139,11 @@ async function renderSession(container, lapId, compareLap) {
   const rerender = () => {
     filters.innerHTML = "";
     filterBar(filters, data, state, rerender);
+    // the charts leave the shared group before they are thrown away (stints/chart.js dispose)
+    for (const node of body.querySelectorAll(".schart")) if (node.dispose) node.dispose();
     body.innerHTML = "";
     const clean = S.cleanIds(data.laps, { exclude: state.exclude, outlierPct: state.outlierPct });
+    if (compareLap && !state.compare) state.compare = { lap: compareLap, driver: null, data: null };
     const ctx = { data, state, clean, rerender, compareLap, group };
     for (const section of SECTIONS) {
       try {
@@ -184,7 +187,7 @@ function filterBar(box, data, state, rerender) {
   const win = el("select", { class: "input", "aria-label": t("Rolling average") }, [3, 5, 10].map((n) => el("option", { value: n, ...(n === state.window ? { selected: "selected" } : {}) }, tp("{0} lap", "{0} laps", n))));
   win.addEventListener("change", () => { state.window = Number(win.value); rerender(); });
   const reset = el("button", { type: "button", class: "btn btn--ghost" }, t("Reset filters"));
-  reset.addEventListener("click", () => { Object.assign(state, DEFAULT_STATE()); rerender(); });
+  reset.addEventListener("click", () => { Object.assign(state, DEFAULT_STATE(), { compare: state.compare }); rerender(); });
   box.appendChild(note(t("Charts: point at a lap to see every value of it in all charts, drag across a range to zoom (double-click: back), click a legend entry to hide it."), "stint-hint"));
   box.appendChild(el("div", { class: "stint-filters__row" }, [el("label", {}, [t("Rolling average over"), " ", win]), reset]));
 }

@@ -216,6 +216,41 @@ s1.dispatchEvent(pointer("pointerdown", px(7)));
 s1.dispatchEvent(pointer("pointerup", px(7)));
 assert.equal(longGroup.state.pinned, true);
 assert.equal(longGroup.state.cursor, 7);
+// review fixes: a link dot keeps its click (no drag, no pin); a cancelled touch leaves no cursor;
+// a drag into a gap does not zoom; dispose() leaves the group
+const linkGroup = C.createChartGroup();
+let opened = null;
+const lc = chart([{ kind: "dots", label: "laps", color: "#f00", onClick: (m) => { opened = m.id; }, points: pts.map(([x, y]) => [x, y, { id: x }]) }], { group: linkGroup, width: 600, height: 200 });
+root.append(lc);
+const dot = lc.querySelector(".stint-chart__dot--link");
+dot.dispatchEvent(pointer("pointerdown", px(1)));
+dot.dispatchEvent(pointer("pointerup", px(1)));
+dot.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+assert.equal(opened, 1, "the dot opens its lap");
+assert.equal(linkGroup.state.pinned, false, "and does not pin the cursor");
+const ls = lc.querySelector("svg");
+ls.dispatchEvent(pointer("pointerdown", px(5), { pointerType: "touch" }));
+ls.dispatchEvent(pointer("pointermove", px(6), { pointerType: "touch" }));
+assert.equal(lc.querySelector(".schart__tip").hidden, false);
+ls.dispatchEvent(new MouseEvent("pointercancel", { bubbles: true }));
+assert.equal(lc.querySelector(".schart__tip").hidden, true, "a scroll gesture takes the cursor away");
+const gappy = C.createChartGroup();
+const gc = chart([{ kind: "dots", label: "days", color: "#f00", points: [[0, 100], [1, 99], [40, 98], [41, 97]] }], { group: gappy, width: 600, height: 200 });
+root.append(gc);
+const gs = gc.querySelector("svg");
+const gx = (v) => 58 + (v / 41) * (600 - 58 - 14);
+gs.dispatchEvent(pointer("pointerdown", gx(10)));
+gs.dispatchEvent(pointer("pointermove", gx(25)));
+gs.dispatchEvent(pointer("pointerup", gx(30)));
+assert.equal(gappy.state.window, null, "a range without data is not zoomed into");
+gappy.setCursor(0);
+const tipBefore = gc.querySelector(".schart__tip").textContent;
+gc.dispose();
+gappy.setCursor(41);
+assert.equal(gc.querySelector(".schart__tip").textContent, tipBefore, "a disposed chart no longer follows its group");
+lc.remove();
+gc.remove();
+
 // an empty chart draws nothing and does not throw
 assert.ok(chart([], {}).querySelector("svg"));
 // an inverted axis (positions: 1 on top)
@@ -304,6 +339,18 @@ assert.match(text(cmp), /Mate ·/);
 const medianRow = [...cmp.querySelectorAll("tr")].find((r) => /^Median/.test(r.textContent.trim()));
 assert.match(medianRow.textContent, /\+0\.500/, "the team mate is half a second slower on the median");
 assert.ok(medianRow.querySelector(".cmp-better"), "the better value is marked");
+
+// review fixes: the comparison and the inputs survive a re-render (a filter change)
+const marginBox = root.querySelector("#stint-fuel input[type=number]");
+marginBox.value = "2";
+marginBox.dispatchEvent(new Event("change"));
+const trafficBox2 = [...root.querySelectorAll(".stint-filter")].find((l) => /traffic/.test(l.textContent)).querySelector("input");
+trafficBox2.checked = !trafficBox2.checked;
+trafficBox2.dispatchEvent(new Event("change"));
+await sleep(30);
+assert.equal(root.querySelector("#stint-fuel input[type=number]").value, "2", "the safety margin is kept");
+assert.match(text(root.querySelector("#stint-sessions")), /Mate ·/, "the chosen session is kept");
+assert.ok(root.querySelector("#stint-sessions svg"));
 
 // CSV export of every lap
 const { lapsCsv } = await import("../../web/js/stints/section_compare.js");

@@ -151,11 +151,11 @@ def test_a_failed_stamp_does_not_send_the_event_again(client, bot, monkeypatch):
     real_stamp = bot._stamp_announced
     calls = []
 
-    def broken_stamp(event_id):
+    def broken_stamp(event_id, *also):
         calls.append(event_id)
         if len(calls) <= 2:
             return None          # as if the commit had failed: the event stays pending
-        return real_stamp(event_id)
+        return real_stamp(event_id, *also)
 
     monkeypatch.setattr(bot, "_stamp_announced", broken_stamp)
     _run(bot, FakeClient({"111": working}), turns=4)
@@ -288,3 +288,19 @@ def test_digest_zero_posts_at_once(client, bot, monkeypatch):
     working = FakeChannel()
     _run(bot, FakeClient({"111": working}), turns=1)
     assert len(working.sent) == 1 and "improvements" not in working.sent[0]
+
+
+def test_a_digest_group_is_stamped_in_one_transaction(client, bot, monkeypatch):
+    """V1.0.3 review: the newest event and the older ones it replaces are stamped together — a
+    failure in between used to leave an older, slower time to be announced on its own later."""
+    monkeypatch.setenv("GARAGE16_DISCORD_DIGEST_S", "0")
+    driver_id, team_id, lap_id = _team_with_lap(client)
+    _channels(team_id, "111")
+    _add_events(driver_id, team_id, lap_id, [79.569, 79.0, 78.5])
+    working = FakeChannel()
+    seen = []
+    real = bot._stamp_announced
+    monkeypatch.setattr(bot, "_stamp_announced", lambda event_id, *also: (seen.append((event_id, also)), real(event_id, *also)))
+    _run(bot, FakeClient({"111": working}), turns=2)
+    assert len(working.sent) == 1 and _pending() == 0
+    assert len(seen) == 1 and len(seen[0][1]) == 2, seen

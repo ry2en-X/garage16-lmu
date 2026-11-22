@@ -21,11 +21,11 @@ const COMBOS = [
 ];
 const DAYS = {
   Fuji: [
-    { day: "2026-11-01", best: 100.0, median: 101.5, laps: 2 },
-    { day: "2026-11-03", best: 101.0, median: 102.0, laps: 2 },
-    { day: "2026-11-10", best: 98.5, median: 99.2, laps: 1 },
+    { day: "2026-11-01", best: 100.0 },
+    { day: "2026-11-03", best: 101.0 },
+    { day: "2026-11-10", best: 98.5 },
   ],
-  Monza: [{ day: "2026-10-01", best: 110.0, median: 111.0, laps: 2 }, { day: "2026-10-02", best: 110.0, median: 110.0, laps: 1 }],
+  Monza: [{ day: "2026-10-01", best: 110.0 }, { day: "2026-10-02", best: 110.0 }],
 };
 const calls = [];
 globalThis.fetch = async (url) => {
@@ -53,7 +53,7 @@ assert.deepEqual(m.dots.map((p) => p.slice(0, 2)), [[0, 100], [2, 101], [9, 98.5
 assert.deepEqual(m.pb, [[0, 100], [9, 100], [9, 98.5]]);
 assert.equal(m.improved, 1.5);
 assert.equal(m.days, 3);
-assert.deepEqual(m.median.map((p) => p[1]), [101.5, 102, 99.2]);
+assert.equal(m.median, undefined, "no medians (the server sends the best per day only)");
 assert.equal(dayNumber("2026-11-02") - dayNumber("2026-11-01"), 1);
 const flat = progressModel(DAYS.Monza);
 assert.equal(flat.improved, 0);

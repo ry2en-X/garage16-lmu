@@ -10,7 +10,6 @@ session data, or is_locked — see DriverProfileOut's docstring.
 
 from __future__ import annotations
 
-import statistics
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -162,8 +161,10 @@ def driver_progress(
     (official_filter: valid, not held/quarantined) and laps without a car_model are left out.
     {"combos": [{track_name, car_model, car_name, car_class, laps, last_day}] — combinations with at
      least 2 laps, most recently driven first; "selected": {track_name, car_model} | null;
-     "days": [{day: "YYYY-MM-DD" (UTC), best, median, laps}] oldest first, for the selected
-    combination}. Without `track` and `car_model` the most recent combination is selected; with
+     "days": [{day: "YYYY-MM-DD" (UTC), best}] oldest first, for the selected combination}.
+    Deliberately only the best lap per day: no lap counts or medians per day, so the public page
+    shows the progress, not how long and how evenly somebody practised on which day (that stays
+    in the Stint Analyzer, for the driver and team mates). Without `track` and `car_model` the most recent combination is selected; with
     them an unknown combination gives an empty list. Giving only one of the two is a 422.
     """
     if (track is None) != (car_model is None):
@@ -201,16 +202,17 @@ def driver_progress(
         per_day: Dict[str, List[float]] = {}
         for recorded_at, lap_time in laps:
             per_day.setdefault(_day(recorded_at), []).append(lap_time)
-        days = [
-            {"day": d, "best": min(v), "median": round(statistics.median(v), 3), "laps": len(v)}
-            for d, v in sorted(per_day.items())
-        ]
+        days = [{"day": d, "best": min(v)} for d, v in sorted(per_day.items())]
     return {"combos": combos, "selected": selected, "days": days}
 
 
 def _day(recorded_at: Optional[int]) -> str:
-    """The session day (UTC date) of a lap's recording time."""
-    return datetime.fromtimestamp(recorded_at or 0, tz=timezone.utc).strftime("%Y-%m-%d")
+    """The session day (UTC date) of a lap's recording time. The time comes from the client: one
+    that cannot be a date (milliseconds, far future) counts as unknown instead of failing the page."""
+    try:
+        return datetime.fromtimestamp(recorded_at or 0, tz=timezone.utc).strftime("%Y-%m-%d")
+    except (OverflowError, OSError, ValueError):
+        return "1970-01-01"
 
 
 def _class_bests(db: Session, pairs: set) -> dict:

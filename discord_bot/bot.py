@@ -303,28 +303,28 @@ async def _post_pending_events() -> None:
 
 
 def _finish(evt: dict) -> None:
-    """The event is done (posted, skipped or given up): stamp it, then the older events of its
-    digest group, which never get a message of their own."""
-    _stamp_announced(evt["event_id"])
-    for event_id in evt["superseded_ids"]:
-        _stamp_announced(event_id)
+    """The event is done (posted, skipped or given up): stamp it together with the older events of
+    its digest group, which never get a message of their own — in ONE transaction, so a failed
+    stamp cannot leave an older, slower time behind to be announced on its own later."""
+    _stamp_announced(evt["event_id"], *evt["superseded_ids"])
 
 
-def _stamp_announced(event_id: int) -> None:
+def _stamp_announced(event_id: int, *also: int) -> None:
     """Short-lived session to stamp announced_at — no lock held during sends. If the stamp fails,
-    the event stays pending, but _delivered keeps its channels from getting it a second time."""
+    the events stay pending, but _delivered keeps the channels from getting them a second time."""
+    ids = [event_id, *also]
     db = _db()
     try:
-        event = db.get(RecordEvent, event_id)
-        if event is not None:
-            event.announced_at = datetime.now(timezone.utc)
-            db.add(event)
-            db.commit()
-        _delivered.pop(event_id, None)
-        _attempts.pop(event_id, None)
+        now = datetime.now(timezone.utc)
+        for event in db.query(RecordEvent).filter(RecordEvent.id.in_(ids)).all():
+            event.announced_at = now
+        db.commit()
+        for i in ids:
+            _delivered.pop(i, None)
+            _attempts.pop(i, None)
     except Exception:
         db.rollback()
-        logger.exception("Could not mark event %s as announced; will try again (without re-sending)", event_id)
+        logger.exception("Could not mark events %s as announced; will try again (without re-sending)", ids)
     finally:
         db.close()
 

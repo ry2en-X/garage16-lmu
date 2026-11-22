@@ -8,16 +8,18 @@ import * as S from "./stats.js";
 import { lapTitle, sessionDecor } from "./section_pace.js";
 import { GREY, card, chart, dash, estimateTag, f, fin, lapTime, legend, measuredTag, note, signed, stat, stintColor, table } from "./ui.js";
 
-export function fuelSection({ data, clean, group }) {
+export function fuelSection({ data, clean, group, state }) {
   const laps = data.laps;
   const s = data.summary;
   const perLap = S.median(laps.filter((l) => clean.has(l.id)).map((l) => l.fuel_used_l));
   const energyPerLap = S.median(laps.filter((l) => clean.has(l.id)).map((l) => l.energy_used_pct));
   const medianLap = S.median(laps.filter((l) => clean.has(l.id)).map((l) => l.lap_time));
-  const margin = { value: 1 };
+  // the margin lives in the page's state, so it survives a re-render (a filter change)
+  const margin = { get value() { return state.fuelMargin; }, set value(v) { state.fuelMargin = v; } };
   const out = el("div");
-  const marginInput = el("input", { type: "number", class: "input stint-input--short", min: "0", max: "10", step: "0.5", value: "1", "aria-label": t("Safety margin in laps") });
+  const marginInput = el("input", { type: "number", class: "input stint-input--short", min: "0", max: "10", step: "0.5", value: String(margin.value), "aria-label": t("Safety margin in laps") });
   const draw = () => {
+    for (const node of out.querySelectorAll(".schart")) if (node.dispose) node.dispose();
     out.innerHTML = "";
     const fuel = S.fuelPlan({ fuelLeft: s.fuel_end_l, perLap, lapTime: medianLap, timeLeft: s.session_left_s, lapsLeft: s.max_laps ? s.max_laps - (laps[laps.length - 1].lap_number || 0) : null, marginLaps: margin.value });
     const energy = S.fuelPlan({ fuelLeft: s.energy_end_pct, perLap: energyPerLap, lapTime: medianLap, timeLeft: s.session_left_s, lapsLeft: s.max_laps ? s.max_laps - (laps[laps.length - 1].lap_number || 0) : null, marginLaps: margin.value });

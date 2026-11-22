@@ -51,7 +51,7 @@ def run(batch: int = BATCH, pause_s: float = PAUSE_S) -> dict:
         def progress(done: int, total: int) -> None:
             logger.info("Lap figures: %s / %s recomputed.", done, total)
 
-        result = recompute_figures(db, batch=batch, pause_s=pause_s, progress=progress)
+        result = recompute_figures(db, lap_ids=stale, batch=batch, pause_s=pause_s, progress=progress)
         logger.info("Lap figures up to date: %s", result)
         return result
     finally:

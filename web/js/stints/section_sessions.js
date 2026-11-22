@@ -5,7 +5,7 @@
 // figures that matter for a race are set side by side.
 //
 // Opened with /stints?lap=<id>&compare=<lap id of the other session> the other session is chosen
-// at once, so a comparison can be shared as a link.
+// at once, so a comparison can be shared as a link. The choice survives filter changes (state).
 
 import { api } from "../core/api.js";
 import { el, formatLapTime } from "../core/format.js";
@@ -44,15 +44,19 @@ export function sessionFigures(data, state) {
 // Lap times of a session, x = lap in the session (all laps; filtered ones as null so the line breaks).
 const sessionLine = (data, clean) => data.laps.map((l, i) => [i + 1, clean.has(l.id) ? l.lap_time : null]);
 
-export function sessionsSection({ data, state, compareLap }) {
+export function sessionsSection({ data, state }) {
   const out = el("div");
   const pickDriver = el("select", { class: "input", "aria-label": t("Driver") });
   const pickSession = el("select", { class: "input", "aria-label": t("Session") });
-  const own = { other: null };   // the other session, once loaded
+  // The choice lives in the page's state (state.compare = { lap, driver, data }), so changing a
+  // filter or a chart view — which draws the page again — keeps the comparison and loads nothing.
+  if (!state.compare) state.compare = { lap: null, driver: null, data: null };
+  const choice = state.compare;
+  let token = 0;   // the newest request wins when sessions are picked quickly one after the other
 
   const draw = () => {
     out.innerHTML = "";
-    const other = own.other;
+    const other = choice.data;
     if (!other) {
       out.appendChild(note(t("Choose a session to compare with: your own on this track and car, or a team mate's.")));
       return;
@@ -77,6 +81,7 @@ export function sessionsSection({ data, state, compareLap }) {
       return { cells: [label, el("span", { class: better === "a" ? "cmp-better" : null }, fmt(a)), el("span", { class: better === "b" ? "cmp-better" : null }, fmt(b)),
         fin(diff) ? signed(diff, 3, "") : dash] };
     };
+    const plain = (label, a, b, fmt) => ({ cells: [label, fmt(a), fmt(b), fin(a) && fin(b) ? signed(b - a, 1, "") : dash] });
     out.appendChild(table(["", nameA, nameB, t("Difference")], [
       { cells: [t("Laps (clean)"), `${fa.laps} (${fa.cleanLaps})`, `${fb.laps} (${fb.cleanLaps})`, dash] },
       row(t("Best (clean)"), fa.best, fb.best, lapTime),
@@ -87,7 +92,7 @@ export function sessionsSection({ data, state, compareLap }) {
       row(t("Fuel / lap"), fa.fuel, fb.fuel, (v) => f(v, 2, "L")),
       row(t("Energy / lap"), fa.energy, fb.energy, (v) => f(v, 2, "%")),
       row(t("Tyre wear / lap"), fa.wear, fb.wear, (v) => f(v, 3, "%")),
-      row(t("Tyre temperature (avg)"), fa.tyreTemp, fb.tyreTemp, (v) => f(v, 1, "°C"), false),
+      plain(t("Tyre temperature (avg)"), fa.tyreTemp, fb.tyreTemp, (v) => f(v, 1, "°C")),
       { cells: [t("Stints / pit stops"), `${fa.stints} / ${fa.pitStops}`, `${fb.stints} / ${fb.pitStops}`, dash] },
     ]));
     out.appendChild(note(t("Both sessions with the same filter. Difference = the other session minus this one; the better value is marked. Tyre temperature is not better or worse by itself — it is only set side by side.")));
@@ -106,6 +111,7 @@ export function sessionsSection({ data, state, compareLap }) {
         pickSession.appendChild(el("option", { value: s.key_lap_id }, `${dateOf(s.started)} · ${tp("{0} lap", "{0} laps", s.laps.length)}${s.consistency && fin(s.consistency.best) ? ` · ${lapTime(s.consistency.best)}` : ""}`));
       }
       if (pickSession.options.length === 1) pickSession.options[0].textContent = t("No other session on this track and car.");
+      if (choice.lap) pickSession.value = String(choice.lap);
       return res;
     } catch (err) {
       pickSession.innerHTML = "";
@@ -114,31 +120,45 @@ export function sessionsSection({ data, state, compareLap }) {
     }
   };
   const loadOther = async (lapId) => {
-    own.other = null;
+    const mine = ++token;
+    choice.lap = lapId;
+    choice.data = null;
     if (!lapId) { draw(); return; }
     out.innerHTML = "";
     out.appendChild(note(t("Loading …")));
+    let other;
     try {
-      own.other = await api.stintSession(lapId);
+      other = await api.stintSession(lapId);
     } catch (err) {
+      if (mine !== token) return;
       out.innerHTML = "";
       out.appendChild(el("div", { class: "notice notice--error" }, err.message));
       return;
     }
+    if (mine !== token) return;   // another session was picked meanwhile
+    choice.data = other;
     draw();
   };
-  pickDriver.addEventListener("change", () => { own.other = null; draw(); loadSessions(); });
+  pickDriver.addEventListener("change", () => {
+    choice.driver = Number(pickDriver.value) || null;
+    token += 1;
+    choice.lap = null;
+    choice.data = null;
+    draw();
+    loadSessions();
+  });
   pickSession.addEventListener("change", () => loadOther(Number(pickSession.value) || null));
 
   // the drivers you may look at come with the session list
   api.stintSessions({ trackName: data.track_name, carModel: data.car_model || undefined, limit: 1 }).then((res) => {
-    for (const d of res.drivers || []) pickDriver.appendChild(el("option", { value: d.id, ...(d.own ? { selected: "selected" } : {}) }, d.own ? t("{0} (you)", [d.name]) : d.name));
+    for (const d of res.drivers || []) {
+      const selected = choice.driver ? d.id === choice.driver : d.own;
+      pickDriver.appendChild(el("option", { value: d.id, ...(selected ? { selected: "selected" } : {}) }, d.own ? t("{0} (you)", [d.name]) : d.name));
+    }
     return loadSessions();
   }).then(() => {
-    if (compareLap) {
-      pickSession.value = String(compareLap);
-      return loadOther(compareLap);
-    }
+    if (choice.data) { draw(); return null; }          // chosen before this re-render: nothing to load
+    if (choice.lap) return loadOther(choice.lap);       // ?compare=… in the address
     draw();
     return null;
   }).catch((err) => { out.innerHTML = ""; out.appendChild(el("div", { class: "notice notice--error" }, err.message)); });

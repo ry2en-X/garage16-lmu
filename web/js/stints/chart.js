@@ -76,7 +76,8 @@ function valueAt(s, x) {
  *            legendExtra: [{ label, color, dot, dashed }] (not clickable), zoom (default true),
  *            markers: [{ x, label }], regions: [{ x0, x1, color, label }],
  *            hlines: [{ y, label, color, dashed }], tooltipTitle(x) }
- * Returns a <div class="schart"> holding the SVG (and the legend, value box, reset button).
+ * Returns a <div class="schart"> holding the SVG (and the legend, value box, reset button);
+ * its dispose() takes the chart out of the group.
  */
 export function chart(series, options = {}) {
   const height = options.height || 240;
@@ -319,8 +320,17 @@ export function chart(series, options = {}) {
   root.addEventListener("pointerleave", () => { if (!drag) group.setCursor(null, box); });
   root.addEventListener("pointerdown", (event) => {
     if (!geom || event.button > 0) return;
+    // A dot that is a link keeps its click: capturing the pointer would send the click to the SVG
+    // (real browsers do), and the lap would be pinned instead of opened.
+    if (event.target && event.target.classList && event.target.classList.contains("stint-chart__dot--link")) return;
     drag = { startPx: event.clientX, startX: toX(event), moved: false };
     if (root.setPointerCapture && event.pointerId !== undefined) { try { root.setPointerCapture(event.pointerId); } catch { /* jsdom */ } }
+  });
+  // A finger that scrolls the page (touch-action: pan-y) ends in pointercancel: no drag, no cursor left behind.
+  root.addEventListener("pointercancel", () => {
+    drag = null;
+    if (brush) { brush.remove(); brush = null; }
+    group.setCursor(null, box);
   });
   root.addEventListener("pointerup", (event) => {
     if (!drag) return;
@@ -330,7 +340,8 @@ export function chart(series, options = {}) {
     if (d.moved && zoomable) {
       const a = Math.min(d.startX, toX(event));
       const b = Math.max(d.startX, toX(event));
-      if (b - a >= 1) group.setWindow([clamp(a, fullX[0], fullX[1]), clamp(b, fullX[0], fullX[1])], box);
+      // only a range with data in it (a drag into a gap between days would show an empty chart)
+      if (b - a >= 1 && allXs.some((x) => x >= a && x <= b)) group.setWindow([clamp(a, fullX[0], fullX[1]), clamp(b, fullX[0], fullX[1])], box);
     } else if (event.pointerType !== "mouse" || !d.moved) {
       group.pin(snap(toX(event)));
     }
@@ -341,7 +352,8 @@ export function chart(series, options = {}) {
     const win = group.state.window || fullX;
     if (event.ctrlKey || event.metaKey) {
       event.preventDefault();
-      group.setWindow(zoomWindow(win, event.deltaY > 0 ? 1.25 : 0.8, toX(event), fullX), box);
+      // proportional to the wheel: a trackpad pinch sends many small events, a mouse wheel few big ones
+      group.setWindow(zoomWindow(win, clamp(Math.exp(event.deltaY * 0.01), 0.5, 2), toX(event), fullX), box);
     } else if (group.state.window && Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
       event.preventDefault();
       group.setWindow(panWindow(win, (event.deltaX / Math.max(width, 1)) * (win[1] - win[0]), fullX), box);
@@ -363,22 +375,29 @@ export function chart(series, options = {}) {
   reset.addEventListener("click", () => group.setWindow(null, box));
 
   // ------------------------------------------------------------- group + size
+  // box.dispose() takes a chart out of its group (the page calls it before it re-renders, because
+  // the group outlives the charts); a chart that is found detached at the next change leaves too.
   let wasConnected = false;
+  let ro = null;
   const sameWindow = (w) => (w === null && drawnWindow === null) || Boolean(w && drawnWindow && w[0] === drawnWindow[0] && w[1] === drawnWindow[1]);
   const unsubscribe = group.subscribe((state) => {
-    // a chart that was on the page and is gone (the page re-rendered) leaves the group
     if (box.isConnected) wasConnected = true;
-    else if (wasConnected) { unsubscribe(); return; }
+    else if (wasConnected) { dispose(); return; }
     if (!sameWindow(state.window)) draw();
     else drawCursor();
   });
+  function dispose() {
+    unsubscribe();
+    if (ro) { ro.disconnect(); ro = null; }
+  }
+  box.dispose = dispose;
   draw();
 
   if (typeof ResizeObserver !== "undefined") {
-    const ro = new ResizeObserver((entries) => {
+    ro = new ResizeObserver((entries) => {
+      if (box.isConnected) wasConnected = true;
       const w = Math.round(entries[0].contentRect.width);
       if (w > 120 && Math.abs(w - width) > 2) { width = w; draw(); }
-      if (wasConnected && !box.isConnected) ro.disconnect();
     });
     ro.observe(plot);
   }

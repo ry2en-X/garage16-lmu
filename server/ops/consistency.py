@@ -246,51 +246,58 @@ def recompute_figures(db: Session, lap_ids: Optional[List[int]] = None, limit: O
 
     from server.laps.lap_check import check_lap, inputs_for_lap
 
-    query = db.query(Lap)
-    if lap_ids:
-        query = query.filter(Lap.id.in_(lap_ids))
+    # The ids first, then one lap at a time: a background run takes minutes, and a lap deleted in
+    # the meantime (account deletion, orphan cleanup) must only skip that lap, not end the run.
+    ids = list(lap_ids) if lap_ids else stale_figure_ids(db)
+    total = len(ids)
     done = failed = skipped = 0
-    laps = query.order_by(Lap.id).all()
-    total = len(laps) if lap_ids else sum(
-        1 for lap in laps
-        if not (isinstance(lap.lap_stats, dict) and isinstance(lap.lap_stats.get("version"), int)
-                and lap.lap_stats["version"] >= INSIGHTS_VERSION))
-    for lap in laps:
-        stats = lap.lap_stats if isinstance(lap.lap_stats, dict) else {}
-        if not lap_ids and isinstance(stats.get("version"), int) and stats["version"] >= INSIGHTS_VERSION:
-            continue
+    uncommitted = 0   # recomputed since the last commit (lost by a rollback, redone on the next run)
+    for lap_id in ids:
         if limit is not None and done >= limit:
             break
-        path = Path(lap.telemetry_path)
-        if not _inside(settings.telemetry_storage_dir.resolve(), path) or not path.is_file():
-            skipped += 1
-            continue
-        metadata = SimpleNamespace(
-            track_name=lap.track_name, lap_time=lap.lap_time, sector_times=lap.sector_times or [],
-            sample_count=lap.sample_count, tail_samples=None, game_lap_state=None, lap_report=None,
-            track_grip_level=None, fixed_setup=None, track_limits_steps_per_point=None,
-            track_limits_steps_per_penalty=None)
         try:
+            lap = db.get(Lap, lap_id)
+            if lap is None:
+                skipped += 1
+                continue
+            stats = lap.lap_stats if isinstance(lap.lap_stats, dict) else {}
+            if not lap_ids and isinstance(stats.get("version"), int) and stats["version"] >= INSIGHTS_VERSION:
+                continue
+            path = Path(lap.telemetry_path)
+            if not _inside(settings.telemetry_storage_dir.resolve(), path) or not path.is_file():
+                skipped += 1
+                continue
+            metadata = SimpleNamespace(
+                track_name=lap.track_name, lap_time=lap.lap_time, sector_times=lap.sector_times or [],
+                sample_count=lap.sample_count, tail_samples=None, game_lap_state=None, lap_report=None,
+                track_grip_level=None, fixed_setup=None, track_limits_steps_per_point=None,
+                track_limits_steps_per_penalty=None)
             result = check_lap(db, path, metadata, client_valid=lap.client_claimed_valid,
                                exclude_lap_id=lap.id, inputs=inputs_for_lap(lap))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Recomputing the figures of lap %s failed: %s", lap.id, exc)
+            new = dict(result.stats or {})
+            if not new.get("version"):
+                failed += 1
+                continue
+            if "session" in stats and "session" not in new:
+                new["session"] = stats["session"]
+            lap.lap_stats = new
+            done += 1
+            uncommitted += 1
+            if batch and done % batch == 0:
+                db.commit()
+                uncommitted = 0
+                if progress:
+                    progress(done, total)
+        except Exception as exc:  # noqa: BLE001 — one lap must not end the run
+            logger.warning("Recomputing the figures of lap %s failed: %s", lap_id, exc)
+            db.rollback()
+            done -= uncommitted
+            uncommitted = 0
             failed += 1
             continue
-        new = dict(result.stats or {})
-        if not new.get("version"):
-            failed += 1
-            continue
-        if "session" in stats and "session" not in new:
-            new["session"] = stats["session"]
-        lap.lap_stats = new
-        done += 1
-        if batch and done % batch == 0:
-            db.commit()
-            if progress:
-                progress(done, total)
-        if pause_s:
-            time.sleep(pause_s)
+        finally:
+            if pause_s:
+                time.sleep(pause_s)
     db.commit()
     if progress:
         progress(done, total)

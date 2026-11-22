@@ -1,6 +1,6 @@
 // pages/driver_progress.js — V1.0.3: "Progress" on the public driver profile: how the driver's best
 // lap developed per track + car model. One dot per day (the best valid lap of that day), a step
-// line for the personal best so far, a faint line for the median of the day.
+// line for the personal best so far (the server sends only the best per day — no lap counts).
 // Data: GET /api/v1/public/drivers/{id}/progress (one row per day).
 
 import { api } from "../core/api.js";
@@ -18,13 +18,12 @@ export function dayLabel(n) {
   return new Date(n * DAY_MS).toLocaleDateString(locale(), { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 }
 
-// rows -> { dots, pb (step line), median, improved, first, last, days } with x = days since the first day
+// rows -> { dots, pb (step line), improved, first, last, days } with x = days since the first day
 export function progressModel(rows) {
   const days = (rows || []).filter((r) => r && Number.isFinite(r.best)).sort((a, b) => (a.day < b.day ? -1 : 1));
   if (!days.length) return null;
   const base = dayNumber(days[0].day);
   const dots = [];
-  const median = [];
   const pb = [];
   let best = Infinity;
   for (const r of days) {
@@ -35,12 +34,11 @@ export function progressModel(rows) {
       best = r.best;
       pb.push([x, best]);
     }
-    dots.push([x, r.best, { note: `${t("Personal best")}: ${formatLapTime(best)} · ${r.laps} ${r.laps === 1 ? t("lap") : t("laps")}` }]);
-    if (Number.isFinite(r.median)) median.push([x, r.median]);
+    dots.push([x, r.best, { note: `${t("Personal best")}: ${formatLapTime(best)}` }]);
   }
   const lastX = dots[dots.length - 1][0];
   if (pb[pb.length - 1][0] < lastX) pb.push([lastX, best]);
-  return { base, dots, pb, median, first: days[0].best, best, improved: days[0].best - best, firstDay: base, days: days.length };
+  return { base, dots, pb, first: days[0].best, best, improved: days[0].best - best, firstDay: base, days: days.length };
 }
 
 export function progressSection(driverId) {
@@ -82,7 +80,6 @@ export function progressSection(driverId) {
     if (mine !== token) return;
     body.appendChild(chart([
       { kind: "line", color: "#4C9BE8", width: 2, label: t("Personal best so far"), format: formatLapTime, points: model.pb, tooltip: false },
-      { kind: "line", color: "#4C9BE8", width: 1, dashed: true, label: t("Median of the day"), format: formatLapTime, points: model.median },
       { kind: "dots", color: "#D8A83E", radius: 4, label: t("Best lap of the day"), format: formatLapTime, points: model.dots },
     ], {
       legend: true, integerX: true, height: 260, yFormat: formatLapTime,

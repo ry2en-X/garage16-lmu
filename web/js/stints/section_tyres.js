@@ -123,19 +123,20 @@ export function wheelsSection({ data, state, rerender, group }) {
       parts.push(note(t("Median of the session: front {0} · rear {1} · left {2} · right {3}.", [fmt(front), fmt(rear), fmt(left), fmt(right)])));
     }
   }
-  if (key === "wear") parts.push(wearForecast(data));
+  if (key === "wear") parts.push(wearForecast(data, state));
   return card(t("Tyres per wheel"), parts, { id: "stint-wheels" });
 }
 
 // How many more laps until the most worn tyre of the current set reaches the limit.
-function wearForecast(data) {
+function wearForecast(data, state) {
   const out = el("div");
-  const limit = { value: 50 };
-  const input = el("input", { type: "number", class: "input stint-input--short", min: "5", max: "95", step: "5", value: "50", "aria-label": t("Tread limit in percent") });
+  const limit = { get value() { return state.wearLimit; }, set value(v) { state.wearLimit = v; } };
+  const input = el("input", { type: "number", class: "input stint-input--short", min: "5", max: "95", step: "5", value: String(limit.value), "aria-label": t("Tread limit in percent") });
   const draw = () => {
     out.innerHTML = "";
     const lastSet = data.laps.length ? data.laps[data.laps.length - 1].tyre_set : null;
-    const laps = data.laps.filter((l) => l.tyre_set === lastSet && l.wear_left_pct && fin(l.tyre_age));
+    // without a known tyre set no forecast: mixing the sets would fit one line through new and old tyres
+    const laps = lastSet === null || lastSet === undefined ? [] : data.laps.filter((l) => l.tyre_set === lastSet && l.wear_left_pct && fin(l.tyre_age));
     const fc = S.wearForecast(laps, limit.value);
     if (!fc.ok) {
       out.appendChild(note(fc.reason === "too_few" ? t("Wear forecast: at least {0} laps on the current tyre set needed.", [S.MIN_WEAR_LAPS]) : t("Wear forecast: the tread did not go down on the current tyre set.")));
