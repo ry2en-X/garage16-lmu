@@ -87,7 +87,22 @@ const SESSION = {
 globalThis.fetch = async (url) => {
   const u = new URL(url, "http://x");
   const json = (body, status = 200) => ({ ok: status < 400, status, statusText: String(status), json: async () => body, text: async () => JSON.stringify(body) });
-  if (u.pathname === "/api/v1/stints/session") return json(SESSION);
+  if (u.pathname === "/api/v1/stints/session") {
+    // lap 2034: a team mate's session, every lap 0.5 s slower
+    if (u.searchParams.get("lap_id") === "2034") {
+      return json({ ...SESSION, laps: SESSION.laps.map((l) => ({ ...l, id: l.id + 1000, lap_time: l.lap_time + 0.5 })),
+        stints: SESSION.stints.map((st) => ({ ...st, lap_ids: st.lap_ids.map((id) => id + 1000) })),
+        driver: { id: 2, name: "Mate", own: false }, started: 1700100000 });
+    }
+    return json(SESSION);
+  }
+  if (u.pathname === "/api/v1/stints/sessions") {
+    const mate = u.searchParams.get("driver_id") === "2";
+    return json({ driver_id: mate ? 2 : 1, own: !mate, total: 1, drivers: [{ id: 1, name: "Me", own: true }, { id: 2, name: "Mate", own: false }],
+      sessions: [mate
+        ? { key_lap_id: 2034, started: 1700100000, laps: [{ id: 2001 }, { id: 2034 }], consistency: { best: 104.9 } }
+        : { key_lap_id: 1034, started: 1700000000, laps: [{ id: 1001 }, { id: 1034 }], consistency: { best: 104.4 } }] });
+  }
   if (u.pathname === "/api/v1/stints/drivers") return json({ drivers: [] });
   if (u.pathname === "/api/v1/stints/rule-sets") return json({ rule_sets: [] });
   if (u.pathname === "/api/v1/analysis/theoretical-best") return json({ found: false });
@@ -270,6 +285,25 @@ const trafficBox = [...root.querySelectorAll(".stint-filter")].find((l) => /traf
 trafficBox.checked = false;
 trafficBox.dispatchEvent(new Event("change"));
 assert.ok(resetButtons() >= 3, "a filter change keeps the zoom");
+
+// another session: a team mate's, chosen in the two selects
+const cmp = root.querySelector("#stint-sessions");
+assert.ok(cmp, "the session comparison is there");
+for (let i = 0; i < 20 && cmp.querySelectorAll("select")[0].options.length < 2; i += 1) await sleep(10);
+const [selDriver, selSession] = cmp.querySelectorAll("select");
+assert.deepEqual([...selDriver.options].map((o) => o.textContent), ["Me (you)", "Mate"]);
+assert.match(text(cmp), /No other session on this track and car|Choose a session/, "this session itself is not offered");
+selDriver.value = "2";
+selDriver.dispatchEvent(new Event("change"));
+for (let i = 0; i < 20 && selSession.options.length < 2; i += 1) await sleep(10);
+selSession.value = "2034";
+selSession.dispatchEvent(new Event("change"));
+for (let i = 0; i < 30 && !cmp.querySelector("svg"); i += 1) await sleep(10);
+assert.equal(cmp.querySelectorAll("polyline").length >= 2, true, "both sessions drawn");
+assert.match(text(cmp), /Mate ·/);
+const medianRow = [...cmp.querySelectorAll("tr")].find((r) => /^Median/.test(r.textContent.trim()));
+assert.match(medianRow.textContent, /\+0\.500/, "the team mate is half a second slower on the median");
+assert.ok(medianRow.querySelector(".cmp-better"), "the better value is marked");
 
 // CSV export of every lap
 const { lapsCsv } = await import("../../web/js/stints/section_compare.js");

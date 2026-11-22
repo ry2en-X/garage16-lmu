@@ -195,7 +195,8 @@ import { compareSection, driversSection, lapsSection, sectorsSection } from "../
 import { fuelSection, pitSection, stateSection, trafficSection } from "../stints/section_fuel.js";
 import { paceSection } from "../stints/section_pace.js";
 import { forecastSection, strategySection } from "../stints/section_plan.js";
+import { sessionsSection } from "../stints/section_sessions.js";
 import { stintsSection, tyresSection, wheelsSection } from "../stints/section_tyres.js";
 
-const SECTIONS = [paceSection, stintsSection, tyresSection, wheelsSection, fuelSection, stateSection, trafficSection, pitSection, forecastSection, strategySection, compareSection, sectorsSection, driversSection, lapsSection];
+const SECTIONS = [paceSection, stintsSection, tyresSection, wheelsSection, fuelSection, stateSection, trafficSection, pitSection, forecastSection, strategySection, compareSection, sessionsSection, sectorsSection, driversSection, lapsSection];
 
