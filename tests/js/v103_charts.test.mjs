@@ -271,4 +271,17 @@ trafficBox.checked = false;
 trafficBox.dispatchEvent(new Event("change"));
 assert.ok(resetButtons() >= 3, "a filter change keeps the zoom");
 
+// CSV export of every lap
+const { lapsCsv } = await import("../../web/js/stints/section_compare.js");
+const csv = lapsCsv(SESSION, new Set(laps.filter((l) => l.clean).map((l) => l.id)));
+const lines = csv.trim().split("\r\n");
+assert.equal(lines.length, 35, "a header and one line per lap");
+assert.ok(lines[0].startsWith("lap;stint;tyre_set;tyre_age;lap_time_s;"));
+const lap13 = lines[13].split(";");
+assert.equal(lap13[0], "13");
+assert.match(lap13[4], /^\d+\.\d{3}$/, "times as plain seconds with a dot");
+assert.equal(lap13[8], "0", "the out-lap is not clean");
+assert.match(lines[13], /"?out-lap, pit stop"?/);
+assert.ok(root.querySelector("#stint-laps button"), "the download button is there");
+
 console.log("V103-CHARTS-OK");

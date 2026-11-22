@@ -102,9 +102,44 @@ export function driversSection({ data }) {
   return card(t("You and your team mates"), box, { id: "stint-drivers" });
 }
 
+// V1.0.3: every lap of the session as a CSV file (for a spreadsheet). Plain numbers with a dot as
+// the decimal separator and seconds for times, so a spreadsheet reads them as numbers; the
+// separator is a semicolon, which German Excel expects (and LibreOffice/Sheets ask for).
+export function lapsCsv(data, clean) {
+  const labels = FLAG_LABELS();
+  const num = (v, d) => (fin(v) ? v.toFixed(d) : "");
+  const quote = (v) => (/[";\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+  const head = ["lap", "stint", "tyre_set", "tyre_age", "lap_time_s", "s1_s", "s2_s", "s3_s", "clean", "flags", "fuel_start_l", "fuel_used_l",
+    "fuel_end_l", "energy_used_pct", "tread_left_avg_pct", "tyre_temp_avg_c", "tyre_pressure_avg_kpa", "track_temp_c", "position", "compound"];
+  const rows = data.laps.map((l) => [
+    String(l.lap_number ?? ""), String(l.stint ?? ""), String(l.tyre_set ?? ""), String(l.tyre_age ?? ""), num(l.lap_time, 3),
+    ...(l.sector_times || [null, null, null]).map((v) => num(v, 3)), clean.has(l.id) ? "1" : "0", l.flags.map((x) => labels[x] || x).join(", "),
+    num(l.fuel_start_l, 2), num(l.fuel_used_l, 3), num(l.fuel_end_l, 2), num(l.energy_used_pct, 2), num(l.wear_left_avg, 1),
+    num(l.tyre_temp_avg, 1), num(l.tyre_pressure_avg, 1), num(l.track_temp, 1), l.place ? String(l.place) : "", l.compound || "",
+  ]);
+  return [head, ...rows].map((r) => r.map(quote).join(";")).join("\r\n") + "\r\n";
+}
+
+function csvButton(data, clean) {
+  const button = el("button", { type: "button", class: "btn btn--ghost btn--sm" }, t("Download as CSV"));
+  button.addEventListener("click", () => {
+    // the byte order mark tells Excel the file is UTF-8 (track names, "Medium → Hard")
+    const blob = new Blob(["\ufeff", lapsCsv(data, clean)], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const day = data.started ? new Date(data.started * 1000).toISOString().slice(0, 10) : "session";
+    const name = `garage16-${String(data.track_name || "track").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${day}.csv`;
+    const a = el("a", { href: url, download: name });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+  return button;
+}
+
 export function lapsSection({ data, clean }) {
   const labels = FLAG_LABELS();
-  return card(t("All laps"), [table([t("Lap"), t("Stint"), t("Time"), "S1", "S2", "S3", t("Tyre age"), t("Fuel used"), t("Fuel left"), t("Tread left"), t("Tyre temp."), t("Position"), t("Notes")],
+  return card(t("All laps"), [el("div", { class: "stint-toolbar" }, csvButton(data, clean)), table([t("Lap"), t("Stint"), t("Time"), "S1", "S2", "S3", t("Tyre age"), t("Fuel used"), t("Fuel left"), t("Tread left"), t("Tyre temp."), t("Position"), t("Notes")],
     data.laps.map((l) => ({ cls: clean.has(l.id) ? null : "stint-row--filtered", cells: [
       el("a", { href: link.analysis({ a: l.id }), title: t("Open in the LapTime Analyzer") }, String(l.lap_number)),
       String(l.stint || dash), lapTime(l.lap_time),
