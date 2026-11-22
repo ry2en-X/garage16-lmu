@@ -223,18 +223,39 @@ def delete_orphans(db: Session, *, min_age: timedelta = DEFAULT_MIN_ORPHAN_AGE) 
     return removed
 
 
-def recompute_figures(db: Session, lap_ids: Optional[List[int]] = None, limit: Optional[int] = None) -> dict:
+def stale_figure_ids(db: Session) -> List[int]:
+    """Ids of the laps whose stored figures an older analysis computed (oldest first)."""
+    out = []
+    for lap_id, stats in db.query(Lap.id, Lap.lap_stats).order_by(Lap.id).all():
+        version = stats.get("version") if isinstance(stats, dict) else None
+        if not isinstance(version, int) or version < INSIGHTS_VERSION:
+            out.append(lap_id)
+    return out
+
+
+def recompute_figures(db: Session, lap_ids: Optional[List[int]] = None, limit: Optional[int] = None,
+                      batch: Optional[int] = None, pause_s: float = 0.0, progress=None) -> dict:
     """Recomputes laps.lap_stats from the stored file with the CURRENT analysis for laps whose
     figures are older than INSIGHTS_VERSION (or the given ids). Does not touch validity, the
     verdict or the review queue (that is scripts.ops.revalidate_laps). The session settings stored
-    with the old figures (from the upload's metadata, not from the file) are kept."""
+    with the old figures (from the upload's metadata, not from the file) are kept.
+    V1.0.3: `batch` commits every so many laps (a long run in the background does not hold one
+    transaction open), `pause_s` sleeps between laps (leaves the NAS's CPU to the server),
+    `progress(done, total)` is called after every batch."""
+    import time
+
     from server.laps.lap_check import check_lap, inputs_for_lap
 
     query = db.query(Lap)
     if lap_ids:
         query = query.filter(Lap.id.in_(lap_ids))
     done = failed = skipped = 0
-    for lap in query.order_by(Lap.id).all():
+    laps = query.order_by(Lap.id).all()
+    total = len(laps) if lap_ids else sum(
+        1 for lap in laps
+        if not (isinstance(lap.lap_stats, dict) and isinstance(lap.lap_stats.get("version"), int)
+                and lap.lap_stats["version"] >= INSIGHTS_VERSION))
+    for lap in laps:
         stats = lap.lap_stats if isinstance(lap.lap_stats, dict) else {}
         if not lap_ids and isinstance(stats.get("version"), int) and stats["version"] >= INSIGHTS_VERSION:
             continue
@@ -264,5 +285,13 @@ def recompute_figures(db: Session, lap_ids: Optional[List[int]] = None, limit: O
             new["session"] = stats["session"]
         lap.lap_stats = new
         done += 1
+        if batch and done % batch == 0:
+            db.commit()
+            if progress:
+                progress(done, total)
+        if pause_s:
+            time.sleep(pause_s)
     db.commit()
+    if progress:
+        progress(done, total)
     return {"recomputed": done, "failed": failed, "skipped_without_file": skipped}

@@ -91,6 +91,11 @@ chown -R garage:garage "$GARAGE16_STORAGE_DIR"
 echo "[entrypoint] Running migrations (alembic upgrade head)..."
 gosu garage alembic upgrade head
 
+# V1.0.3: laps whose stored figures an older analysis computed are brought up to date in the
+# background (server/ops/figures_refresh.py: batches, low priority, ends when done; a restart
+# continues). GARAGE16_REFRESH_FIGURES=0 switches it off.
+gosu garage nice -n 10 python -m server.ops.figures_refresh &
+
 echo "[entrypoint] Starting server..."
 # GARAGE16_WORKERS: number of uvicorn worker processes. Each worker has
 # its OWN in-memory rate-limit state (server/core/rate_limit.py) and its own DB

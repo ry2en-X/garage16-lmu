@@ -88,6 +88,9 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.server
+    # V1.0.3: a small init process (tini) as PID 1 reaps the background figures refresh
+    # (docker/entrypoint.sh) when it ends, so no zombie process is left behind.
+    init: true
     restart: unless-stopped
     depends_on:
       db:
