@@ -21,7 +21,7 @@ import i18n_check  # noqa: E402
 # German entries that are deliberately the same as the English text (names and cognates).
 SAME_IN_BOTH_LANGUAGES = {
     # "Client" and "Download" (download page) are the usual German words too
-    "Admin", "Analyse", "Client", "Dashboard", "Delta", "Discord", "Download", "GARAGE16", "Garage16", "Garage16 Best", "Lap ID",
+    "Admin", "Analyse", "Client", "Stint {0} − Stint {1}", "Dashboard", "Delta", "Discord", "Download", "GARAGE16", "Garage16", "Garage16 Best", "Lap ID",
     "Lap ID:", "Layout", "Leaderboard", "Leaderboards →", "PBs", "Status", "System", "Team Best", "Teams",
     # The usual German statistics words
     "Median", "Trend",

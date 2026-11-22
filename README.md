@@ -7,7 +7,7 @@ track and car, and a web app shows leaderboards, teams, the **LapTime Analyzer**
 every channel, racing lines on the track) and the **Stint Analyzer** (pace, tyres, fuel, strategy).
 A Discord bot announces records.
 
-**Current version: server 1.0.2 / desktop client 1.0.2.** What changed: [`CHANGELOG.md`](CHANGELOG.md).
+**Current version: server 1.0.3 / desktop client 1.0.2.** What changed: [`CHANGELOG.md`](CHANGELOG.md).
 
 Deutsch: Anleitungen für Fahrer und Betreiber stehen auf Deutsch in [`docs/`](docs/README.md) —
 [Fahrer-Leitfaden](docs/FRIENDS_GUIDE.md) · [Admin-Leitfaden](docs/ADMIN_GUIDE.md).

@@ -1,5 +1,75 @@
 # Changelog
 
+## V1.0.3 — Better charts, a calmer Discord bot, figures that keep themselves up to date
+
+Server `1.0.3`, desktop client stays `1.0.2` (no client changes). **No migration.** Rollback: start
+the V1.0.2 folder again. Two new optional settings: `GARAGE16_DISCORD_DIGEST_S`,
+`GARAGE16_REFRESH_FIGURES` (`.env.example`).
+
+### Stint Analyzer: interactive charts
+- One chart component for every chart of the page (`web/js/stints/chart.js` on the shared core
+  `web/js/core/chart_core.js`, which the LapTime Analyzer's ticks now come from too):
+  - point at a lap: a cursor line and a value box with every series at that lap — and **every chart
+    over the session shows the same lap at once** (pace, tyres, fuel, temperatures, position);
+  - drag across a range to **zoom** (all session charts follow; double-click, Escape or "Reset zoom"
+    goes back; Ctrl/⌘ + wheel zooms, a sideways wheel pans); a click pins the cursor; arrow keys
+    move it lap by lap;
+  - the legend is clickable (hide/show a stint or a series);
+  - drawn for the real width (labels keep their size on a phone and on a wide screen);
+  - a changed filter keeps the zoom.
+- **Pace**: three views — lap time, gap to the best lap, and fuel-corrected (the fuel effect measured
+  in the session taken out; offered only when it can be measured, marked as an estimate); a ±1σ
+  band around the rolling average; the stints as coloured bands, pit stops marked with the
+  standing time; one legend entry per stint.
+- **Tyres per wheel** (new): temperature, pressure, tread left or brake temperature, one line per
+  wheel, with the front/rear and left/right balance; a **wear forecast** for the current tyre set
+  (which tyre wears fastest, % per lap, laps until a limit you set; an estimate).
+- **Fuel**: the tank over the session with the projection to the session end at the median
+  consumption and the safety margin, the consumption per lap as bars with the median.
+- **Sectors** (new): a heat map of every lap's sector times against the best sector of the
+  session, and the sector with the most time to find.
+- **Position over the session** with the traffic laps marked; tyre and track temperature together.
+- **Compare with another session** (new): one of your other sessions on the same track and car, or
+  a team mate's (a driver change), both with the same filter: lap times over the session and the
+  race figures side by side, the better value marked. `/stints?lap=…&compare=…` opens it directly.
+- **Stints compared**: a bar chart of the difference per lap under the two lines.
+- **All laps as CSV** (semicolon, UTF-8, times in seconds) for a spreadsheet.
+- Server: `tyre_pressure_kpa` per wheel in the session data. The page is split into modules
+  (`web/js/stints/ui.js`, `section_*.js`).
+
+### LapTime Analyzer, driver profile, leaderboard
+- Every LapTime Analyzer chart can be **saved as a PNG** (with its title and the values at the cursor).
+- **Driver profile: progress** — the best lap per day and the personal best so far, per track and
+  car (`GET /api/v1/public/drivers/{id}/progress`, valid laps only).
+- `/leaderboard` without a choice opens at the track of the newest lap and the class driven most there.
+- The dashboard's recent activity groups the records of one session into one line.
+- A page that takes longer than a quarter second to load says so instead of leaving the old page standing.
+- "Add to home screen" opens Garage16 like an app (`web/manifest.webmanifest`).
+
+### Discord bot
+- Announcements name the **car model** (as the leaderboard), not the livery ("Ferrari 499P", not
+  "499P Custom Team 2026 #397").
+- **One message per record and session**: an announcement waits `GARAGE16_DISCORD_DIGEST_S` seconds
+  (default 300) for a further improvement of the same record; then one message with the newest
+  time, the time before the first improvement and the number of improvements. `0` = at once.
+- `/channels` lists this server's announcement channels (and marks the ones the bot cannot see);
+  `/unlink_channel` removes one — also one that no longer exists. Both need "Manage channels".
+
+### Operations
+- **Lap figures refresh themselves after an update**: laps whose stored figures an older analysis
+  computed are recomputed in the background after the start (`server/ops/figures_refresh.py`,
+  started by `docker/entrypoint.sh`, batches of 25, low priority, progress in the server log; a
+  restart continues). `GARAGE16_REFRESH_FIGURES=0` switches it off. The server container runs with
+  `init: true` so the finished helper is reaped.
+- **Backup progress**: the incremental backup says how many files are new and how big they are,
+  warns before a long first copy, and reports progress about every 100 files / 10 s (also the
+  restore). Old backup folders without `manifest.json` that are kept are named once.
+- The commands written in the guides are tested (URLs against the server with HTTPS required,
+  `python -m scripts…` modules, `scripts/…sh` paths) — the V1.0.2 update had a guide command that
+  answered 400.
+- `scripts/ops/backup.sh` without `sudo` says so instead of reporting a missing volume.
+- `/api/v1/health/*` answers over plain HTTP like `/health/*`.
+
 ## V1.0.2 — Readable links, the website on Cloudflare Pages, less load on the NAS, a tidy code base
 
 Server `1.0.2`, desktop client `1.0.2`. **One additive migration (0020)**: `drivers.slug`,

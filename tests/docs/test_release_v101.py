@@ -18,8 +18,9 @@ def _read(name):
 
 
 def _section():
-    guide = _read("docs/ADMIN_GUIDE.md")
-    return guide.split("Neu in V1.0.1", 1)[1].split("\n### ", 1)[0]  # V1.0.2: chapter 8.3
+    # V1.0.3: the chapter moved to the archive (the guide keeps the two newest updates)
+    archive = (ROOT / "docs" / "archive" / "UPDATES_V1_0_1.md").read_text(encoding="utf-8")
+    return archive.split("Neu in V1.0.1", 1)[1]
 
 
 def test_versions_and_changelog():
@@ -28,7 +29,7 @@ def test_versions_and_changelog():
     from server.core.versioning import LATEST_CLIENT_VERSION
 
     assert tuple(int(x) for x in VERSION.split(".")) >= (1, 0, 1)  # later releases keep this entry
-    assert CLIENT_VERSION == VERSION and LATEST_CLIENT_VERSION == CLIENT_VERSION
+    assert LATEST_CLIENT_VERSION == CLIENT_VERSION   # V1.0.3: the server may be ahead of the client
     changelog = _read("CHANGELOG.md")
     assert changelog.index("\n## V1.0.1 — ") < changelog.index("\n## V1.0.0 — ")
     entry = changelog.split("\n## V1.0.1 — ", 1)[1].split("\n## V1.0.0 — ", 1)[0]

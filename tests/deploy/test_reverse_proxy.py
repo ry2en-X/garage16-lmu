@@ -192,7 +192,7 @@ def test_real_caddy_serves_the_frontend_and_spa_fallback(proxied):
     deep = requests.get(base + "/some/unknown/spa/route", timeout=5)
     assert deep.status_code == 404 and "text/html" in deep.headers["content-type"]
     # the release's files under /v/<version>/ are the web folder's files
-    js = requests.get(base + "/v/1.0.2/js/main.js", timeout=5)
+    js = requests.get(base + "/v/1.0.3/js/main.js", timeout=5)
     assert js.status_code == 200 and "startRouter" in js.text
 
 
@@ -200,7 +200,7 @@ def test_real_caddy_serves_the_frontend_and_spa_fallback(proxied):
 def test_real_caddy_sends_the_security_headers_of_the_pages(proxied):
     """The web pages come with a strict CSP, no framing and nosniff; the API keeps its own."""
     base, _ = proxied
-    for path in ("/", "/v/1.0.2/js/main.js", "/robots.txt", "/leaderboard/fuji-speedway/hypercar"):
+    for path in ("/", "/v/1.0.3/js/main.js", "/robots.txt", "/leaderboard/fuji-speedway/hypercar"):
         page = requests.get(base + path, timeout=5)
         assert page.status_code == 200, path
         csp = page.headers.get("content-security-policy", "")
@@ -321,7 +321,7 @@ def test_real_caddy_makes_the_browser_revalidate_the_frontend_files(proxied):
         assert resp.status_code == 200, path
         assert resp.headers.get("Cache-Control") == "no-cache", (path, resp.headers.get("Cache-Control"))
     # What index.html loads lives under /v/<version>/ — a year, never asked again
-    for path in ("/v/1.0.2/js/main.js", "/v/1.0.2/css/styles.css", "/v/1.0.2/fonts/oswald-latin-wght.woff2"):
+    for path in ("/v/1.0.3/js/main.js", "/v/1.0.3/css/styles.css", "/v/1.0.3/fonts/oswald-latin-wght.woff2"):
         resp = requests.get(base + path, timeout=5)
         assert resp.status_code == 200, path
         assert resp.headers.get("Cache-Control") == "public, max-age=31536000, immutable", path

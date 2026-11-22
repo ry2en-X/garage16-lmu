@@ -49,7 +49,7 @@ from server.core.database import Base, SessionLocal, engine
 from server.core.versioning import is_client_outdated
 from server.core.env import env
 
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 
 def _configure_logging() -> None:

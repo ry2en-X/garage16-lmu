@@ -6,6 +6,7 @@ hier beschreibt den aktuellen Stand — dafür gelten `README.md`, `CHANGELOG.md
 | Datei | Inhalt |
 |---|---|
 | `UPDATES_V0_9_BIS_V1_0.md` | die Update-Abschnitte „Neu in V0.9 … V1.0“ des Admin-Leitfadens, mit den damaligen NAS-Befehlen und Rückwegen |
+| `UPDATES_V1_0_1.md` | der Update-Abschnitt „Neu in V1.0.1“ des Admin-Leitfadens (in V1.0.3 hierher verschoben) |
 | `CHANGELOG_BIS_V0_8.md` | Changelog-Einträge V0.5.1 bis V0.8.10 |
 | `CHANGES_V0.5.1.md`, `CHANGES_V0.5.2.md`, `CHANGES_V0.5.3.md` | die ersten Änderungsnotizen |
 | `V0_9_9_BESTANDSAUFNAHME.md`, `V0_9_9_PROTOKOLL.md`, `V0_9_9_ABSCHLUSSBERICHT.md` | Bestandsaufnahme, Prüfprotokoll und Abschlussbericht von V0.9.9 |

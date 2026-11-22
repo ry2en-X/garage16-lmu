@@ -11,7 +11,7 @@ def _read(name):
 
 
 def _section():
-    return _read("docs/ADMIN_GUIDE.md").split("### 8.2 Neu in V1.0.2", 1)[1].split("\n### ", 1)[0]
+    return _read("docs/ADMIN_GUIDE.md").split("Neu in V1.0.2", 1)[1].split("\n### ", 1)[0]
 
 
 def test_versions_and_changelog():
@@ -20,7 +20,8 @@ def test_versions_and_changelog():
     from server.main import VERSION
 
     assert tuple(int(x) for x in VERSION.split(".")) >= (1, 0, 2)
-    assert CLIENT_VERSION == VERSION == LATEST_CLIENT_VERSION
+    # V1.0.3: a server release without client changes keeps the client at its version
+    assert CLIENT_VERSION == LATEST_CLIENT_VERSION and tuple(int(x) for x in CLIENT_VERSION.split(".")) >= (1, 0, 2)
     changelog = _read("CHANGELOG.md")
     assert changelog.index("\n## V1.0.2 — ") < changelog.index("\n## V1.0.1 — ")
     entry = changelog.split("\n## V1.0.2 — ", 1)[1].split("\n## V1.0.1 — ", 1)[0]
