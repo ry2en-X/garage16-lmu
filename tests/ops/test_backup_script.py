@@ -22,6 +22,7 @@ pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="bash neede
 STUB = r'''#!/bin/bash
 echo "docker $*" >> "$STUB_LOG"
 case "$1" in
+  info) [ -z "$STUB_NO_DOCKER" ] && exit 0 || { echo "permission denied" >&2; exit 1; } ;;
   volume) [[ " $STUB_VOLUMES " == *" $3 "* ]] && exit 0 || exit 1 ;;
   run) [[ "$*" == *" -d "* ]] && exit 1 ;;   # stop at the lock helper: nothing after it is tested here
 esac
@@ -70,6 +71,14 @@ def test_a_missing_volume_is_refused_before_anything_is_written(project):
     assert r.returncode == 1 and "does not exist" in r.stderr
     assert not out.exists() or not any(out.iterdir()), "no folder, not even a .partial one"
     assert "docker run" not in calls
+
+
+def test_without_sudo_it_says_so_instead_of_blaming_the_volume(project):
+    """Found on the NAS (22.11.2026): run without sudo, docker said "permission denied" and the
+    script reported the telemetry volume as missing."""
+    r, out, calls = _run(project, env={"STUB_NO_DOCKER": "1"})
+    assert r.returncode == 1 and "sudo" in r.stderr and "does not exist" not in r.stderr
+    assert "docker volume" not in calls and "docker run" not in calls
 
 
 def test_a_failed_lock_publishes_nothing(project):

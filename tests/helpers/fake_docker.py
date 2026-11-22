@@ -309,6 +309,8 @@ def main(argv) -> int:
         if rest[0] == "ls":
             print("\n".join(sorted(p.name for p in VOLUMES.iterdir())) if VOLUMES.exists() else "")
             return 0
+    if cmd == "info":   # scripts/ops/backup.sh (V1.0.2) checks it may talk to Docker at all
+        return 0
     if cmd == "compose":
         return compose(rest)
     if cmd == "run":

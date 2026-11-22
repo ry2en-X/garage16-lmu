@@ -61,6 +61,12 @@ STATE="/data/.garage16-backup-${TIMESTAMP}-$$"
 log() { echo "[backup] $*"; }
 fail() { echo "[backup] ERROR: $*" >&2; exit 1; }
 
+# V1.0.2: without root (no sudo) docker answers "permission denied", which used to look like a
+# missing volume — say what is really wrong.
+if ! docker info >/dev/null 2>&1; then
+    fail "cannot talk to Docker — run the script with sudo (the DSM task runs as root)"
+fi
+
 if ! docker volume inspect "${TELEMETRY_VOLUME}" >/dev/null 2>&1; then
     echo "[backup] ERROR: Docker volume '${TELEMETRY_VOLUME}' does not exist." >&2
     echo "[backup] Refusing to run: backing up a missing volume would silently produce an empty archive." >&2
