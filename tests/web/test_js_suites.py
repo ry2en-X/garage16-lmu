@@ -168,3 +168,11 @@ def test_v102_readable_links():
     result = _run("v102_links.test.mjs")
     assert "V102-LINKS-OK" in result.stdout, result.stdout + result.stderr
     assert "Error" not in result.stderr, result.stderr
+
+
+@needs_jsdom
+def test_v103_interactive_stint_charts_and_new_sections():
+    """V1.0.3: shared cursor and zoom across the session charts, value box, legend toggles, pace
+    modes, tyres per wheel with the wear forecast, fuel tank, sector heat map, positions."""
+    result = _run("v103_charts.test.mjs")
+    assert "V103-CHARTS-OK" in result.stdout, result.stdout + result.stderr

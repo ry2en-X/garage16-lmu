@@ -14,6 +14,7 @@ export const MIN_FORECAST_LAPS = 5;
 export const MIN_CORRELATION_LAPS = 8;
 export const MIN_DEGRADATION_LAPS = 4;
 export const MIN_SEPARATION_LAPS = 8;
+export const MIN_WEAR_LAPS = 4;
 export const DEFAULT_OUTLIER_PCT = 107;
 export const NOT_CLEAN_DEFAULT = ["invalid", "outlap", "inlap", "pit_stop", "traffic", "blue_flag", "race_start", "outlier"];
 // the flags a user can switch in the filter (outlier is a threshold, not a switch)
@@ -421,4 +422,26 @@ export function strategyPlans(input) {
 // The measured pit loss to put into the calculator: median of the measured stops' losses.
 export function measuredPitLoss(pitStops) {
   return median((pitStops || []).filter((s) => s.kind === "stop").map((s) => s.loss_s));
+}
+
+// V1.0.3: when the current tyre set reaches a tread limit. laps: the laps of ONE tyre set (with
+// tyre_age and wear_left_pct per wheel). Per wheel a Theil–Sen line of tread left over tyre age;
+// the wheel that wears fastest decides. Returns { ok, wheel, per_lap (% per lap, negative = wear),
+// now (% left on the last lap), laps_to_limit } or { ok: false, reason: "too_few" | "no_wear" }.
+export function wearForecast(laps, limitPct) {
+  const usable = laps.filter((l) => l.wear_left_pct && finite(l.tyre_age));
+  if (usable.length < MIN_WEAR_LAPS) return { ok: false, reason: "too_few" };
+  let worst = null;
+  for (const w of ["fl", "fr", "rl", "rr"]) {
+    const xs = usable.map((l) => l.tyre_age);
+    const ys = usable.map((l) => (finite(l.wear_left_pct[w]) ? l.wear_left_pct[w] : null));
+    const fit = theilSen(xs, ys);
+    if (!fit || !(fit.slope < 0)) continue;
+    if (!worst || fit.slope < worst.slope) worst = { wheel: w, slope: fit.slope, fit };
+  }
+  if (!worst) return { ok: false, reason: "no_wear" };
+  const last = usable[usable.length - 1];
+  const now = finite(last.wear_left_pct[worst.wheel]) ? last.wear_left_pct[worst.wheel] : worst.fit.intercept + worst.slope * last.tyre_age;
+  const lapsToLimit = now <= limitPct ? 0 : (limitPct - now) / worst.slope;
+  return { ok: true, wheel: worst.wheel, per_lap: worst.slope, now, laps_to_limit: lapsToLimit };
 }

@@ -93,24 +93,8 @@ export function indexForDistance(grid, distance) {
 
 // ---------------------------------------------------------------- scales
 
-// "Nice" tick values (1, 2, 5 x 10^n) between lo and hi.
-export function niceTicks(lo, hi, target = 5) {
-  if (!(hi > lo)) return [lo];
-  const raw = (hi - lo) / Math.max(target, 1);
-  const magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
-  const norm = raw / magnitude;
-  const step = (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * magnitude;
-  // Integer multiples of the step, rounded to the step's decimals: adding the step
-  // repeatedly accumulates float noise (0.6000000000000001) that would end up in
-  // the axis labels.
-  const decimals = Math.max(0, -Math.round(Math.log10(magnitude)));
-  const ticks = [];
-  const last = Math.floor(hi / step + 1e-9);
-  for (let k = Math.ceil(lo / step - 1e-9); k <= last; k++) {
-    ticks.push(Number((k * step).toFixed(decimals)));
-  }
-  return ticks;
-}
+// "Nice" tick values: shared with the Stint Analyzer (core/chart_core.js, V1.0.3).
+export { niceTicks } from "../core/chart_core.js";
 
 // Y range of one or several series (nulls ignored); a fixed range wins.
 export function valueRange(seriesList, fixed) {

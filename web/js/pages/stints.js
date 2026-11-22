@@ -24,14 +24,14 @@ let svgChart = null;
 let legend = null;
 import { link } from "../core/link.js";
 import { navigate, routeQuery } from "../core/router.js";
+import { NEUTRAL, SERIES_COLORS, TEXT_LINE, WHEEL_COLORS } from "../core/chart_core.js";
 
-// The SVG charts scale with the page; on a phone they are drawn for the narrow width, so the
-// labels keep a readable size instead of being shrunk to a third.
-const chartWidth = () => (typeof window !== "undefined" && window.innerWidth && window.innerWidth < 700 ? Math.max(300, window.innerWidth - 60) : 720);
-const chart = (series, options = {}) => svgChart(series, { width: chartWidth(), ...options });
+// V1.0.3: the charts measure their own width (stints/chart.js), so no width is passed any more.
+let createGroup = null;
+const chart = (series, options = {}) => svgChart(series, options);
 
-const COLORS = ["#E0472B", "#4C9BE8", "#4CA771", "#D8A83E", "#B276E0", "#E07AB0", "#5FC9C2", "#C9C25F"];
-const GREY = "#5A6068";
+const COLORS = SERIES_COLORS;
+const GREY = NEUTRAL;
 const fin = (v) => typeof v === "number" && Number.isFinite(v);
 const dash = "—";
 const f = (v, d = 2, unit = "") => (fin(v) ? `${v.toFixed(d)}${unit ? ` ${unit}` : ""}` : dash);
@@ -153,7 +153,8 @@ async function renderSessionList(container, driverId) {
 
 // ------------------------------------------------------------------ one session
 
-const DEFAULT_STATE = () => ({ exclude: [...S.NOT_CLEAN_DEFAULT], outlierPct: S.DEFAULT_OUTLIER_PCT, window: 5, stint: null });
+const DEFAULT_STATE = () => ({ exclude: [...S.NOT_CLEAN_DEFAULT], outlierPct: S.DEFAULT_OUTLIER_PCT, window: 5, stint: null,
+  paceMode: "time", wheelValue: "temp" });
 
 async function renderSession(container, lapId, compareLap) {
   const status = el("div", { class: "notice" }, t("Loading …"));
@@ -164,6 +165,7 @@ async function renderSession(container, lapId, compareLap) {
     data = session;
     svgChart = charts.chart;
     legend = charts.legend;
+    createGroup = charts.createChartGroup;
   } catch (err) {
     status.className = "notice notice--error";
     status.textContent = err.message;
@@ -189,6 +191,9 @@ async function renderSession(container, lapId, compareLap) {
   }
 
   const state = DEFAULT_STATE();
+  // One cursor and one zoom window for every chart over "lap in session" (V1.0.3); it outlives a
+  // re-render, so changing a filter keeps the zoomed laps.
+  const group = createGroup();
   const body = el("div", { class: "stint-body" });
   const filters = el("div", { class: "stint-filters card" });
   container.appendChild(filters);
@@ -198,7 +203,7 @@ async function renderSession(container, lapId, compareLap) {
     filterBar(filters, data, state, rerender);
     body.innerHTML = "";
     const clean = S.cleanIds(data.laps, { exclude: state.exclude, outlierPct: state.outlierPct });
-    const ctx = { data, state, clean, rerender, compareLap };
+    const ctx = { data, state, clean, rerender, compareLap, group };
     for (const section of SECTIONS) {
       try {
         const node = section(ctx);
@@ -242,6 +247,7 @@ function filterBar(box, data, state, rerender) {
   win.addEventListener("change", () => { state.window = Number(win.value); rerender(); });
   const reset = el("button", { type: "button", class: "btn btn--ghost" }, t("Reset filters"));
   reset.addEventListener("click", () => { Object.assign(state, DEFAULT_STATE()); rerender(); });
+  box.appendChild(note(t("Charts: point at a lap to see every value of it in all charts, drag across a range to zoom (double-click: back), click a legend entry to hide it."), "stint-hint"));
   box.appendChild(el("div", { class: "stint-filters__row" }, [el("label", {}, [t("Rolling average over"), " ", win]), reset]));
 }
 
@@ -254,28 +260,112 @@ function ciText(ci, digits = 3) {
   return ci && fin(ci[0]) && fin(ci[1]) ? ` (${ci[0].toFixed(digits)} … ${ci[1].toFixed(digits)})` : "";
 }
 
-function paceSection({ data, state, clean }) {
+// x of a lap in the charts over the whole session: its position in the session (1, 2, …)
+const sessionX = (data) => { const m = new Map(); data.laps.forEach((l, i) => m.set(l.id, i + 1)); return m; };
+
+// "Lap 12 · Stint 2 · out-lap" — the head of the value box of the session charts
+function lapTitle(data) {
+  const labels = FLAG_LABELS();
+  return (x) => {
+    const l = data.laps[x - 1];
+    if (!l) return "";
+    return [t("Lap {0}", [l.lap_number]), l.stint ? t("Stint {0}", [l.stint]) : null, ...l.flags.map((fl) => labels[fl] || fl)].filter(Boolean).join(" · ");
+  };
+}
+
+// A light band per stint and a marker per pit stop: the same on every session chart.
+function sessionDecor(data) {
+  const xOf = sessionX(data);
+  const regions = data.stints.map((st) => {
+    const xs = st.lap_ids.map((id) => xOf.get(id)).filter(fin);
+    return xs.length ? { x0: Math.min(...xs) - 0.5, x1: Math.max(...xs) + 0.5, color: stintColor(st.number), label: t("Stint {0}", [st.number]) } : null;
+  }).filter(Boolean);
+  const markers = data.pit_stops.map((p) => {
+    const i = data.laps.findIndex((l) => l.lap_number === p.lap_number);
+    if (i < 0) return null;
+    return { x: i + 1.5, label: p.kind === "stop" && fin(p.stationary_s) ? t("Pit {0} s", [p.stationary_s.toFixed(0)]) : t("Pit") };
+  }).filter(Boolean);
+  return { regions, markers };
+}
+
+// Rolling mean and spread over the last `n` clean laps (spread = standard deviation).
+function rollingBand(values, n) {
+  return values.map((_, k) => {
+    const w = values.slice(Math.max(0, k - n + 1), k + 1);
+    if (w.length < Math.min(3, n)) return [null, null];
+    const m = S.mean(w);
+    const sd = S.stdev(w);
+    return fin(m) && fin(sd) ? [m - sd, m + sd] : [null, null];
+  });
+}
+
+const PACE_MODES = () => ({
+  time: { label: t("Lap time"), help: t("The lap times as driven.") },
+  gap: { label: t("Gap to best"), help: t("Each lap minus the best clean lap of the session: how far off your best you were.") },
+  fuel: { label: t("Fuel-corrected"), help: t("Lap times as if every lap had been driven with the fuel of the lightest clean lap — the effect of the fuel load measured in this session taken out, so what is left is tyres and driving.") },
+});
+
+function paceSection({ data, state, clean, rerender, group }) {
   const laps = data.laps;
   const p = S.paceSummary(laps, clean, { window: state.window });
+  const fc = S.fuelCorrectedDegradation(laps, clean);
+  const fuelOk = fc.ok && fin(fc.per_litre) && laps.some((l) => fin(l.fuel_start_l));
+  const mode = state.paceMode === "fuel" && !fuelOk ? "time" : state.paceMode;
+  const lightest = fuelOk ? Math.min(...laps.filter((l) => clean.has(l.id) && fin(l.fuel_start_l)).map((l) => l.fuel_start_l)) : null;
+  const best = p ? p.best : null;
+  // the value drawn for a lap in the chosen mode
+  const valueOf = (l) => {
+    if (!fin(l.lap_time)) return null;
+    if (mode === "gap") return fin(best) ? l.lap_time - best : null;
+    if (mode === "fuel") return fin(l.fuel_start_l) ? l.lap_time - fc.per_litre * (l.fuel_start_l - lightest) : null;
+    return l.lap_time;
+  };
+  const fmt = mode === "gap" ? (v) => signed(v, 3, "s") : (v) => formatLapTime(v);
+
+  const modes = PACE_MODES();
+  const switcher = el("div", { class: "seg stint-toolbar", role: "group", "aria-label": t("What the chart shows") }, Object.entries(modes).map(([key, m]) => {
+    const disabled = key === "fuel" && !fuelOk;
+    const button = el("button", { type: "button", class: `seg__btn${key === mode ? " seg__btn--on" : ""}`, "aria-pressed": key === mode ? "true" : "false",
+      title: disabled ? t("Needs clean laps with different fuel loads (see Tyres and degradation).") : m.help, ...(disabled ? { disabled: "disabled" } : {}) }, m.label);
+    button.addEventListener("click", () => { state.paceMode = key; rerender(); });
+    return button;
+  }));
+
+  const xOf = sessionX(data);
   const labels = FLAG_LABELS();
-  const points = laps.map((l, i) => [i + 1, l.lap_time, {
-    color: clean.has(l.id) ? stintColor(l.stint) : GREY, faded: !clean.has(l.id),
+  const pointOf = (l) => [xOf.get(l.id), valueOf(l), {
+    id: l.id, label: t("Lap time"), note: mode === "time" ? null : lapTime(l.lap_time),
     title: `${t("Lap {0}", [l.lap_number])}: ${lapTime(l.lap_time)}${l.flags.length ? ` (${l.flags.map((x) => labels[x] || x).join(", ")})` : ""}`,
-    id: l.id,
-  }]);
-  // rolling average over the last N CLEAN laps, drawn through the clean laps only (a filtered
-  // lap neither breaks the line nor enters the average)
-  const cleanIdx = laps.map((l, i) => (clean.has(l.id) ? i : -1)).filter((i) => i >= 0);
-  const avgClean = S.rolling(cleanIdx.map((i) => laps[i].lap_time), state.window);
-  const med = p ? p.median : null;
-  const capped = p ? Math.min(Math.max(...laps.filter((l) => clean.has(l.id)).map((l) => l.lap_time)) + 1.5, (med || 0) * 1.08) : null;
+  }];
+  const open = (meta) => { if (meta && meta.id) navigate(link.analysis({ a: meta.id })); };
+  const dotSeries = data.stints.map((st) => ({
+    kind: "dots", color: stintColor(st.number), label: t("Stint {0}", [st.number]), onClick: open, format: fmt,
+    points: laps.filter((l) => l.stint === st.number && clean.has(l.id)).map(pointOf),
+  }));
+  dotSeries.push({ kind: "dots", color: GREY, label: t("not clean (filtered)"), onClick: open, format: fmt, radius: 3,
+    points: laps.filter((l) => !clean.has(l.id)).map((l) => { const q = pointOf(l); q[2].faded = true; q[2].label = t("not clean"); return q; }) });
+  // rolling average (and its spread) over the last N CLEAN laps, drawn through the clean laps
+  // only: a filtered lap neither breaks the line nor enters the average
+  const cleanLaps = laps.filter((l) => clean.has(l.id) && fin(valueOf(l)));
+  const cleanVals = cleanLaps.map(valueOf);
+  const avg = S.rolling(cleanVals, state.window);
+  const band = rollingBand(cleanVals, state.window);
+  const cleanMax = cleanVals.length ? Math.max(...cleanVals) : null;
+  const cleanMed = S.median(cleanVals);
+  // the top of the axis: just above the slowest clean lap, so a 30 s in-lap does not squash the rest
+  const cap = !fin(cleanMax) ? undefined : (mode === "gap" ? cleanMax + 1.5 : Math.min(cleanMax + 1.5, (cleanMed || cleanMax) * 1.08));
+  const { regions, markers } = sessionDecor(data);
   const svgChart = chart([
-    { kind: "dots", points, onClick: (meta) => { if (meta) navigate(link.analysis({ a: meta.id })); } },
-    { kind: "line", color: "#ECEDEE", width: 1.5, points: cleanIdx.map((i, k) => [i + 1, avgClean[k]]), label: t("Rolling average") },
+    { kind: "band", color: TEXT_LINE, opacity: 0.1, label: t("spread (± 1 σ)"), format: fmt,
+      band: cleanLaps.map((l, k) => [xOf.get(l.id), band[k][0], band[k][1]]) },
+    ...dotSeries,
+    { kind: "line", color: TEXT_LINE, width: 1.5, label: t("rolling average ({0})", [state.window]), format: fmt,
+      points: cleanLaps.map((l, k) => [xOf.get(l.id), avg[k]]) },
   ], {
-    yFormat: (v) => formatLapTime(v), xLabel: t("lap in session"), yLabel: t("lap time"),
-    yMin: p ? p.best - 0.5 : undefined, yMax: fin(capped) ? capped : undefined,
-    markers: data.stints.slice(1).map((s) => ({ x: laps.findIndex((l) => l.id === s.lap_ids[0]) + 1 - 0.5, label: t("Stint {0}", [s.number]) })),
+    group, legend: true, integerX: true, tooltipTitle: lapTitle(data), regions, markers,
+    yFormat: fmt, xLabel: t("lap in session"), yLabel: modes[mode].label,
+    yMin: mode === "gap" ? -0.2 : (fin(best) && mode === "time" ? best - 0.5 : undefined), yMax: fin(cap) ? cap : undefined,
+    hlines: mode === "gap" ? [{ y: 0, label: t("best"), color: TEXT_LINE }] : [],
     title: t("Lap times of the session"),
   });
   const stats = p ? [
@@ -289,11 +379,8 @@ function paceSection({ data, state, clean }) {
     stat(t("Trend"), p.trend ? t("{0} s/lap", [signed(p.trend.slope, 3, "")]) + ciText(p.trend.ci) : dash, t("Theil–Sen slope of the clean lap times over the session: + = getting slower. In brackets: the 95 % range of the slope.")),
     stat(t("Consistency (trend removed)"), p.consistency ? `± ${p.consistency.sigma.toFixed(3)} s` : dash, t("Lap-to-lap spread around the trend line (robust): how evenly you drive, without the slow change from tyres and fuel.")),
   ] : [];
-  const parts = [svgChart, legend([
-    ...data.stints.map((st) => ({ color: stintColor(st.number), label: t("Stint {0}", [st.number]), dot: true })),
-    { color: GREY, label: t("not clean (filtered)"), dot: true },
-    { color: "#ECEDEE", label: t("rolling average ({0})", [state.window]) },
-  ])];
+  const parts = [switcher, svgChart];
+  if (mode === "fuel") parts.push(el("p", {}, [estimateTag(), " ", t("Fuel effect measured in this session: {0} per litre.", [signed(fc.per_litre, 3, "s")])]));
   if (p) {
     parts.push(el("div", { class: "sess__stats" }, stats));
     if (p.thirds) parts.push(note(t("Median by thirds of the session: {0} → {1} → {2}.", p.thirds.map(lapTime))));
@@ -337,8 +424,8 @@ function stintsSection({ data, clean }) {
 function tyresSection({ data, clean }) {
   const laps = data.laps;
   const series = data.stints.map((st) => ({
-    kind: "dots", color: stintColor(st.number),
-    points: laps.filter((l) => l.stint === st.number && clean.has(l.id)).map((l) => [l.tyre_age, l.lap_time, { title: `${t("Lap {0}", [l.lap_number])}: ${lapTime(l.lap_time)} · ${t("tyre age {0}", [l.tyre_age])}` }]),
+    kind: "dots", color: stintColor(st.number), label: t("Stint {0}", [st.number]),
+    points: laps.filter((l) => l.stint === st.number && clean.has(l.id)).map((l) => [l.tyre_age, l.lap_time, { title: `${t("Lap {0}", [l.lap_number])}: ${lapTime(l.lap_time)} · ${t("tyre age {0}", [l.tyre_age])}`, label: t("Lap {0}", [l.lap_number]) }]),
   }));
   const lines = data.stints.map((st) => {
     const deg = S.degradation(laps, clean, st.number);
@@ -346,9 +433,10 @@ function tyresSection({ data, clean }) {
     const ages = laps.filter((l) => l.stint === st.number).map((l) => l.tyre_age);
     const lo = Math.min(...ages);
     const hi = Math.max(...ages);
-    return { kind: "line", color: stintColor(st.number), dashed: true, width: 1.5, points: [[lo, deg.intercept + deg.slope * lo], [hi, deg.intercept + deg.slope * hi]] };
+    return { kind: "line", color: stintColor(st.number), dashed: true, width: 1.5, legend: false, tooltip: false, points: [[lo, deg.intercept + deg.slope * lo], [hi, deg.intercept + deg.slope * hi]] };
   }).filter(Boolean);
-  const parts = [chart([...series, ...lines], { yFormat: (v) => formatLapTime(v), xLabel: t("tyre age (laps)"), yLabel: t("lap time"), title: t("Lap time over tyre age") })];
+  const parts = [chart([...series, ...lines], { legend: true, integerX: true, yFormat: (v) => formatLapTime(v), xLabel: t("tyre age (laps)"), yLabel: t("lap time"), title: t("Lap time over tyre age"),
+    tooltipTitle: (x) => t("tyre age {0}", [x]), legendExtra: [{ label: t("trend per stint"), color: TEXT_LINE, dashed: true }] })];
   const fc = S.fuelCorrectedDegradation(laps, clean);
   if (fc.ok) {
     parts.push(el("p", {}, [estimateTag(), " ", t("Separated from the fuel load ({0} laps): tyres {1} per lap of age, fuel {2} per litre.", [fc.n, signed(fc.per_lap_tyre, 3, "s") + ciText(fc.per_lap_tyre_ci), signed(fc.per_litre, 3, "s") + ciText(fc.per_litre_ci)]),
@@ -371,7 +459,80 @@ function tyresSection({ data, clean }) {
   return card(t("Tyres and degradation"), parts, { id: "stint-tyres" });
 }
 
-function fuelSection({ data, clean }) {
+// The four tyres over the session (V1.0.3): temperature, pressure, tread left or brakes, one line
+// per wheel; and how fast the current set wears, with an estimate of when it reaches a limit.
+const WHEEL_VALUES = () => ({
+  temp: { label: t("Tyre temperature"), unit: "°C", key: "tyre_temp_c", digits: 1 },
+  pressure: { label: t("Tyre pressure"), unit: "kPa", key: "tyre_pressure_kpa", digits: 1 },
+  wear: { label: t("Tread left"), unit: "%", key: "wear_left_pct", digits: 1 },
+  brakes: { label: t("Brake temperature (max)"), unit: "°C", key: "brake_max_c", digits: 0 },
+});
+const WHEEL_NAMES = () => ({ fl: t("front left"), fr: t("front right"), rl: t("rear left"), rr: t("rear right") });
+
+function wheelsSection({ data, state, rerender, group }) {
+  const laps = data.laps;
+  const values = WHEEL_VALUES();
+  const available = Object.entries(values).filter(([, v]) => laps.some((l) => l[v.key] && Object.keys(l[v.key]).length));
+  if (!available.length) return null;
+  const key = available.some(([k]) => k === state.wheelValue) ? state.wheelValue : available[0][0];
+  const v = values[key];
+  const names = WHEEL_NAMES();
+  const switcher = el("div", { class: "seg stint-toolbar", role: "group", "aria-label": t("What the chart shows") }, available.map(([k, m]) => {
+    const button = el("button", { type: "button", class: `seg__btn${k === key ? " seg__btn--on" : ""}`, "aria-pressed": k === key ? "true" : "false" }, m.label);
+    button.addEventListener("click", () => { state.wheelValue = k; rerender(); });
+    return button;
+  }));
+  const xOf = sessionX(data);
+  const fmt = (x) => `${x.toFixed(v.digits)} ${v.unit}`;
+  const series = ["fl", "fr", "rl", "rr"].map((w) => ({
+    kind: "line", color: WHEEL_COLORS[w], label: names[w], width: 1.8, format: fmt, dashed: w === "fr" || w === "rr",
+    points: laps.map((l) => [xOf.get(l.id), l[v.key] && fin(l[v.key][w]) ? l[v.key][w] : null]),
+  }));
+  const { regions, markers } = sessionDecor(data);
+  const parts = [switcher, chart(series, {
+    group, legend: true, integerX: true, tooltipTitle: lapTitle(data), regions, markers, height: 200,
+    yFormat: (x) => x.toFixed(v.digits > 0 && key !== "temp" && key !== "brakes" ? 1 : 0), xLabel: t("lap in session"), yLabel: `${v.label} (${v.unit})`, title: v.label,
+  })];
+  if (key === "temp" || key === "pressure") {
+    // front/rear and left/right balance over the clean laps: where the car loads its tyres
+    const avgOf = (ws) => S.median(laps.map((l) => (l[v.key] ? S.mean(ws.map((w) => l[v.key][w]).filter(fin)) : null)).filter(fin));
+    const front = avgOf(["fl", "fr"]);
+    const rear = avgOf(["rl", "rr"]);
+    const left = avgOf(["fl", "rl"]);
+    const right = avgOf(["fr", "rr"]);
+    if ([front, rear, left, right].every(fin)) {
+      parts.push(note(t("Median of the session: front {0} · rear {1} · left {2} · right {3}.", [fmt(front), fmt(rear), fmt(left), fmt(right)])));
+    }
+  }
+  if (key === "wear") parts.push(wearForecast(data));
+  return card(t("Tyres per wheel"), parts, { id: "stint-wheels" });
+}
+
+// How many more laps until the most worn tyre of the current set reaches the limit.
+function wearForecast(data) {
+  const out = el("div");
+  const limit = { value: 50 };
+  const input = el("input", { type: "number", class: "input stint-input--short", min: "5", max: "95", step: "5", value: "50", "aria-label": t("Tread limit in percent") });
+  const draw = () => {
+    out.innerHTML = "";
+    const lastSet = data.laps.length ? data.laps[data.laps.length - 1].tyre_set : null;
+    const laps = data.laps.filter((l) => l.tyre_set === lastSet && l.wear_left_pct && fin(l.tyre_age));
+    const fc = S.wearForecast(laps, limit.value);
+    if (!fc.ok) {
+      out.appendChild(note(fc.reason === "too_few" ? t("Wear forecast: at least {0} laps on the current tyre set needed.", [S.MIN_WEAR_LAPS]) : t("Wear forecast: the tread did not go down on the current tyre set.")));
+      return;
+    }
+    const names = WHEEL_NAMES();
+    out.appendChild(el("p", {}, [estimateTag(), " ", t("Current tyre set: {0} wears fastest, {1} per lap. {2} left now; at {3} % after about {4} more laps.", [
+      names[fc.wheel], f(-fc.per_lap, 2, "%"), f(fc.now, 1, "%"), String(limit.value), fin(fc.laps_to_limit) ? String(Math.max(0, Math.floor(fc.laps_to_limit))) : dash,
+    ])]));
+  };
+  input.addEventListener("change", () => { const x = Number(input.value); if (x >= 5 && x <= 95) { limit.value = x; draw(); } });
+  draw();
+  return el("div", {}, [el("label", { class: "stint-toolbar" }, [t("Tread limit"), " ", input, " %"]), out]);
+}
+
+function fuelSection({ data, clean, group }) {
   const laps = data.laps;
   const s = data.summary;
   const perLap = S.median(laps.filter((l) => clean.has(l.id)).map((l) => l.fuel_used_l));
@@ -409,15 +570,38 @@ function fuelSection({ data, clean }) {
       out.appendChild(table([t("Engine map"), t("Laps"), t("Fuel / lap"), t("Median lap")], maps.map((m) => ({ cells: [String(m.map), String(m.laps), f(m.per_lap, 2, "L"), lapTime(m.lap_time)] }))));
       out.appendChild(note(t("By the engine map used most of each lap. Other things changed too (traffic, tyres), so this is a comparison, not a measured effect of the map alone.")));
     }
-    const fuelSeries = laps.map((l, i) => [i + 1, l.fuel_used_l, { color: clean.has(l.id) ? stintColor(l.stint) : GREY, faded: !clean.has(l.id), title: `${t("Lap {0}", [l.lap_number])}: ${f(l.fuel_used_l, 2, "L")}` }]);
-    if (fuelSeries.some((p) => fin(p[1]))) out.appendChild(chart([{ kind: "dots", points: fuelSeries }], { height: 160, xLabel: t("lap in session"), yLabel: t("fuel / lap (L)"), title: t("Fuel per lap") }));
+    // V1.0.3: the tank over the session (and, dashed, where it goes at the median consumption until
+    // the session ends), and the consumption per lap as bars with the median as a line
+    const { regions, markers } = sessionDecor(data);
+    const tank = laps.map((l, i) => [i + 1, l.fuel_end_l]);
+    if (tank.some((p) => fin(p[1]))) {
+      const lastX = laps.length;
+      const ahead = fin(fuel.laps_remaining) && fin(perLap) && fin(s.fuel_end_l)
+        ? Array.from({ length: Math.min(Math.ceil(fuel.laps_remaining), 200) + 1 }, (_, k) => [lastX + k, Math.max(s.fuel_end_l - perLap * k, 0)])
+        : [];
+      out.appendChild(chart([
+        { kind: "line", color: "#D8A83E", label: t("Fuel in the tank"), format: (v) => f(v, 1, "L"), points: tank },
+        ...(ahead.length ? [{ kind: "line", color: "#D8A83E", dashed: true, width: 1.5, label: t("at the median consumption"), format: (v) => f(v, 1, "L"), points: ahead }] : []),
+      ], { group: ahead.length ? undefined : group, legend: ahead.length > 0, integerX: true, regions, markers, height: 180, yZero: true,
+        tooltipTitle: (x) => (x <= lastX ? lapTitle(data)(x) : t("{0} laps ahead", [x - lastX])),
+        hlines: fin(margin.value) && fin(perLap) ? [{ y: perLap * margin.value, label: t("margin"), color: "#E0472B" }] : [],
+        xLabel: t("lap in session"), yLabel: t("fuel (L)"), title: t("Fuel in the tank") }));
+    }
+    const used = laps.map((l, i) => [i + 1, l.fuel_used_l, { color: clean.has(l.id) ? stintColor(l.stint) : GREY, faded: !clean.has(l.id) }]);
+    if (used.some((p) => fin(p[1]))) {
+      out.appendChild(chart([
+        { kind: "bars", color: "#D8A83E", label: t("Fuel / lap"), format: (v) => f(v, 2, "L"), points: used },
+      ], { group, integerX: true, regions, markers, height: 150, yZero: true, tooltipTitle: lapTitle(data),
+        hlines: fin(perLap) ? [{ y: perLap, label: t("median {0}", [f(perLap, 2, "L")]), color: TEXT_LINE }] : [],
+        xLabel: t("lap in session"), yLabel: t("fuel / lap (L)"), title: t("Fuel per lap") }));
+    }
   };
   marginInput.addEventListener("change", () => { const v = Number(marginInput.value); if (v >= 0 && v <= 10) { margin.value = v; draw(); } });
   draw();
   return card(t("Fuel and energy"), [el("label", { class: "stint-toolbar" }, [t("Safety margin"), " ", marginInput, " ", t("laps")]), out], { id: "stint-fuel" });
 }
 
-function stateSection({ data, clean }) {
+function stateSection({ data, clean, group }) {
   const laps = data.laps;
   const corr = S.stateCorrelations(laps, clean);
   const labelOf = (key) => ({ tyre_temp_avg: t("Tyre temperature (avg)"), tyre_pressure_avg: t("Tyre pressure (avg)"), wear_left_avg: t("Tread left (avg)"), fuel_start_l: t("Fuel at lap start"), track_temp: t("Track temperature") })[key] || key;
@@ -431,8 +615,9 @@ function stateSection({ data, clean }) {
   const temps = laps.map((l, i) => [i + 1, l.tyre_temp_avg]);
   if (temps.some((p) => fin(p[1]))) {
     parts.push(chart([
-      { kind: "line", color: "#E0472B", points: temps, label: t("Tyre temperature (avg)") },
-    ], { height: 150, xLabel: t("lap in session"), yLabel: "°C", title: t("Tyre temperature per lap") }));
+      { kind: "line", color: "#E0472B", points: temps, label: t("Tyre temperature (avg)"), format: (v) => `${v.toFixed(1)} °C` },
+      { kind: "line", color: "#5FC9C2", points: laps.map((l, i) => [i + 1, l.track_temp]), label: t("Track temperature"), format: (v) => `${v.toFixed(1)} °C`, dashed: true },
+    ], { group, legend: true, integerX: true, height: 160, tooltipTitle: lapTitle(data), xLabel: t("lap in session"), yLabel: "°C", title: t("Tyre temperature per lap") }));
   }
   if (damaged.length) {
     parts.push(table([t("Lap"), t("Damage (0–2)"), t("Overheating"), t("Part detached")], damaged.map((l) => ({ cells: [String(l.lap_number), String(l.damage.dent_max), l.damage.overheating ? t("yes") : t("no"), l.damage.detached ? t("yes") : t("no")] }))));
@@ -442,10 +627,18 @@ function stateSection({ data, clean }) {
   return card(t("Vehicle state"), parts, { id: "stint-state" });
 }
 
-function trafficSection({ data, clean }) {
+function trafficSection({ data, clean, group }) {
   const tr = S.trafficSummary(data.laps, clean);
   if (!tr.measured) return card(t("Traffic"), note(t("Not recorded for these laps: the gaps to other cars come with client 0.9.4.")), { id: "stint-traffic" });
+  const places = data.laps.map((l, i) => [i + 1, fin(l.place) ? l.place : null]);
+  const placeChart = places.filter((p) => fin(p[1])).length >= 2 && new Set(places.map((p) => p[1]).filter(fin)).size > 1
+    ? chart([{ kind: "line", color: "#4C9BE8", label: t("Position"), format: (v) => `P${v}`, points: places },
+      { kind: "dots", color: "#E0472B", label: t("Traffic lap"), format: (v) => `P${v}`, radius: 4,
+        points: data.laps.map((l, i) => (l.flags.includes("traffic") || l.flags.includes("blue_flag") ? [i + 1, l.place, { label: l.flags.includes("blue_flag") ? t("blue flag") : t("traffic") }] : null)).filter((p) => p && fin(p[1])) }],
+    { group, legend: true, integerX: true, invertY: true, height: 160, tooltipTitle: lapTitle(data), yFormat: (v) => (Number.isInteger(v) ? `P${v}` : ""), xLabel: t("lap in session"), yLabel: t("Position"), title: t("Position over the session") })
+    : null;
   return card(t("Traffic"), [
+    placeChart,
     el("div", { class: "sess__stats" }, [
       stat(t("Laps in traffic"), String(tr.traffic_laps), t("At least 10 % of the lap less than 1 s behind another car."), measuredTag()),
       stat(t("Their median vs clean"), signed(tr.difference, 2), null),
@@ -486,10 +679,10 @@ function forecastSection({ data, clean }) {
   const maxAge = Math.max(...laps.map((l) => l.tyre_age));
   const ahead = fc.points;
   const svgChart = chart([
-    { kind: "band", color: "#D8A83E", band: [[maxAge, ahead[0].lap_time, ahead[0].lap_time], ...ahead.map((p) => [p.tyre_age, p.low, p.high])], label: t("forecast range") },
-    { kind: "dots", points: actual },
-    { kind: "line", color: "#D8A83E", dashed: true, points: [[maxAge, ahead[0].lap_time - fc.slope], ...ahead.map((p) => [p.tyre_age, p.lap_time])] },
-  ], { yFormat: (v) => formatLapTime(v), xLabel: t("tyre age (laps)"), yLabel: t("lap time"), title: t("Forecast of the last stint") });
+    { kind: "band", color: "#D8A83E", band: [[maxAge, ahead[0].lap_time, ahead[0].lap_time], ...ahead.map((p) => [p.tyre_age, p.low, p.high])], label: t("forecast range"), format: (v) => formatLapTime(v) },
+    { kind: "dots", points: actual, color: stintColor(last.number), label: t("measured"), format: (v) => formatLapTime(v) },
+    { kind: "line", color: "#D8A83E", dashed: true, label: t("forecast"), format: (v) => formatLapTime(v), points: [[maxAge, ahead[0].lap_time - fc.slope], ...ahead.map((p) => [p.tyre_age, p.lap_time])] },
+  ], { legend: true, integerX: true, yFormat: (v) => formatLapTime(v), xLabel: t("tyre age (laps)"), yLabel: t("lap time"), title: t("Forecast of the last stint"), tooltipTitle: (x) => t("tyre age {0}", [x]) });
   return card(t("Forecast"), [
     el("p", {}, [estimateTag(), " ", t("From the {0} clean laps of stint {1}, if it goes on like this:", [fc.n, last.number])]),
     table([t("Laps ahead"), t("Tyre age"), t("Lap time"), t("Range")], ahead.map((p) => ({ cells: [`+${p.laps_ahead}`, String(p.tyre_age), lapTime(p.lap_time), `${lapTime(p.low)} – ${lapTime(p.high)}`] }))),
@@ -606,11 +799,16 @@ function compareSection({ data, clean }) {
     const na = Number(a.value);
     const nb = Number(b.value);
     const series = [na, nb].map((n, k) => ({
-      kind: "line", color: k ? "#4C9BE8" : "#E0472B", label: t("Stint {0}", [n]),
+      kind: "line", color: k ? "#4C9BE8" : "#E0472B", label: t("Stint {0}", [n]), format: (v) => formatLapTime(v),
       points: data.laps.filter((l) => l.stint === n).map((l, i) => [i + 1, clean.has(l.id) ? l.lap_time : null]),
     }));
-    out.appendChild(chart(series, { yFormat: (v) => formatLapTime(v), xLabel: t("lap in stint"), yLabel: t("lap time"), title: t("Stints compared") }));
-    out.appendChild(legend(series.map((s) => ({ color: s.color, label: s.label }))));
+    // the difference lap by lap (B − A), where both have a clean lap
+    const diff = series[0].points.map(([x, ya]) => { const q = series[1].points.find((p) => p[0] === x); return [x, fin(ya) && q && fin(q[1]) ? q[1] - ya : null]; });
+    series.push({ kind: "bars", color: "#8B9199", label: t("Stint {0} − Stint {1}", [nb, na]), format: (v) => signed(v, 3), points: diff, legend: false });
+    out.appendChild(chart(series.slice(0, 2), { legend: true, integerX: true, yFormat: (v) => formatLapTime(v), xLabel: t("lap in stint"), yLabel: t("lap time"), title: t("Stints compared"), tooltipTitle: (x) => t("Lap {0} of the stint", [x]) }));
+    if (diff.some((p) => fin(p[1]))) {
+      out.appendChild(chart([series[2]], { integerX: true, height: 130, yZero: true, yFormat: (v) => signed(v, 1, ""), xLabel: t("lap in stint"), yLabel: t("Stint {0} − Stint {1}", [nb, na]), title: t("Difference per lap"), tooltipTitle: (x) => t("Lap {0} of the stint", [x]) }));
+    }
     const rowFor = (label, fn) => ({ cells: [label, ...[na, nb].map((n) => fn(n))] });
     const of = (n) => data.laps.filter((l) => l.stint === n && clean.has(l.id));
     const stint = (n) => data.stints.find((s) => s.number === n);
@@ -630,6 +828,37 @@ function compareSection({ data, clean }) {
   b.addEventListener("change", draw);
   draw();
   return card(t("Compare stints"), [el("div", { class: "stint-toolbar" }, [a, " ", t("vs"), " ", b]), out], { id: "stint-compare" });
+}
+
+// Sector times of every lap as a heat map (V1.0.3): green = close to the best sector of the
+// session's clean laps, red = far off. Shows at a glance which sector costs the time, and when.
+function sectorsSection({ data, clean }) {
+  const laps = data.laps.filter((l) => l.sector_times);
+  if (laps.length < 2) return null;
+  const cleanLaps = laps.filter((l) => clean.has(l.id));
+  if (!cleanLaps.length) return null;
+  const best = [0, 1, 2].map((k) => Math.min(...cleanLaps.map((l) => l.sector_times[k])));
+  const medianLoss = [0, 1, 2].map((k) => S.median(cleanLaps.map((l) => l.sector_times[k] - best[k])));
+  // the colour scale: 0 = best, 1 = twice the typical (median) loss of that sector or more
+  const shade = (k, v) => {
+    const loss = v - best[k];
+    const scale = Math.max(medianLoss[k] * 2, 0.05);
+    const share = Math.min(Math.max(loss / scale, 0), 1);
+    const hue = 130 - 130 * share;   // green → yellow → red
+    return `hsla(${hue.toFixed(0)}, 60%, 45%, ${(0.18 + 0.5 * share).toFixed(2)})`;
+  };
+  const rows = laps.map((l) => ({ cls: clean.has(l.id) ? null : "stint-row--filtered", cells: [
+    el("a", { href: link.analysis({ a: l.id }) }, String(l.lap_number)),
+    String(l.stint || dash),
+    ...l.sector_times.map((v, k) => el("span", { class: "heat", style: `background:${shade(k, v)}`, title: `${t("best")} ${f(best[k], 3)} · ${signed(v - best[k], 3)}` }, [f(v, 3), el("small", {}, ` ${signed(v - best[k], 2, "")}`)])),
+    lapTime(l.lap_time),
+  ] }));
+  const where = [0, 1, 2].map((k) => [k, medianLoss[k]]).filter(([, v]) => fin(v)).sort((a, b) => b[1] - a[1])[0];
+  return card(t("Sectors"), [
+    where ? el("p", {}, t("The most time to find: sector {0} — the clean laps lose {1} s there on the median against your best sector.", [String(where[0] + 1), where[1].toFixed(3)])) : null,
+    el("div", { class: "table-scroll" }, table([t("Lap"), t("Stint"), "S1", "S2", "S3", t("Time")], rows, "stint-heat")),
+    note(t("Colour: green = at your best sector of the session (clean laps), red = twice the usual loss or more.")),
+  ], { id: "stint-sectors" });
 }
 
 function driversSection({ data }) {
@@ -666,4 +895,4 @@ function lapsSection({ data, clean }) {
     ] }))), note(t("Greyed: not counted as clean with the current filter. Under an invalid lap: why the server did not count it."))], { id: "stint-laps" });
 }
 
-const SECTIONS = [paceSection, stintsSection, tyresSection, fuelSection, stateSection, trafficSection, pitSection, forecastSection, strategySection, compareSection, driversSection, lapsSection];
+const SECTIONS = [paceSection, stintsSection, tyresSection, wheelsSection, fuelSection, stateSection, trafficSection, pitSection, forecastSection, strategySection, compareSection, sectorsSection, driversSection, lapsSection];

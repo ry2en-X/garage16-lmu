@@ -844,6 +844,44 @@ button.delta-fact { cursor: pointer; }
 .stint-chart__marker { stroke: var(--text-muted); stroke-dasharray: 3 3; }
 .stint-chart__dot--link { cursor: pointer; }
 .stint-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--text-muted); }
+/* V1.0.3: interactive stint charts (web/js/stints/chart.js) */
+.schart { margin: 6px 0 10px; }
+.schart__plot { position: relative; }
+.schart .stint-chart { margin: 0; touch-action: pan-y; cursor: crosshair; user-select: none; -webkit-user-select: none; }
+.schart .stint-chart:focus-visible { outline: 1px solid var(--text-muted); outline-offset: 2px; }
+.schart__crosshair { stroke: var(--text); stroke-opacity: 0.55; stroke-width: 1; }
+.schart__focus { fill: var(--asphalt); stroke-width: 2; }
+.schart__brush { fill: var(--text); fill-opacity: 0.08; stroke: var(--text-muted); stroke-dasharray: 3 3; }
+.schart__region-label { fill: var(--text-muted); font-size: 10px; font-family: var(--font-mono); opacity: 0.8; }
+.schart__hline { stroke-opacity: 0.6; }
+.schart__hline-label { fill: var(--text-muted); font-size: 10px; font-family: var(--font-mono); }
+.schart__tip {
+  position: absolute; z-index: 5; pointer-events: none; min-width: 150px; max-width: 280px;
+  background: var(--panel-raised); border: 1px solid var(--hairline); padding: 6px 8px;
+  font-size: 12px; line-height: 1.45; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+.schart__tip[hidden] { display: none; }
+.schart__tip-head { color: var(--text-muted); margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.schart__tip-row { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.schart__tip-swatch { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.schart__tip-label { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
+.schart__tip-value { margin-left: auto; font-variant-numeric: tabular-nums; }
+.schart__tip-note { color: var(--text-muted); font-size: 11px; }
+.schart__reset { position: absolute; top: 2px; right: 14px; }
+.schart__reset[hidden] { display: none; }
+.stint-legend__toggle { background: none; border: none; color: inherit; font: inherit; padding: 2px 0; cursor: pointer; }
+.stint-legend__toggle[aria-pressed="false"] { opacity: 0.4; text-decoration: line-through; }
+.stint-legend__swatch--band { height: 9px; opacity: 0.4; }
+.stint-hint { font-size: 12px; margin-top: 6px; }
+.seg { display: inline-flex; flex-wrap: wrap; gap: 0; border: 1px solid var(--hairline); margin-bottom: 6px; }
+.seg__btn { background: none; border: none; border-right: 1px solid var(--hairline); color: var(--text-muted); font: inherit; font-size: 12px; padding: 5px 10px; cursor: pointer; }
+.seg__btn:last-child { border-right: none; }
+.seg__btn:hover:not([disabled]) { color: var(--text); }
+.seg__btn--on { background: var(--panel-raised); color: var(--text); }
+.seg__btn[disabled] { opacity: 0.4; cursor: not-allowed; }
+.stint-heat td:has(> .heat) { padding: 0; }
+.stint-heat .heat { display: block; padding: 4px 8px; font-variant-numeric: tabular-nums; }
+.stint-heat .heat small { color: var(--text-muted); }
 .stint-legend__item { display: inline-flex; align-items: center; gap: 6px; }
 .stint-legend__swatch { width: 16px; height: 3px; border: 1px solid; display: inline-block; }
 .stint-legend__swatch--dot { width: 9px; height: 9px; border-radius: 50%; }

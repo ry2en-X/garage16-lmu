@@ -140,6 +140,7 @@ def lap_row(lap: dict) -> dict:
         "tyre_temp_c": wheel("temp_avg_c") or None,
         "tyre_temp_avg": _mean(wheel("temp_avg_c").values(), 1),
         "tyre_pressure_avg": _mean(wheel("pressure_avg_kpa").values(), 1),
+        "tyre_pressure_kpa": wheel("pressure_avg_kpa") or None,   # V1.0.3: per wheel for the charts
         "brake_max_c": wheel("brake_max_c") or None,
         "traffic_ahead_share": _num(traffic.get("ahead_close_share")),
         "traffic_behind_share": _num(traffic.get("behind_close_share")),

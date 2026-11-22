@@ -235,7 +235,7 @@ assert.equal(root.querySelector("#stint-pace").querySelectorAll("circle").length
 const trafficBox = [...root.querySelectorAll(".stint-filter")].find((l) => /traffic/.test(l.textContent)).querySelector("input");
 trafficBox.checked = false;
 trafficBox.dispatchEvent(new dom.window.Event("change"));
-assert.equal(root.querySelectorAll(".stint-row--filtered").length, 2, "only in- and out-lap remain filtered");
+assert.equal(root.querySelector("#stint-laps").querySelectorAll(".stint-row--filtered").length, 2, "only in- and out-lap remain filtered");
 await sleep(20);
 
 // strategy calculator: measured values are filled in, a rule set fills the rest
