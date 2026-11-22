@@ -24,7 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 WEB = ROOT / "web"
-TOP_LEVEL = ("favicon.ico", "favicon.svg", "icon-192.png", "apple-touch-icon.png", "robots.txt")
+TOP_LEVEL = ("favicon.ico", "favicon.svg", "icon-192.png", "apple-touch-icon.png", "robots.txt", "manifest.webmanifest")
 NOT_SHIPPED = ("README.md", "functions", "index.html")
 ASSET_PREFIX = re.compile(r'/v/[0-9A-Za-z.\-]+/')
 

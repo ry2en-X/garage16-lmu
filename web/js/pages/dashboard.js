@@ -133,7 +133,7 @@ async function renderCockpit(container, profile, teams) {
 
   // --- 3. Recent records, one row per lap
   container.appendChild(el("h2", {}, t("Recent Activity")));
-  container.appendChild(renderActivityList(profile.recent_activity, { limit: 8 }));
+  container.appendChild(renderActivityList(profile.recent_activity, { limit: 8, collapse: true }));
 }
 
 // ---------------------------------------------------------------- 4. all laps

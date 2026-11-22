@@ -109,6 +109,20 @@ export async function renderLeaderboard(container) {
     if (fromUrl || busiest) classSelect.value = fromUrl || busiest.name;
   }
 
+  // The venue of the newest lap on the platform (public activity feed); null when there is none
+  async function recentVenue() {
+    try {
+      const entries = await api.recentActivity(1);
+      const track = entries && entries[0] && entries[0].track_name;
+      if (!track) return null;
+      const venue = venues.find((v) => v.layouts.some((l) => l.track_name === track));
+      if (venue) wanted.track = track;   // its layout is the one shown first
+      return venue || null;
+    } catch {
+      return null;
+    }
+  }
+
   async function loadVenues(q) {
     const previous = venueSelect.value;
     try {
@@ -140,9 +154,11 @@ export async function renderLeaderboard(container) {
     } else if (!q && urlVenue) {
       venueSelect.value = urlVenue.venue;          // A shared link
     } else if (!q && !previous) {
-      // Start with the busiest track instead of an empty page
+      // Start with the track of the most recent activity (else the busiest one) instead of an empty page
+      const recent = firstLoad ? await recentVenue() : null;
       const busiest = [...venues].filter((v) => v.lap_count > 0).sort((a, b) => b.lap_count - a.lap_count)[0];
-      if (busiest) venueSelect.value = busiest.venue;
+      const start = recent || busiest;
+      if (start) venueSelect.value = start.venue;
     }
     await onVenueChange();
   }
