@@ -213,5 +213,13 @@ docker run --rm -v "${BACKUP_DIR}:/backups" -v "$(pwd)/docker:/g16:ro" alpine \
     sh -c '. /g16/telemetry-store.sh && store_prune /backups/telemetry-store /backups' \
     || log "WARNING: cleaning the telemetry store failed (the backup itself is complete)"
 
+# folders older than the retention that are NOT pruned because they have no manifest.json (a format
+# from before manifests) — never delete what cannot be identified; but tell the operator
+UNKNOWN_OLD=$(find "${BACKUP_DIR}" -maxdepth 1 -type d -name 'garage16_*' ! -name '*.partial' -mtime "+${RETENTION_DAYS}" \
+    ! -exec test -e '{}/manifest.json' ';' -print | wc -l | tr -d ' ')
+if [ "${UNKNOWN_OLD:-0}" -gt 0 ]; then
+    log "NOTE: ${UNKNOWN_OLD} backup folder(s) older than ${RETENTION_DAYS} days were kept: they have no manifest.json (very old format), so they are not pruned automatically. They can be deleted by hand if no longer needed (sudo rm -rf <folder>)."
+fi
+
 log "Remaining backups:"
 ls -la "${BACKUP_DIR}"
