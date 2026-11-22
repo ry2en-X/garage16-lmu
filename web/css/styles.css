@@ -1172,3 +1172,7 @@ select, input, textarea { max-width: 100%; }
 .driver-progress__pick { margin: 0 0 10px; }
 .driver-progress__pick select { max-width: 100%; }
 .driver-progress__summary { margin-top: 8px; }
+
+/* V1.0.3: save a LapTime Analyzer chart as a picture */
+.chart__save { margin-left: 8px; background: none; border: 1px solid transparent; color: var(--text-muted); font: inherit; font-size: 13px; line-height: 1; padding: 1px 5px; cursor: pointer; opacity: 0.6; }
+.chart__save:hover, .chart__save:focus-visible { opacity: 1; border-color: var(--hairline); color: var(--text); }

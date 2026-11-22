@@ -102,11 +102,15 @@ export function createChart(state, spec) {
     const cls = s.side === "a" ? "chart__val chart__val--a" : s.side === "b" ? "chart__val chart__val--b" : "chart__val";
     return el("span", { class: cls, style: `color:${s.color};` }, "—");
   });
+  const canvas = el("canvas", { class: "chart__canvas", "aria-label": spec.title });
+  // V1.0.3: save this chart as a picture (for Discord, a setup chat …)
+  const save = el("button", { type: "button", class: "chart__save", title: t("Save as image (PNG)"), "aria-label": t("Save as image (PNG)") }, "⤓");
+  save.addEventListener("click", () => downloadChartImage(canvas, [spec.title, spec.unit].filter(Boolean).join(" "), legendValues));
   const header = el("div", { class: "chart__head" }, [
     el("span", { class: "chart__title" }, [spec.title, spec.unit ? el("small", {}, ` ${spec.unit}`) : null]),
     el("span", { class: "chart__legend" }, legendValues),
+    save,
   ]);
-  const canvas = el("canvas", { class: "chart__canvas", "aria-label": spec.title });
   const element = el("div", { class: "chart", "data-chart": spec.key }, [header, canvas]);
   const totalHeight = height + (spec.showXAxis ? X_AXIS_HEIGHT : 0);
 
@@ -446,6 +450,50 @@ export function createChart(state, spec) {
     _indexAtClientX: indexAtClientX,
     _canvas: canvas,
   };
+}
+
+// The chart as it is on screen (zoom, cursor and all) on the page's background, with its title
+// and the values at the cursor written above it, as a PNG download.
+export function chartImage(canvas, title, legendNodes = []) {
+  if (!canvas || !canvas.width || !canvas.height) return null;
+  const head = 28;
+  const out = document.createElement("canvas");
+  out.width = canvas.width;
+  out.height = canvas.height + head;
+  const ctx = out.getContext && out.getContext("2d");
+  if (!ctx) return null;
+  const dpr = canvas.width / Math.max(canvas.getBoundingClientRect ? canvas.getBoundingClientRect().width || canvas.width : canvas.width, 1);
+  ctx.fillStyle = cssVar("--panel", "#1B1F23");
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.font = `${Math.round(13 * dpr)}px 'IBM Plex Mono', monospace`;
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = cssVar("--text", "#ECEDEE");
+  ctx.fillText(`${title} — Garage16`, 8 * dpr, head / 2);
+  let x = out.width - 8 * dpr;
+  ctx.textAlign = "right";
+  for (const node of [...legendNodes].reverse()) {
+    const text = (node.textContent || "").trim();
+    if (!text || text === "—") continue;
+    ctx.fillStyle = node.style && node.style.color ? node.style.color : cssVar("--text-muted", "#8B9199");
+    ctx.fillText(text, x, head / 2);
+    x -= ctx.measureText(text).width + 14 * dpr;
+  }
+  ctx.drawImage(canvas, 0, head);
+  return out;
+}
+
+function downloadChartImage(canvas, title, legendNodes) {
+  const image = chartImage(canvas, title, legendNodes);
+  if (!image || !image.toBlob) return;
+  image.toBlob((blob) => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = el("a", { href: url, download: `garage16-${String(title).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "chart"}.png` });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, "image/png");
 }
 
 function tickLabel(value, span) {
