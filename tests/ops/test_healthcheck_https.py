@@ -21,7 +21,9 @@ def https_required(client, monkeypatch):
     return client
 
 
-@pytest.mark.parametrize("path", ["/health", "/health/live", "/health/ready"])
+@pytest.mark.parametrize("path", ["/health", "/health/live", "/health/ready",
+                                  # V1.0.2 (found on the NAS update): the /api/v1 aliases too
+                                  "/api/v1/health", "/api/v1/health/live", "/api/v1/health/ready"])
 def test_health_endpoints_answer_over_plain_http_when_https_is_required(https_required, path):
     r = https_required.get(path)
     assert r.status_code in (200, 503), (path, r.status_code, r.text)
@@ -30,6 +32,7 @@ def test_health_endpoints_answer_over_plain_http_when_https_is_required(https_re
 
 def test_everything_else_still_needs_https(https_required):
     assert https_required.get("/leaderboard/catalog/tracks").status_code == 400
+    assert https_required.get("/api/v1/public/catalog/tracks").status_code == 400
     assert https_required.get("/health/ready/../../accounts/me").status_code in (400, 404)
     ok = https_required.get("/leaderboard/catalog/tracks", headers={"X-Forwarded-Proto": "https"})
     assert ok.status_code == 200
@@ -40,7 +43,7 @@ def test_the_compose_healthcheck_probes_an_exempt_path_and_compose_requires_http
     assert 'GARAGE16_REQUIRE_HTTPS: "1"' in compose
     probed = set(re.findall(r"http://localhost:8000(/[a-z/]+)", compose))
     assert "/health/ready" in probed
-    main = (ROOT / "server/main.py").read_text(encoding="utf-8")
-    exempt = re.search(r"request\.url\.path not in \(([^)]*)\)", main).group(1)
+    from server.main import HEALTH_PATHS
+
     for path in probed:
-        assert f'"{path}"' in exempt, f"the compose healthcheck probes {path}, which the HTTPS middleware refuses"
+        assert path in HEALTH_PATHS, f"the compose healthcheck probes {path}, which the HTTPS middleware refuses"

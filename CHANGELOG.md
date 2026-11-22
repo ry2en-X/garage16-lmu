@@ -44,6 +44,8 @@ changes.
   bot posted it again to the channels that worked. Each channel now gets an event once; a channel
   that is gone or refuses the bot is skipped (warning in the bot log); other errors retry for about
   five minutes; several waiting improvements of the same record become one message (the newest).
+- `/api/v1/health`, `/health/live`, `/health/ready` answer over plain HTTP like `/health/...`
+  (with `GARAGE16_REQUIRE_HTTPS=1` they returned 400 — found on the NAS update).
 - **Installer: autostart in two steps.** "Start Garage16 automatically when I log in to Windows"
   (off unless ticked), and under it "Open the Garage16 window" (default) or "Start minimized (only
   in the taskbar)" — the shortcut then starts `Garage16.exe --minimized`. Running the setup again

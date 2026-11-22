@@ -277,7 +277,7 @@ BACKUPS=/volumeUSB2/usbshare/garage16-backups
    cd "$ALT" && sudo docker compose --profile tunnel down
    cd "$NEU" && sudo docker compose --profile tunnel up -d --build
    sudo docker compose --profile tunnel ps
-   sudo docker compose exec -T server python -c "import urllib.request as u; print(u.urlopen('http://localhost:8000/api/v1/health/ready').read().decode())"
+   sudo docker compose exec -T server python -c "import urllib.request as u; print(u.urlopen('http://localhost:8000/health/ready').read().decode())"
    ```
    Erwartet: `"status":"ready"`, `"version":"1.0.2"`. Die Healthchecks prüfen jetzt alle 30–60 s;
    `ps` kann deshalb in der ersten Minute noch „starting“ zeigen. Der `quicktunnel`-Container bleibt

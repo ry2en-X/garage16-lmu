@@ -225,11 +225,12 @@ async def require_https(request: Request, call_next):
     directly (docker-compose.yml probes /health/ready). The two
     V0.9.8 endpoints were missing here, so with GARAGE16_REQUIRE_HTTPS=1
     (the compose default) the healthcheck got 400 and the server never
-    became healthy.
+    became healthy. V1.0.2: the same for the /api/v1/health aliases — they answered 400 to the
+    check in the NAS update guide (found on the NAS, 22.11.2026).
     """
     if (
         settings.require_https
-        and request.url.path not in ("/health", "/health/live", "/health/ready")
+        and request.url.path not in HEALTH_PATHS
         and request.headers.get("x-forwarded-proto", "http") != "https"
     ):
         return JSONResponse(
@@ -247,6 +248,8 @@ app.add_middleware(LegacyPathMiddleware)
 # The whole API lives under /api/v1 (server/api/v1/, one module per area). The paths of
 # V1.0.1 and older are translated by LegacyPathMiddleware below (server/api/legacy.py).
 API_V1 = "/api/v1"
+# Reachable over plain HTTP even with GARAGE16_REQUIRE_HTTPS (see require_https_middleware).
+HEALTH_PATHS = frozenset(p + s for p in ("", API_V1) for s in ("/health", "/health/live", "/health/ready"))
 for _router in (
     telemetry.router, analysis.router, circuits.router, stints.router, leaderboard.router, accounts.router,
     web_sessions.router, account_data.router, teams.router, invitations_router, admin.router, drivers.router,
