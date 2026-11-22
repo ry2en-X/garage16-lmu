@@ -37,6 +37,7 @@ globalThis.fetch = async (url) => {
   if (p === "/api/v1/accounts/sessions") return json([]);
   if (p === "/api/v1/accounts/devices") return json([]);
   if (p === "/api/v1/accounts/discord") return json({ linked: false });
+  if (p === "/api/v1/public/drivers/1/progress") return json({ combos: [], selected: null, days: [] });
   if (p.startsWith("/api/v1/public/drivers/by-slug/")) return json({ driver_id: 1, display_name: "Mika", slug: "mika", renamed: false });
   if (p === "/api/v1/public/drivers/1") return json({ driver_id: 1, display_name: "Mika", total_laps: 4, tracks_driven: 2, cars_driven: 1, personal_records: [], teams: [{ team_id: 5, team_name: "Red", role: "owner" }], recent_activity: [
     { record_type: "WR", track_name: "Spa", car_name: "#7", lap_time: 139.0, created_at: "2026-10-01T10:00:00" },

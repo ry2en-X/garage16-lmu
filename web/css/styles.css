@@ -1167,3 +1167,8 @@ select, input, textarea { max-width: 100%; }
 @media (max-width: 640px) {
   .feature__art { height: 96px; }
 }
+
+/* V1.0.3: driver progress */
+.driver-progress__pick { margin: 0 0 10px; }
+.driver-progress__pick select { max-width: 100%; }
+.driver-progress__summary { margin-top: 8px; }

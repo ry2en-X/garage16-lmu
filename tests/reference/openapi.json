@@ -8951,6 +8951,87 @@
     ]
    }
   },
+  "/api/v1/public/drivers/{driver_id}/progress": {
+   "get": {
+    "description": "Public, unauthenticated \u2014 how a driver's best lap developed per track and car model (V1.0.3).\n\nSame rules as the public profile: the driver must exist (404), only official laps count\n(official_filter: valid, not held/quarantined) and laps without a car_model are left out.\n{\"combos\": [{track_name, car_model, car_name, car_class, laps, last_day}] \u2014 combinations with at\n least 2 laps, most recently driven first; \"selected\": {track_name, car_model} | null;\n \"days\": [{day: \"YYYY-MM-DD\" (UTC), best, median, laps}] oldest first, for the selected\ncombination}. Without `track` and `car_model` the most recent combination is selected; with\nthem an unknown combination gives an empty list. Giving only one of the two is a 422.",
+    "operationId": "driver_progress_api_v1_public_drivers__driver_id__progress_get",
+    "parameters": [
+     {
+      "in": "path",
+      "name": "driver_id",
+      "required": true,
+      "schema": {
+       "title": "Driver Id",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "track",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 120,
+         "minLength": 1,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Track"
+      }
+     },
+     {
+      "in": "query",
+      "name": "car_model",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "maxLength": 120,
+         "minLength": 1,
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Car Model"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "additionalProperties": true,
+         "title": "Response Driver Progress Api V1 Public Drivers  Driver Id  Progress Get",
+         "type": "object"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Driver Progress",
+    "tags": [
+     "drivers"
+    ]
+   }
+  },
   "/api/v1/public/leaderboards/car/{track_name}/{car_model}": {
    "get": {
     "description": "Sub-leaderboard: best valid lap per driver for this exact track +\ncar model, ignoring team/livery/car number (those live in car_name,\nnot car_model \u2014 see server/core/models.py).",

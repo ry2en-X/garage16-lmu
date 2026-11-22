@@ -107,12 +107,19 @@ export async function render() {
     }
     const { route, params } = found;
     const search = window.location.search;
-    // load the page module and the address's names/ids first (usually instant), THEN clear — no blank flash
+    // load the page module and the address's names/ids first (usually instant), THEN clear — no blank flash.
+    // V1.0.3: if that takes longer (first visit over the tunnel, a slow catalog lookup), say so
+    // instead of leaving the previous page standing as if the click had done nothing.
+    const slow = setTimeout(() => {
+      if (seq !== renderSeq) return;
+      app.innerHTML = "";
+      app.appendChild(el("div", { class: "notice page-loading", role: "status" }, t("Loading …")));
+    }, 250);
     const [fn, query, resolved] = await Promise.all([
       route.load(),
       route.query ? route.query(params, search) : new URLSearchParams(search),
       route.resolve ? route.resolve(params).catch(() => null) : Promise.resolve(undefined),
-    ]);
+    ]).finally(() => clearTimeout(slow));
     if (seq !== renderSeq) return;   // another page was chosen while this one loaded
     if (resolved === null) {
       app.innerHTML = "";

@@ -363,6 +363,12 @@ export const api = {
     return request(`/api/v1/public/drivers/${driverId}`);
   },
 
+  // V1.0.3: best lap per day for one track + car model (no arguments: the most recently driven one)
+  driverProgress(driverId, track, carModel) {
+    const q = track ? `?track=${encodeURIComponent(track)}&car_model=${encodeURIComponent(carModel)}` : "";
+    return request(`/api/v1/public/drivers/${driverId}/progress${q}`);
+  },
+
   whoami() {
     return request("/api/v1/accounts/me", { auth: true });
   },

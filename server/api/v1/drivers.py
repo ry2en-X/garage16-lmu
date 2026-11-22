@@ -10,7 +10,9 @@ session data, or is_locked — see DriverProfileOut's docstring.
 
 from __future__ import annotations
 
-from typing import List
+import statistics
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -145,6 +147,70 @@ def driver_public_profile(driver_id: int, db: Session = Depends(get_db)) -> Driv
         total_laps=total_laps or 0, tracks_driven=tracks_driven or 0, cars_driven=cars_driven or 0,
         personal_records=personal_records, recent_activity=recent_activity, teams=teams,
     )
+
+
+@router.get("/public/drivers/{driver_id}/progress")
+def driver_progress(
+    driver_id: int,
+    track: Optional[str] = Query(default=None, min_length=1, max_length=120),
+    car_model: Optional[str] = Query(default=None, min_length=1, max_length=120),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Public, unauthenticated — how a driver's best lap developed per track and car model (V1.0.3).
+
+    Same rules as the public profile: the driver must exist (404), only official laps count
+    (official_filter: valid, not held/quarantined) and laps without a car_model are left out.
+    {"combos": [{track_name, car_model, car_name, car_class, laps, last_day}] — combinations with at
+     least 2 laps, most recently driven first; "selected": {track_name, car_model} | null;
+     "days": [{day: "YYYY-MM-DD" (UTC), best, median, laps}] oldest first, for the selected
+    combination}. Without `track` and `car_model` the most recent combination is selected; with
+    them an unknown combination gives an empty list. Giving only one of the two is a 422.
+    """
+    if (track is None) != (car_model is None):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "track and car_model go together.")
+    if db.query(Driver.id).filter(Driver.id == driver_id).one_or_none() is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Driver not found.")
+
+    rows = db.execute(
+        select(
+            Lap.track_name, Lap.car_model, func.max(Lap.car_name), func.max(Lap.car_class),
+            func.count(Lap.id), func.max(Lap.recorded_at),
+        )
+        .where(Lap.driver_id == driver_id, official_filter(), Lap.car_model.is_not(None))
+        .group_by(Lap.track_name, Lap.car_model)
+        .having(func.count(Lap.id) >= 2)
+    ).all()
+    rows = sorted(rows, key=lambda r: (-(r[5] or 0), r[0], r[1]))
+    combos = [
+        {"track_name": t, "car_model": cm, "car_name": cn, "car_class": cc, "laps": n, "last_day": _day(last)}
+        for t, cm, cn, cc, n, last in rows
+    ]
+    if track is None:
+        selected = {"track_name": combos[0]["track_name"], "car_model": combos[0]["car_model"]} if combos else None
+    else:
+        selected = {"track_name": track, "car_model": car_model}
+
+    days: List[dict] = []
+    if selected is not None:
+        laps = db.execute(
+            select(Lap.recorded_at, Lap.lap_time).where(
+                Lap.driver_id == driver_id, official_filter(),
+                Lap.track_name == selected["track_name"], Lap.car_model == selected["car_model"],
+            )
+        ).all()
+        per_day: Dict[str, List[float]] = {}
+        for recorded_at, lap_time in laps:
+            per_day.setdefault(_day(recorded_at), []).append(lap_time)
+        days = [
+            {"day": d, "best": min(v), "median": round(statistics.median(v), 3), "laps": len(v)}
+            for d, v in sorted(per_day.items())
+        ]
+    return {"combos": combos, "selected": selected, "days": days}
+
+
+def _day(recorded_at: Optional[int]) -> str:
+    """The session day (UTC date) of a lap's recording time."""
+    return datetime.fromtimestamp(recorded_at or 0, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
 def _class_bests(db: Session, pairs: set) -> dict:

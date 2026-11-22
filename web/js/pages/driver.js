@@ -10,6 +10,7 @@ import { loadTrackNames, trackLabel } from "../core/tracks.js";
 import { link } from "../core/link.js";
 import { copyLinkButton } from "../core/copy_link.js";
 import { setTitle } from "../core/router.js";
+import { progressSection } from "./driver_progress.js";
 export async function renderDriverProfile(container, driverId) {
   let profile;
   try {
@@ -72,6 +73,9 @@ export async function renderDriverProfile(container, driverId) {
       ])
     );
   }
+
+  // --- Progress (V1.0.3) ---
+  container.appendChild(progressSection(profile.driver_id || driverId));
 
   // --- Recent Activity ---
   container.appendChild(el("h2", {}, t("Recent Activity")));

@@ -15,6 +15,7 @@
   * tests/js/v100.test.mjs                — V1.0: legal pages, sign-up form, setup guide, downloads
   * tests/js/v101.test.mjs                — V1.0.1: terms dialog, connected PCs, email banner, page titles
   * tests/js/v101_web.test.mjs            — V1.0.1: landing page, leaderboard, track names, "Your Best"
+  * tests/js/v103_driver_progress.test.mjs — V1.0.3: driver profile "Progress" (best lap per day, step line)
   * tests/js/v102_links.test.mjs          — V1.0.2: readable links, route table, old #/ links, 404, Copy link
   * tests/js/v093_analysis.test.mjs        — V0.9.3: coaching, events, histograms, tyres, track-map
                                              markers, the sessions page and the theoretical best
@@ -176,3 +177,21 @@ def test_v103_interactive_stint_charts_and_new_sections():
     modes, tyres per wheel with the wear forecast, fuel tank, sector heat map, positions."""
     result = _run("v103_charts.test.mjs")
     assert "V103-CHARTS-OK" in result.stdout, result.stdout + result.stderr
+
+
+@needs_jsdom
+def test_v103_leaderboard_default_and_collapsed_activity():
+    """V1.0.3: the leaderboard opens at the track of the newest lap (address replaced, no history
+    entry); the dashboard's record feed collapses consecutive records at one track."""
+    result = _run("v103_leaderboard.test.mjs")
+    assert "V103-LEADERBOARD-OK" in result.stdout, result.stdout + result.stderr
+    assert "Error" not in result.stderr, result.stderr
+
+
+@needs_jsdom
+def test_v103_driver_progress():
+    """V1.0.3: the public driver profile's "Progress" section: selector of track/car combinations,
+    dots per day, personal-best step line, summary line."""
+    result = _run("v103_driver_progress.test.mjs")
+    assert "V103-DRIVER-PROGRESS-OK" in result.stdout, result.stdout + result.stderr
+    assert "Error" not in result.stderr, result.stderr
