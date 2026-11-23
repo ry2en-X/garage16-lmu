@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -21,7 +22,7 @@ pytestmark = pytest.mark.skipif(shutil.which("sh") is None or shutil.which("bash
 
 
 def _sh(script: str, **kw):
-    return subprocess.run(["sh", "-c", f". {STORE_SH} && {script}"], capture_output=True, text=True, timeout=120, **kw)
+    return subprocess.run(["sh", "-c", f". {shlex.quote(str(STORE_SH))} && {script}"], capture_output=True, text=True, timeout=120, **kw)
 
 
 def _make_volume(root: Path, n: int, size: int = 2000) -> Path:
