@@ -67,6 +67,11 @@ the V1.0.2 folder again. Two new optional settings: `GARAGE16_DISCORD_DIGEST_S`,
 - The commands written in the guides are tested (URLs against the server with HTTPS required,
   `python -m scripts…` modules, `scripts/…sh` paths) — the V1.0.2 update had a guide command that
   answered 400.
+- The page addresses work even when the app cannot read the mounted `web/` folder (files from the
+  ZIP via Windows arrive as `rwx--x--x` on the NAS; Caddy as root reads them, the app's user does
+  not, and every page answered "The website files are not available"): the server image carries
+  its own readable `index.html` (`docker/Dockerfile.server`), which `server/api/v1/pages.py` uses
+  when the folder fails.
 - `scripts/ops/backup.sh` without `sudo` says so instead of reporting a missing volume.
 - `/api/v1/health/*` answers over plain HTTP like `/health/*`.
 

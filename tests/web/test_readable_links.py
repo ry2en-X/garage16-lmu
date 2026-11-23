@@ -125,3 +125,32 @@ def test_the_page_html_carries_the_title_for_link_previews(client, monkeypatch):
     assert re.search(r'<meta property="og:image" content="[^"]+/icon-192\.png"', page.text)
     missing = client.get("/api/v1/public/page", headers={"X-Garage16-Page-Path": "/driver/<script>"})
     assert missing.status_code == 404 and "<script>" not in missing.text.split("<body>")[0]
+
+
+def test_without_a_readable_web_folder_the_page_comes_from_the_image(client, monkeypatch, tmp_path):
+    """Found on the NAS (23.11.2026): files from the ZIP (via Windows) arrived as rwx--x--x, Caddy
+    (root) could read web/, the app's user `garage` could not — every page address answered
+    "The website files are not available". The image now carries its own readable copy of
+    index.html (docker/Dockerfile.server), which the server uses when the mounted folder fails."""
+    from server.api.v1 import pages
+    from server.core.config import settings
+
+    monkeypatch.setattr(settings, "web_dir", tmp_path / "unreadable")
+    page = client.get("/api/v1/public/page", headers={"X-Garage16-Page-Path": "/leaderboard"})
+    assert page.status_code == 200, page.text
+    assert "<title>Leaderboard – Garage16</title>" in page.text
+    assert pages.BUNDLED_INDEX.is_file()
+
+    # neither the folder nor the image copy: the old, honest message
+    monkeypatch.setattr(pages, "BUNDLED_INDEX", tmp_path / "missing" / "index.html")
+    gone = client.get("/api/v1/public/page", headers={"X-Garage16-Page-Path": "/leaderboard"})
+    assert gone.status_code == 404
+
+
+def test_the_image_carries_a_readable_index_html():
+    dockerfile = (ROOT / "docker" / "Dockerfile.server").read_text(encoding="utf-8")
+    assert "COPY web/index.html ./web/index.html" in dockerfile
+    chmod = next(line for line in dockerfile.splitlines() if line.startswith("RUN chmod -R a+rX"))
+    assert "./web" in chmod.split()
+    ignored = (ROOT / ".dockerignore").read_text(encoding="utf-8").split()
+    assert "web/" not in ignored and "web" not in ignored

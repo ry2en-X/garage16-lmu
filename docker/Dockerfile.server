@@ -29,6 +29,10 @@ COPY docker/entrypoint.sh ./docker/entrypoint.sh
 COPY scripts/ops ./scripts/ops
 COPY scripts/dev/__init__.py ./scripts/dev/__init__.py
 COPY scripts/dev/bench_server.py ./scripts/dev/bench_server.py
+# The website's index.html as a fallback for the page addresses (server/api/v1/pages.py): the app
+# reads the mounted /srv/web first, but on the NAS those files can arrive without read rights for
+# `garage` (ZIP -> Windows -> NAS, rwx--x--x) — then this copy, made readable below, is used.
+COPY web/index.html ./web/index.html
 
 # BUGFIX (found via real deployment testing, 2026-09-25) — see
 # Dockerfile.discord_bot's identical comment for the full story: source
@@ -42,7 +46,7 @@ COPY scripts/dev/bench_server.py ./scripts/dev/bench_server.py
 # container dies with "exec ./docker/entrypoint.sh: no such file or directory" —
 # which is what a Windows checkout with git autocrlf, or a Windows editor, produces.
 RUN sed -i 's/\r$//' ./docker/entrypoint.sh
-RUN chmod -R a+rX ./server ./alembic ./alembic.ini ./docker/entrypoint.sh ./scripts
+RUN chmod -R a+rX ./server ./alembic ./alembic.ini ./docker/entrypoint.sh ./scripts ./web
 RUN chmod +x ./docker/entrypoint.sh
 
 # Non-root at runtime: entrypoint.sh fixes ownership of the (possibly

@@ -198,6 +198,22 @@ def _index_html(path: str, mtime: float) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
+# The copy of index.html inside the image (docker/Dockerfile.server copies it, readable for all).
+# Used when the mounted web folder can't be read by the app's user — on the NAS the files can
+# arrive from the ZIP (via Windows) with rwx--x--x, which Caddy (root) reads but `garage` can't.
+BUNDLED_INDEX = Path(__file__).resolve().parents[3] / "web" / "index.html"
+
+
+def _read_index() -> str | None:
+    """index.html: the mounted web folder first (always the deployed version), else the image's copy."""
+    for candidate in (settings.web_dir / "index.html", BUNDLED_INDEX):
+        try:
+            return _index_html(str(candidate), candidate.stat().st_mtime)
+        except OSError:
+            continue
+    return None
+
+
 def _attr(text: str) -> str:
     return html.escape(text, quote=True)
 
@@ -226,10 +242,8 @@ def page_html(request: Request, path: str = Query(default="/", max_length=400), 
     router draws the page — but with the right title for link previews, and 404 for unknown paths.
     Caddy passes the page's path in X-Garage16-Page-Path (it rewrote the request to this endpoint)."""
     path = (request.headers.get("x-garage16-page-path") or path)[:400]
-    index_path = settings.web_dir / "index.html"
-    try:
-        index = _index_html(str(index_path), index_path.stat().st_mtime)
-    except OSError:
+    index = _read_index()
+    if index is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "The website files are not available on this server.")
     meta = page_meta_for(db, path)
     body = fill_index(index, meta, settings.frontend_url or "")
